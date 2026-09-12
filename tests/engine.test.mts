@@ -15,6 +15,7 @@ import { SNEAKERS } from '../data/sneakers.ts';
 import { ALL_GAME_NPCS, findInteractionData } from '../data/npcs.ts';
 import { resolveEventStub } from '../systems/events/eventResolver.ts';
 import { weightsConfig } from '../systems/events/weights.config.ts';
+import type { EventCategory } from '../systems/events/categories.ts';
 
 const base = () => JSON.parse(JSON.stringify(INITIAL_PLAYER));
 let pass = 0;
@@ -213,7 +214,8 @@ t('every scenario the travel resolver can reach actually exists', () => {
   // Every category must resolve to a real, playable scenario in at least one
   // city — a bad reference used to open an empty dialogue modal.
   const cities = ['tokyo', 'tel-aviv', 'new-york', 'los-angeles', 'paris', 'chicago'];
-  const categories = weightsConfig.categories.map(c => c.id).concat(weightsConfig.rare.map(c => c.id));
+  const categories = weightsConfig.categories.map(c => c.id as EventCategory)
+    .concat(weightsConfig.rare.map(c => c.id as EventCategory));
 
   for (const category of categories) {
     const resolvedSomewhere = cities.some(toCity => {
