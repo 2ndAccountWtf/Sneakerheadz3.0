@@ -22,6 +22,7 @@ import { getSellPrice } from '../systems/pricing';
 import { rollBibiEvent } from '../systems/events/bibiEvents';
 import { rollNapEvent } from '../systems/events/napEvents';
 import { findInteractionData } from '../data/npcs';
+import { generateSideQuest, QUEST_OFFER_CHANCE, MAX_ACTIVE_QUESTS } from '../systems/quests/questGenerator';
 
 // Game Actions
 type Action =
@@ -244,6 +245,20 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                         notification: { message: `En route to ${cityName}... something happens.`, type: 'info' },
                     };
                 }
+            }
+
+            // Nothing dramatic happened — somebody may still want an errand run.
+            const offerQuest =
+                state.quests.length < MAX_ACTIVE_QUESTS && Math.random() < QUEST_OFFER_CHANCE;
+
+            if (offerQuest) {
+                const quest = generateSideQuest(newDay, action.payload.cityId);
+                return {
+                    ...baseNextState,
+                    quests: [...state.quests, quest],
+                    currentScreen: Screen.Dashboard,
+                    notification: { message: `${quest.giverName} wants a favour: ${quest.title}`, type: 'info' },
+                };
             }
 
             return {

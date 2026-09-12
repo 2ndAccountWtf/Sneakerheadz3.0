@@ -139,7 +139,7 @@ const ArcadeScreen: React.FC = () => {
     return (
         <div className="pb-6">
             <ScreenHeader
-                title={<># The <span className="accent">Arcade</span></>}
+                title={<>The <span className="accent">Arcade</span></>}
                 subtitle={`Ways to make money that your accountant would not approve of · ${cityName}`}
                 back={Screen.Dashboard}
             />
@@ -168,7 +168,7 @@ const ArcadeScreen: React.FC = () => {
                                 {entry.energyCost > 0 && <span className="chip">⚡ {entry.energyCost}</span>}
                             </div>
                             <button
-                                className="btn btn-primary w-full mt-auto"
+                                className="btn btn-accent w-full mt-auto"
                                 disabled={tooTired}
                                 onClick={() => launchMiniGame(entry.build({ cityName }))}
                             >

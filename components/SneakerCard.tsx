@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Sneaker, InventoryItem } from '../types';
 import { useGame } from '../hooks/useGame';
+import Img from './Img';
 import { MAX_INVENTORY_SIZE } from '../constants';
 import { getSellPrice } from '../systems/pricing';
 
@@ -33,7 +34,7 @@ export const StoreSneakerCard: React.FC<{
             <div className="h-[3px] w-full" style={{ background: 'var(--rarity)' }} />
 
             <div className="relative h-32 bg-[var(--bg-sunken)] flex items-center justify-center p-3 overflow-hidden">
-                <img
+                <Img
                     src={sneaker.imageUrl}
                     alt={sneaker.name}
                     loading="lazy"
@@ -116,7 +117,7 @@ export const InventorySneakerCard: React.FC<{
             <div className="h-[3px] w-full" style={{ background: 'var(--rarity)' }} />
 
             <div className="relative h-28 bg-[var(--bg-sunken)] flex items-center justify-center p-3 overflow-hidden">
-                <img src={sneaker.imageUrl} alt={sneaker.name} loading="lazy" className="max-h-full max-w-full object-contain" />
+                <Img src={sneaker.imageUrl} alt={sneaker.name} loading="lazy" className="max-h-full max-w-full object-contain" />
                 <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
                     {item.isFake && <span className="chip chip-bad !text-[9px] !py-0.5">⚠ REPLICA</span>}
                     {blessed && (

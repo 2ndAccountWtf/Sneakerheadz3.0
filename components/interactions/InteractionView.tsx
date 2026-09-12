@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../hooks/useGame';
 import { findInteractionData } from '../../data/npcs';
 import { ScenarioNode } from '../../types/interactions';
+import Img from '../Img';
 
 // --- TYPEWRITER HOOK ---
 const useTypewriter = (text: string, speed: number = 22) => {
@@ -129,7 +130,8 @@ const InteractionView: React.FC = () => {
                 {/* PORTRAIT */}
                 <div className="relative sm:w-1/3 w-full h-32 sm:h-auto sm:min-h-[26rem] bg-black border-b-2 sm:border-b-0 sm:border-r-2 border-[var(--line)] overflow-hidden flex-shrink-0">
                     <div className="absolute inset-0 scanlines pointer-events-none z-10" />
-                    <img
+                    <Img
+                        fallback="🧍"
                         src={npc.portraitUrl || 'https://picsum.photos/seed/placeholder/300'}
                         alt={npc.name}
                         className="w-full h-full object-cover object-top opacity-90 contrast-125 saturate-50"

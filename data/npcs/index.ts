@@ -13,6 +13,7 @@ import { TOKYO_CLERK } from './clerk-tokyo';
 import { TSA_AGENT } from './tsa-agent';
 import { SCALPER_SID } from './scalper-sid';
 import { SYSTEM_EVENTS } from './system-events';
+import { STREET_EVENTS } from './street-events';
 
 
 export const AMBIENT_NPCS: AmbientNpcProfile[] = [
@@ -33,4 +34,5 @@ export const AMBIENT_NPCS: AmbientNpcProfile[] = [
     TSA_AGENT,
     SCALPER_SID,
     SYSTEM_EVENTS,
+    STREET_EVENTS,
 ];

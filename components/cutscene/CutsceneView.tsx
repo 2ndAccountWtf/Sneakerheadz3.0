@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useGame } from '../../hooks/useGame';
+import Img from '../Img';
 
 const KIND_STYLE: Record<string, { ring: string; glow: string; tint: string }> = {
     'bibi-gift': { ring: 'var(--accent)', glow: 'rgba(0,229,192,0.35)', tint: 'from-[#00e5c0]/15' },
@@ -78,7 +79,8 @@ const CutsceneView: React.FC = () => {
             >
                 <div className="flex items-start gap-4 mb-5">
                     {scene.portraitUrl && (
-                        <img
+                        <Img
+                            fallback="🧍"
                             src={scene.portraitUrl}
                             alt=""
                             className="w-16 h-16 sm:w-20 sm:h-20 object-cover border-2 flex-shrink-0 saturate-50 contrast-125"

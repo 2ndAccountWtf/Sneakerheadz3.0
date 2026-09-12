@@ -1,0 +1,239 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+      /* ============================================================
+         SNEAKERHEAD DOPE WARS — RETRO TERMINAL DESIGN SYSTEM
+         One set of tokens, one set of primitives. Every screen pulls
+         from here so the game reads as a single machine instead of
+         a dozen unrelated neon experiments.
+         ============================================================ */
+      :root {
+        /* Surfaces — near-black CRT glass, three depths only */
+        --bg:        #07090c;
+        --bg-panel:  #0d1218;
+        --bg-raised: #141c25;
+        --bg-sunken: #04060a;
+
+        /* Ink */
+        --ink:       #e6edf3;
+        --ink-dim:   #8394a6;
+        --ink-faint: #55636f;
+
+        /* Structure */
+        --line:       #223040;
+        --line-bright:#33475c;
+
+        /* Phosphor accents */
+        --accent:    #00e5c0;
+        --accent-dim:#0b6b5d;
+        --accent-2:  #ff2e88;
+        --warn:      #ffb400;
+        --ok:        #46e06a;
+        --bad:       #ff4747;
+        --legend:    #ffcc4d;
+
+        /* Rhythm — an 8px scale, used everywhere */
+        --r1: 4px;  --r2: 8px;  --r3: 12px; --r4: 16px;
+        --r5: 24px; --r6: 32px; --r7: 48px;
+
+        --nav-h: 60px;
+        --header-h: 56px;
+
+        color-scheme: dark;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { height: 100%; }
+
+      body {
+        margin: 0;
+        font-family: 'Rajdhani', system-ui, sans-serif;
+        font-size: 16px;
+        background-color: var(--bg);
+        color: var(--ink);
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* ---------- Type ---------- */
+      @layer components {
+      .font-display { font-family: 'Bungee', 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', system-ui, sans-serif; font-weight: 400; letter-spacing: 0.02em; }
+      .font-pixel   { font-family: 'Press Start 2P', 'Courier New', monospace; letter-spacing: 0; line-height: 1.6; }
+      .font-mono    { font-family: 'IBM Plex Mono', 'Space Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+
+      h1, h2, h3, h4 { margin: 0; line-height: 1.1; }
+
+      /* A single screen-title treatment, used by every screen header. */
+      .screen-title {
+        font-family: 'Bungee', 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', system-ui, sans-serif;
+        font-size: clamp(1.35rem, 4.5vw, 2rem);
+        line-height: 1;
+        text-transform: uppercase;
+        color: var(--ink);
+        letter-spacing: 0.02em;
+      }
+      .screen-title .accent { color: var(--accent); }
+
+      .label {
+        font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+
+      .numeric { font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-weight: 600; font-variant-numeric: tabular-nums; }
+      }
+
+      /* ---------- Scrollbars ---------- */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: var(--bg-sunken); }
+      ::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 0; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+      /* Component classes live in Tailwind's `components` layer so utilities
+         such as `hidden`, `flex` or `text-sm` still win over them. Defined
+         outside a layer, `.chip { display: inline-flex }` would beat
+         `hidden` and break every responsive show/hide in the app. */
+      @layer components {
+      /* ---------- Panels ---------- */
+      .panel {
+        background: var(--bg-panel);
+        border: 1px solid var(--line);
+        position: relative;
+      }
+      .panel-raised { background: var(--bg-raised); border: 1px solid var(--line); }
+
+      /* The signature cut-corner console panel. */
+      .crt-panel {
+        background: var(--bg-panel);
+        border: 1px solid var(--line-bright);
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 20px 60px rgba(0,0,0,0.7),
+                    inset 0 1px 0 rgba(255,255,255,0.04);
+        clip-path: polygon(0 12px, 12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+      }
+
+      /* Section header strip that sits on top of a panel. */
+      .panel-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--r3);
+        padding: var(--r2) var(--r3);
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent);
+      }
+
+      /* ---------- Buttons ---------- */
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+        font-weight: 600;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 10px 16px;
+        min-height: 40px;
+        border: 1px solid var(--line-bright);
+        background: var(--bg-raised);
+        color: var(--ink);
+        cursor: pointer;
+        transition: background .15s, border-color .15s, color .15s, transform .08s;
+        white-space: nowrap;
+      }
+      .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+      .btn:active:not(:disabled) { transform: translateY(1px); }
+      .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+      .btn-primary { background: var(--accent); border-color: var(--accent); color: #04120f; }
+      .btn-primary:hover:not(:disabled) { background: #34ffdd; border-color: #34ffdd; color: #04120f; }
+
+      .btn-danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+      .btn-danger:hover:not(:disabled) { background: var(--bad); color: #170404; }
+
+      .btn-accent { background: transparent; border-color: var(--accent); color: var(--accent); }
+      .btn-accent:hover:not(:disabled) { background: var(--accent); color: #04120f; }
+
+      .btn-gold { background: transparent; border-color: var(--legend); color: var(--legend); }
+      .btn-gold:hover:not(:disabled) { background: var(--legend); color: #1a1400; }
+
+      .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink-dim); }
+      .btn-ghost:hover:not(:disabled) { border-color: var(--line-bright); color: var(--ink); }
+
+      .btn-sm { min-height: 32px; padding: 6px 10px; font-size: 10px; }
+
+      /* ---------- Chips & bars ---------- */
+      .chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+        font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.03);
+        color: var(--ink-dim);
+        white-space: nowrap;
+      }
+      .chip-accent { border-color: var(--accent-dim); color: var(--accent); }
+      .chip-warn   { border-color: #6b4f00; color: var(--warn); }
+      .chip-bad    { border-color: #6b1f1f; color: var(--bad); }
+
+      .meter { height: 6px; background: var(--bg-sunken); border: 1px solid var(--line); overflow: hidden; }
+      .meter > i { display: block; height: 100%; transition: width .35s ease; }
+
+      }
+
+      /* ---------- FX ---------- */
+      .scanlines {
+        background-image: repeating-linear-gradient(
+          to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+          rgba(0,0,0,0.22) 3px, rgba(0,0,0,0.22) 4px);
+      }
+      .grid-bg {
+        background-image:
+          linear-gradient(to right, rgba(0,229,192,0.045) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,229,192,0.045) 1px, transparent 1px);
+        background-size: 44px 44px;
+      }
+      .text-glow { text-shadow: 0 0 12px currentColor; }
+      .glow-accent { box-shadow: 0 0 18px rgba(0,229,192,0.25); }
+
+      /* ---------- Animation ---------- */
+      @keyframes hud-boot { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      .screen-enter { animation: hud-boot .28s cubic-bezier(.16,1,.3,1) both; }
+
+      @keyframes pan { from { background-position: 0 0; } to { background-position: 44px 44px; } }
+      @keyframes pulse-glow { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+      @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+      .animate-ticker { display: inline-flex; white-space: nowrap; animation: ticker 34s linear infinite; }
+      @keyframes shake {
+        0%,100% { transform: translate(0,0); }
+        20% { transform: translate(-4px, 2px); }
+        40% { transform: translate(4px, -2px); }
+        60% { transform: translate(-3px, -3px); }
+        80% { transform: translate(3px, 3px); }
+      }
+      .animate-shake { animation: shake .45s ease-in-out; }
+      @keyframes rise-fade { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none; } }
+      .animate-rise { animation: rise-fade .3s ease-out both; }
+      @keyframes slide-in-right { from { transform: translateX(110%); } to { transform: none; } }
+      .animate-slide-in { animation: slide-in-right .35s cubic-bezier(.25,1,.5,1) both; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+      }
+
+      /* ---------- Utilities ---------- */
+      @layer utilities {
+      .clip-notch { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); }
+      .safe-bottom { padding-bottom: calc(var(--nav-h) + var(--r5) + env(safe-area-inset-bottom, 0px)); }
+      .no-tap-highlight { -webkit-tap-highlight-color: transparent; }
+      }
+
+      /* Rarity accents, shared by every card in the game. */
+      .rarity-common    { --rarity: #8394a6; }
+      .rarity-uncommon  { --rarity: #46e06a; }
+      .rarity-rare      { --rarity: #3aa8ff; }
+      .rarity-legendary { --rarity: #ffcc4d; }

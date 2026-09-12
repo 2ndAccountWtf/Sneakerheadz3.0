@@ -2,57 +2,49 @@ import React, { useEffect } from 'react';
 import { useGame } from '../../hooks/useGame';
 import { NewsItem } from '../../types/news';
 
+const SEVERITY: Record<NonNullable<NewsItem['severity']>, { color: string; label: string }> = {
+    low: { color: 'var(--line-bright)', label: 'Filler' },
+    med: { color: 'var(--warn)', label: 'Notable' },
+    high: { color: 'var(--bad)', label: 'Breaking' },
+    wtf: { color: 'var(--accent-2)', label: 'What' },
+};
+
+/**
+ * Newsflash toast. Sits above the HUD, below modals, and out of the way of the
+ * bottom nav on phones.
+ */
 export const NewsModal: React.FC = () => {
     const { gameState, dispatch } = useGame();
     const { activeNewsItem } = gameState;
 
     useEffect(() => {
-        if (activeNewsItem) {
-            const timer = setTimeout(() => {
-                dispatch({ type: 'HIDE_NEWS_ITEM' });
-            }, 7000); // Auto-dismiss after 7 seconds
-            return () => clearTimeout(timer);
-        }
+        if (!activeNewsItem) return;
+        const timer = setTimeout(() => dispatch({ type: 'HIDE_NEWS_ITEM' }), 7000);
+        return () => clearTimeout(timer);
     }, [activeNewsItem, dispatch]);
 
-    if (!activeNewsItem) {
-        return null;
-    }
+    if (!activeNewsItem) return null;
 
-    const severityStyles: Record<NonNullable<NewsItem['severity']>, string> = {
-        low: 'border-gray-500',
-        med: 'border-yellow-500 animate-pulse',
-        high: 'border-red-500 animate-pulse',
-        wtf: 'border-fuchsia-500 animate-pulse',
-    };
-    const severityClass = severityStyles[activeNewsItem.severity || 'low'];
-
-    const css = `
-        @keyframes slide-in-from-right {
-            from { transform: translateX(110%); }
-            to { transform: translateX(0); }
-        }
-        .animate-slide-in { 
-            animation: slide-in-from-right 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
-        }
-    `;
+    const sev = SEVERITY[activeNewsItem.severity ?? 'low'];
 
     return (
-        <div className={`fixed top-5 right-5 w-full max-w-sm bg-gray-900/90 border-2 ${severityClass} text-white p-4 rounded-lg shadow-2xl shadow-cyan-500/20 z-50 backdrop-blur-sm animate-slide-in`}>
-            <style>{css}</style>
-            <div className="flex items-start gap-4">
-                <div className="text-3xl flex-shrink-0 mt-1">{activeNewsItem.icon || '🔔'}</div>
-                <div className="flex-grow">
-                    <h3 className="font-bold text-lg text-cyan-300">{activeNewsItem.title}</h3>
-                    <p className="text-sm text-gray-300 mt-1">{activeNewsItem.body}</p>
+        <div
+            className="fixed left-3 right-3 sm:left-auto sm:right-4 top-[calc(var(--header-h)+12px)] sm:w-80 z-[60] panel p-3 animate-slide-in"
+            style={{ borderColor: sev.color }}
+            role="status"
+        >
+            <div className="flex items-start gap-2.5">
+                <span className="text-xl leading-none flex-shrink-0">{activeNewsItem.icon ?? '🔔'}</span>
+                <div className="min-w-0 flex-1">
+                    <div className="label mb-0.5" style={{ color: sev.color }}>{sev.label}</div>
+                    <h3 className="text-sm font-semibold text-white leading-snug">{activeNewsItem.title}</h3>
+                    <p className="text-xs text-[var(--ink-dim)] mt-1 leading-snug">{activeNewsItem.body}</p>
                 </div>
                 <button
                     onClick={() => dispatch({ type: 'HIDE_NEWS_ITEM' })}
-                    className="absolute top-1 right-2 text-2xl text-gray-500 hover:text-white transition-colors"
-                    aria-label="Close news alert"
-                >
-                    &times;
-                </button>
+                    className="label hover:text-white flex-shrink-0"
+                    aria-label="Dismiss"
+                >✕</button>
             </div>
         </div>
     );

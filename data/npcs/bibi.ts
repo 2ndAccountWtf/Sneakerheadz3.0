@@ -159,6 +159,7 @@ export const BIBI: AmbientNpcProfile = {
                 decisive: {
                     npcLine: "Good. Decisiveness is the beginning of victory.",
                     outcomes: [
+                        { type: 'bibiApproval', change: 8, description: 'He notes your discipline.' },
                         { type: 'streetCred', change: 8, description: '+8 Street Cred' },
                         { type: 'priceMarkup', multiplier: 0.95, duration: '24h', description: '5% buying discount for 24h.' },
                         { type: 'marketSignal', effect: 'surge', magnitude: 1.08, target: { kind: 'model', value: 'global' }, description: 'Small market surge.' }
@@ -173,6 +174,7 @@ export const BIBI: AmbientNpcProfile = {
                 careless: {
                     npcLine: "No. Luck favors the prepared. Not the careless.",
                     outcomes: [
+                        { type: 'bibiApproval', change: -10, description: 'He files you under "unserious".' },
                         { type: 'streetCred', change: -5, description: '-5 Street Cred' },
                         { type: 'notification', message: "Bibi leaves early, unimpressed.", description: 'Interaction ends.' }
                     ]
@@ -180,7 +182,8 @@ export const BIBI: AmbientNpcProfile = {
                 loyal: {
                     npcLine: "I will. Listen carefully, and you will profit.",
                     outcomes: [
-                        { type: 'statusEffect', effect: 'guidance', duration: '48h', description: 'Bibi Guidance Buff (Market Insight) for 48h.' }
+                        { type: 'bibiApproval', change: 12, description: 'He takes you on as a student.' },
+                        { type: 'statusEffect', effect: 'guidance', duration: '48h', label: 'Bibi Guidance (market insight)', description: 'Bibi Guidance Buff (Market Insight) for 48h.' }
                     ]
                 }
             }
@@ -203,6 +206,7 @@ export const BIBI: AmbientNpcProfile = {
                 ignore: {
                     npcLine: "Correct. Noise evaporates. Strength remains.",
                     outcomes: [
+                        { type: 'bibiApproval', change: 7, description: 'Correct answer.' },
                         { type: 'statusEffect', effect: 'stable', duration: '24h', description: 'Market volatility reduced.' },
                         { type: 'streetCred', change: 6, description: '+6 Street Cred' }
                     ]
@@ -217,6 +221,7 @@ export const BIBI: AmbientNpcProfile = {
                 fear: {
                     npcLine: "Fear is the enemy of prosperity.",
                     outcomes: [
+                        { type: 'bibiApproval', change: -6, description: 'He has no use for fear.' },
                         { type: 'streetCred', change: -3, description: '-3 Street Cred' },
                         { type: 'marketSignal', effect: 'collapse', magnitude: 0.95, target: { kind: 'model', value: 'global' }, description: 'Minor market dip (-5%).' }
                     ]
@@ -224,6 +229,7 @@ export const BIBI: AmbientNpcProfile = {
                 orders: {
                     npcLine: "Good. That is the attitude of a leader.",
                     outcomes: [
+                        { type: 'bibiApproval', change: 15, description: 'You have volunteered. He remembers volunteers.' },
                         { type: 'statusEffect', effect: 'favored', duration: 'permanent', description: 'Player receives "Bibi Favored" status.' },
                         { type: 'marketSignal', effect: 'surge', magnitude: 1.25, target: { kind: 'rarity', value: 'random' }, description: 'Random inventory buff +25%.' }
                     ]
@@ -248,6 +254,7 @@ export const BIBI: AmbientNpcProfile = {
                 always: {
                     npcLine: "Then prosperity awaits.",
                     outcomes: [
+                        { type: 'bibiApproval', change: 20, description: 'Unconditional loyalty, noted and rewarded.' },
                         { type: 'streetCred', change: 15, description: '+15 Street Cred' },
                         { type: 'marketSignal', effect: 'surge', magnitude: 1.15, target: { kind: 'model', value: 'global' }, description: 'Global market +15%.' },
                         { type: 'statusEffect', effect: 'protection', duration: '72h', description: 'Special Travel Protection (Reduced Robberies).' }
@@ -256,18 +263,21 @@ export const BIBI: AmbientNpcProfile = {
                 practical: {
                     npcLine: "Practical. I respect that.",
                     outcomes: [
+                         { type: 'bibiApproval', change: 4, description: 'Honesty counts for something.' },
                          { type: 'priceMarkup', multiplier: 1.05, duration: '24h', description: '+5% Resale Value for 24h.' }
                     ]
                 },
                 neutral: {
                     npcLine: "Indecision is defeat.",
                     outcomes: [
+                        { type: 'bibiApproval', change: -8, description: 'He does not respect the fence.' },
                         { type: 'notification', message: "Bibi turns away to check his phone.", description: 'No benefit.' }
                     ]
                 },
                 chaos: {
                     npcLine: "…Unwise.",
                     outcomes: [
+                        { type: 'bibiApproval', change: -30, description: 'You have chosen the other side, out loud.' },
                         { type: 'notification', message: "Bibi leaves immediately.", description: 'Bibi leaves.' },
                         { type: 'marketSignal', effect: 'collapse', magnitude: 0.75, target: { kind: 'model', value: 'global' }, description: 'Inventory value drops 25% for 48h.' }
                     ]

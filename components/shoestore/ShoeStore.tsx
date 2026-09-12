@@ -4,6 +4,7 @@ import { useInventory } from '../../hooks/useInventory';
 import { useGame } from '../../hooks/useGame';
 import { StoreSneakerCard } from '../SneakerCard';
 import { InStoreNpcRail } from './InStoreNpcRail';
+import { TradeInCounter, RaffleCounter } from './StoreCounters';
 import { useStoreNPCs } from '../../hooks/useStoreNPCs';
 import { useCelebrityCameos } from '../../hooks/useCelebrityCameos';
 import { Screen } from '../../types';
@@ -170,15 +171,15 @@ const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
                     </div>
                 )}
 
-                {/* GRID */}
-                {inventory.items.length === 0 ? (
+                {/* COUNTERS AND GRID */}
+                {activeTab.id === 'trade' || activeTab.id === 'consignment' ? (
+                    <TradeInCounter store={store} />
+                ) : activeTab.id === 'raffle' ? (
+                    <RaffleCounter store={store} groupRef={activeTab.inventoryGroupRef} />
+                ) : inventory.items.length === 0 ? (
                     <div className="panel p-10 text-center">
                         <div className="text-3xl mb-2">🕸</div>
-                        <p className="text-[var(--ink-dim)] font-mono text-sm">
-                            {activeTab.id === 'trade' || activeTab.id === 'consignment'
-                                ? 'This counter only takes stock in. Nothing on the shelves here.'
-                                : 'Shelves are bare. Come back another day.'}
-                        </p>
+                        <p className="text-[var(--ink-dim)] font-mono text-sm">Shelves are bare. Come back another day.</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">

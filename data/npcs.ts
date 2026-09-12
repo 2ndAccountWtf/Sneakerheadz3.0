@@ -13,11 +13,15 @@ export const ALL_GAME_NPCS: GameNpc[] = [
     ...ALL_CELEBRITIES,
 ];
 
-// Helper to find an NPC and their scenario
+/**
+ * Look up an NPC and one of their scenarios.
+ *
+ * Callers also use this to *probe* whether a scenario exists before starting an
+ * interaction, so a miss is a normal result and is not logged.
+ */
 export const findInteractionData = (npcId: string, scenarioId: string) => {
     const npc = ALL_GAME_NPCS.find(n => n.id === npcId);
     if (!npc) {
-        console.error(`Could not find NPC with ID: ${npcId}`);
         return { npc: null, scenario: null };
     }
     
@@ -30,9 +34,5 @@ export const findInteractionData = (npcId: string, scenarioId: string) => {
     }
 
     const scenario = scenarios.find(s => s.id === scenarioId);
-    if (!scenario) {
-         console.error(`Could not find Scenario with ID: ${scenarioId} in NPC: ${npcId}`);
-    }
-
     return { npc, scenario };
 };

@@ -1,7 +1,8 @@
-import type { TravelEventStub } from './categories';
+import type { TravelEventStub, EventCategory } from './categories';
 import { THE_GAME_PROFILE } from '../../data/celebrities/the-game/index';
 import { YASSER_ABBASFAT_PROFILE } from '../../data/celebrities/yasser-abbasfat/index';
-import { ALL_GAME_NPCS } from '../../data/npcs';
+import { BRO_JOGAN_PROFILE } from '../../data/celebrities/bro-jogan/index';
+import { ALL_GAME_NPCS, findInteractionData } from '../../data/npcs';
 import type { TravelContext } from './travelEngine';
 
 interface ResolvedEvent {
@@ -9,23 +10,24 @@ interface ResolvedEvent {
     scenarioId: string;
 }
 
-// A pool of specific scenarios for each generic event category.
-const eventPool: Record<TravelEventStub['category'], ResolvedEvent[]> = {
-    'mugging': [
+/** Concrete scenarios each generic category can resolve to. */
+const eventPool: Record<EventCategory, ResolvedEvent[]> = {
+    mugging: [
         { npcId: THE_GAME_PROFILE.id, scenarioId: 'robbery-lace-snatcher' },
         { npcId: THE_GAME_PROFILE.id, scenarioId: 'robbery-gas-money' },
         { npcId: THE_GAME_PROFILE.id, scenarioId: 'robbery-subway-heist' },
     ],
-    'grandma': [
+    grandma: [
         { npcId: 'grandma-laces', scenarioId: 'the-game-gossip' },
     ],
-    'customs': [
+    customs: [
         { npcId: 'tsa-agent', scenarioId: 'random-bag-check' },
     ],
-    'scalper': [
+    scalper: [
         { npcId: 'scalper-sid', scenarioId: 'rare-map' },
+        { npcId: 'street-events', scenarioId: 'scalper-sting' },
     ],
-    'lucky': [
+    lucky: [
         { npcId: 'system-events', scenarioId: 'lucky-find-cash' },
         { npcId: 'system-events', scenarioId: 'lucky-find-sneaker' },
     ],
@@ -36,39 +38,42 @@ const eventPool: Record<TravelEventStub['category'], ResolvedEvent[]> = {
         { npcId: YASSER_ABBASFAT_PROFILE.id, scenarioId: 'yasser-robbery' },
         { npcId: YASSER_ABBASFAT_PROFILE.id, scenarioId: 'yasser-nonsense-rant' },
     ],
+    snatch: [
+        { npcId: 'street-events', scenarioId: 'snatch-and-run' },
+    ],
+    hustle: [
+        { npcId: 'street-events', scenarioId: 'blacktop-challenge' },
+    ],
+    boxman: [
+        { npcId: 'street-events', scenarioId: 'mystery-box-man' },
+    ],
+    authenticator: [
+        { npcId: 'street-events', scenarioId: 'authentication-booth' },
+    ],
+    podcast: [
+        { npcId: BRO_JOGAN_PROFILE.id, scenarioId: 'hypecast-roulette' },
+    ],
 };
-
 
 export function resolveEventStub(stub: TravelEventStub, context: TravelContext): ResolvedEvent | null {
     const possibleEvents = eventPool[stub.category];
-    if (!possibleEvents || possibleEvents.length === 0) {
-        console.error(`No events found for category: ${stub.category}`);
-        return null;
-    }
+    if (!possibleEvents || possibleEvents.length === 0) return null;
 
-    // Filter events to only include NPCs that can spawn in the destination city.
-    const locationFilteredEvents = possibleEvents.filter(event => {
+    const valid = possibleEvents.filter(event => {
+        // Drop anything whose dialogue doesn't exist rather than opening an
+        // empty modal, which is what used to happen on a bad reference.
+        const { scenario } = findInteractionData(event.npcId, event.scenarioId);
+        if (!scenario) return false;
+
         const npc = ALL_GAME_NPCS.find(n => n.id === event.npcId);
-        if (!npc) {
-            console.warn(`Could not find NPC profile for ID: ${event.npcId}`);
-            return false;
-        }
+        if (!npc) return false;
 
-        // Check if the NPC has city-specific spawn conditions
-        if ('spawnConditions' in npc && npc.spawnConditions.cityIds && npc.spawnConditions.cityIds.length > 0) {
+        if ('spawnConditions' in npc && npc.spawnConditions?.cityIds?.length) {
             return npc.spawnConditions.cityIds.includes(context.toCity);
         }
-        
-        // If no city restrictions, the event is valid anywhere.
         return true;
     });
 
-    if (locationFilteredEvents.length === 0) {
-        console.warn(`No valid events for category '${stub.category}' in city '${context.toCity}'.`);
-        return null;
-    }
-
-    // Pick a random event from the filtered pool for that category
-    const randomIndex = Math.floor(Math.random() * locationFilteredEvents.length);
-    return locationFilteredEvents[randomIndex];
+    if (valid.length === 0) return null;
+    return valid[Math.floor(Math.random() * valid.length)];
 }

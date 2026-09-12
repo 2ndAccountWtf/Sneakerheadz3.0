@@ -1,171 +1,214 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useGame } from '../hooks/useGame';
-import { Screen, PriceHistoryData, Sneaker } from '../types';
-import NavButton from '../components/NavButton';
+import { Screen, PriceHistoryData } from '../types';
+import ScreenHeader from '../components/ScreenHeader';
 import { SNEAKERS } from '../data/sneakers';
 import { useSneakerHistory } from '../hooks/useSneakerHistory';
 import { calculateRSI } from '../utils/technicalAnalysis';
+import { getCityMarketPrice, activeSignalsFor } from '../systems/pricing';
 
-const ChartSVG: React.FC<{
-    width: number;
-    height: number;
-    children: React.ReactNode;
-}> = ({ width, height, children }) => (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="w-full h-auto">
-        {children}
-    </svg>
-);
+const UP = '#46e06a';
+const DOWN = '#ff4747';
+const AXIS = 'rgba(131,148,166,0.55)';
+const GRID = 'rgba(34,48,64,0.9)';
 
-const CandlestickChart: React.FC<{ data: PriceHistoryData[] }> = ({ data }) => {
-    const width = 800;
-    const height = 300;
-    const padding = { top: 10, bottom: 20, left: 50, right: 10 };
+const PriceChart: React.FC<{ data: PriceHistoryData[] }> = ({ data }) => {
+    const W = 800, H = 260;
+    const pad = { top: 12, bottom: 34, left: 48, right: 8 };
 
     if (data.length === 0) return null;
 
     const maxPrice = Math.max(...data.map(d => d.high));
     const minPrice = Math.min(...data.map(d => d.low));
     const maxVolume = Math.max(...data.map(d => d.volume));
+    const span = maxPrice - minPrice || 1;
 
-    const y = (price: number) => padding.top + (height - padding.top - padding.bottom) * (1 - (price - minPrice) / (maxPrice - minPrice));
-    const x = (index: number) => padding.left + index * (width - padding.left - padding.right) / data.length;
-    const candleWidth = (width - padding.left - padding.right) / data.length * 0.7;
+    const plotH = H - pad.top - pad.bottom;
+    const volH = 26;
+    const y = (p: number) => pad.top + (plotH - volH) * (1 - (p - minPrice) / span);
+    const x = (i: number) => pad.left + i * (W - pad.left - pad.right) / data.length;
+    const cw = Math.max(1.5, (W - pad.left - pad.right) / data.length * 0.66);
 
-    const yAxisTicks = Array.from({ length: 5 }, (_, i) => minPrice + i * (maxPrice - minPrice) / 4);
+    const ticks = Array.from({ length: 5 }, (_, i) => minPrice + i * span / 4);
 
     return (
-        <ChartSVG width={width} height={height}>
-            {/* Grid lines */}
-            {yAxisTicks.map(tick => (
-                <line key={`grid-${tick}`} x1={padding.left} y1={y(tick)} x2={width - padding.right} y2={y(tick)} stroke="rgba(0, 255, 247, 0.1)" />
-            ))}
-            
-            {/* Y-Axis */}
-            {yAxisTicks.map(tick => (
-                <text key={`label-${tick}`} x={padding.left - 10} y={y(tick)} fill="rgba(0, 255, 247, 0.5)" textAnchor="end" dominantBaseline="middle" fontSize="10" fontFamily="'Space Mono', monospace">${Math.round(tick)}</text>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Price history candlestick chart">
+            {ticks.map(t => (
+                <g key={t}>
+                    <line x1={pad.left} y1={y(t)} x2={W - pad.right} y2={y(t)} stroke={GRID} />
+                    <text x={pad.left - 8} y={y(t)} fill={AXIS} textAnchor="end" dominantBaseline="middle" fontSize="10" fontFamily="IBM Plex Mono, monospace">
+                        ${Math.round(t).toLocaleString()}
+                    </text>
+                </g>
             ))}
 
-            {/* Candles and Wicks */}
+            {/* Volume */}
+            {data.map((d, i) => (
+                <rect
+                    key={`v${i}`}
+                    x={x(i)}
+                    y={H - pad.bottom - (d.volume / maxVolume) * volH}
+                    width={cw}
+                    height={(d.volume / maxVolume) * volH}
+                    fill={d.close >= d.open ? UP : DOWN}
+                    opacity="0.22"
+                />
+            ))}
+
+            {/* Candles */}
             {data.map((d, i) => {
-                const isUp = d.close >= d.open;
-                const color = isUp ? '#b6ff00' : '#ff00b8';
-                const candleX = x(i);
-                
+                const up = d.close >= d.open;
+                const color = up ? UP : DOWN;
+                const cx = x(i) + cw / 2;
+                const bodyTop = up ? y(d.close) : y(d.open);
+                const bodyH = Math.max(1, Math.abs(y(d.open) - y(d.close)));
                 return (
                     <g key={i}>
-                        <line x1={candleX + candleWidth / 2} y1={y(d.high)} x2={candleX + candleWidth / 2} y2={y(d.low)} stroke={color} strokeWidth="1" />
-                        <rect x={candleX} y={isUp ? y(d.close) : y(d.open)} width={candleWidth} height={Math.abs(y(d.open) - y(d.close))} fill={color} />
+                        <line x1={cx} y1={y(d.high)} x2={cx} y2={y(d.low)} stroke={color} strokeWidth="1" />
+                        <rect x={x(i)} y={bodyTop} width={cw} height={bodyH} fill={color} />
                     </g>
                 );
             })}
-        </ChartSVG>
+        </svg>
     );
 };
 
 const RsiChart: React.FC<{ data: PriceHistoryData[] }> = ({ data }) => {
-    const width = 800;
-    const height = 100;
-    const padding = { top: 10, bottom: 20, left: 50, right: 10 };
+    const W = 800, H = 90;
+    const pad = { top: 8, bottom: 16, left: 48, right: 8 };
 
-    const rsiData = calculateRSI(data, 14);
-    if (rsiData.length === 0) return null;
+    const rsi = calculateRSI(data, 14);
+    if (rsi.length === 0) return null;
 
-    const x = (index: number) => padding.left + index * (width - padding.left - padding.right) / rsiData.length;
-    const y = (rsi: number) => padding.top + (height - padding.top - padding.bottom) * (1 - rsi / 100);
+    const x = (i: number) => pad.left + i * (W - pad.left - pad.right) / rsi.length;
+    const y = (v: number) => pad.top + (H - pad.top - pad.bottom) * (1 - v / 100);
 
-    const path = rsiData.map((d, i) => (isNaN(d) ? '' : `${i === 0 ? 'M' : 'L'}${x(i)},${y(d)}`)).join(' ');
+    let path = '';
+    let started = false;
+    rsi.forEach((v, i) => {
+        if (isNaN(v)) return;
+        path += `${started ? 'L' : 'M'}${x(i)},${y(v)}`;
+        started = true;
+    });
 
     return (
-        <ChartSVG width={width} height={height}>
-            {/* Overbought/Oversold zones */}
-            <rect x={padding.left} y={y(70)} width={width - padding.left - padding.right} height={y(30) - y(70)} fill="rgba(255, 0, 184, 0.1)" />
-            
-            {/* Y-Axis */}
-            {[30, 70].map(tick => (
-                <g key={`rsi-label-${tick}`}>
-                    <line x1={padding.left} y1={y(tick)} x2={width - padding.right} y2={y(tick)} stroke="rgba(0, 255, 247, 0.2)" strokeDasharray="2" />
-                    <text x={padding.left - 10} y={y(tick)} fill="rgba(0, 255, 247, 0.5)" textAnchor="end" dominantBaseline="middle" fontSize="10" fontFamily="'Space Mono', monospace">{tick}</text>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Relative strength index">
+            <rect x={pad.left} y={y(70)} width={W - pad.left - pad.right} height={y(30) - y(70)} fill="rgba(0,229,192,0.06)" />
+            {[30, 70].map(t => (
+                <g key={t}>
+                    <line x1={pad.left} y1={y(t)} x2={W - pad.right} y2={y(t)} stroke={GRID} strokeDasharray="3 3" />
+                    <text x={pad.left - 8} y={y(t)} fill={AXIS} textAnchor="end" dominantBaseline="middle" fontSize="10" fontFamily="IBM Plex Mono, monospace">{t}</text>
                 </g>
             ))}
-
-            {/* RSI Line */}
-            <path d={path} fill="none" stroke="#60a5fa" strokeWidth="2" />
-        </ChartSVG>
+            <path d={path} fill="none" stroke="#00e5c0" strokeWidth="1.75" />
+        </svg>
     );
 };
 
+const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+    <div className="flex justify-between items-baseline py-1.5 border-b border-[var(--line)] text-sm">
+        <span className="text-[var(--ink-dim)]">{label}</span>
+        <span className="numeric text-[var(--ink)]">{children}</span>
+    </div>
+);
 
+/**
+ * Model analysis. Same charts, retinted onto the shared palette, plus the piece
+ * that was missing: which live market signals are acting on this model right
+ * now and when they lapse.
+ */
 const MarketAnalysisScreen: React.FC = () => {
     const { gameState, changeScreen } = useGame();
-    const { currentAnalysisSneakerId, markets, currentCityId } = gameState;
+    const { currentAnalysisSneakerId, markets, currentCityId, activeMarketSignals, day } = gameState;
 
     const sneaker = SNEAKERS.find(s => s.id === currentAnalysisSneakerId);
     const history = useSneakerHistory(currentAnalysisSneakerId);
-    
-    const marketInfo = markets[currentCityId]?.sneakers.find(s => s.sneakerId === currentAnalysisSneakerId);
-    const currentPrice = marketInfo?.price || 0;
-    const priceChange = history.length > 1 ? currentPrice - history[history.length-2].close : 0;
-    const isUp = priceChange >= 0;
+
+    const marketInfo = markets[currentCityId]?.sneakers.find(s => s.sneakerId === currentAnalysisSneakerId && !s.isFake);
+    const livePrice = useMemo(
+        () => (currentAnalysisSneakerId ? getCityMarketPrice(gameState, currentAnalysisSneakerId) : undefined),
+        [gameState, currentAnalysisSneakerId],
+    );
+
+    const signals = useMemo(
+        () => (sneaker ? activeSignalsFor(sneaker, activeMarketSignals, day) : []),
+        [sneaker, activeMarketSignals, day],
+    );
 
     if (!sneaker) {
         return (
-            <div>
-                <p>Error: Sneaker not found.</p>
-                <NavButton onClick={() => changeScreen(Screen.ShoeStore)}>Back to Store</NavButton>
+            <div className="panel p-8 text-center">
+                <p className="text-[var(--bad)] mb-4">No model selected.</p>
+                <button className="btn" onClick={() => changeScreen(Screen.CityStores)}>Back to Shops</button>
             </div>
         );
     }
-    
-    const DataPanelItem: React.FC<{label: string; children: React.ReactNode; className?: string}> = ({ label, children, className }) => (
-        <div className={`flex justify-between items-baseline py-2 border-b border-cyan-800/50 ${className}`}>
-            <span className="text-gray-400">{label}</span>
-            <span>{children}</span>
-        </div>
-    );
+
+    const prev = history.length > 1 ? history[history.length - 2].close : undefined;
+    const current = livePrice ?? history[history.length - 1]?.close ?? 0;
+    const change = prev !== undefined ? current - prev : 0;
+    const up = change >= 0;
+    const rsiSeries = calculateRSI(history, 14);
+    const rsiNow = rsiSeries.filter(v => !isNaN(v)).slice(-1)[0];
 
     return (
-        <div className="p-1 sm:p-4 bg-[#0a0f14] font-['Space_Mono']">
-            <div className="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-4">
-                {/* Header */}
-                <header className="lg:col-span-2 flex flex-col sm:flex-row justify-between sm:items-center pb-4 border-b-2 border-cyan-800/50 gap-4">
-                    <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold font-['Orbitron'] text-white">{sneaker.name}</h1>
-                        <p className="text-cyan-400 text-sm sm:text-base">{sneaker.rarity} - {sneaker.id}</p>
+        <div className="pb-6">
+            <ScreenHeader
+                title={sneaker.name}
+                subtitle={`${sneaker.rarity} · ${sneaker.id}`}
+                back={Screen.CityStores}
+                backLabel="Shops"
+            />
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-4">
+                <div className="space-y-4 min-w-0">
+                    <div className="panel p-2 overflow-hidden">
+                        <PriceChart data={history} />
                     </div>
-                    <NavButton onClick={() => changeScreen(Screen.ShoeStore)}>Back to Store</NavButton>
-                </header>
-
-                {/* Main Chart */}
-                <div className="lg:col-start-1 bg-black/50 p-2 border border-cyan-800/50">
-                    <CandlestickChart data={history} />
-                </div>
-                
-                {/* RSI Indicator */}
-                <div className="lg:col-start-1 bg-black/50 p-2 border border-cyan-800/50">
-                    <h3 className="text-cyan-400 text-sm pl-12 pb-1">RSI (14)</h3>
-                    <RsiChart data={history} />
+                    <div className="panel p-2 overflow-hidden">
+                        <div className="label pl-12 pb-1">RSI (14){rsiNow !== undefined ? ` — ${rsiNow.toFixed(0)}` : ''}</div>
+                        <RsiChart data={history} />
+                    </div>
                 </div>
 
-                {/* Data Panel */}
-                <aside className="lg:col-start-2 lg:row-start-2 lg:row-span-2 bg-black/50 p-4 border border-cyan-800/50 flex flex-col">
-                    <DataPanelItem label="Price" className="text-lg">
-                        <span className={`text-2xl font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>${currentPrice.toLocaleString()}</span>
-                    </DataPanelItem>
-                     <DataPanelItem label="Change">
-                        <span className={`${isUp ? 'text-green-400' : 'text-red-400'}`}>{isUp ? '+' : ''}${priceChange.toLocaleString()}</span>
-                    </DataPanelItem>
-                     <DataPanelItem label="Volume">
-                        {history[history.length - 1]?.volume.toLocaleString()}
-                    </DataPanelItem>
+                <aside className="space-y-4">
+                    <div className="panel p-3">
+                        <div className="label">Here, right now</div>
+                        <div className="numeric text-3xl mt-0.5" style={{ color: up ? UP : DOWN }}>
+                            ${current.toLocaleString()}
+                        </div>
+                        <div className="numeric text-sm" style={{ color: up ? UP : DOWN }}>
+                            {up ? '▲ +' : '▼ −'}${Math.abs(change).toLocaleString()} vs yesterday
+                        </div>
+                    </div>
 
-                    <h3 className="text-cyan-400 mt-6 mb-2 text-lg border-b border-cyan-800/50 pb-1">Core Stats</h3>
-                    <DataPanelItem label="Rarity">{sneaker.rarity}</DataPanelItem>
-                    <DataPanelItem label="Volatility">{(sneaker.volatility * 100).toFixed(0)}%</DataPanelItem>
-                    <DataPanelItem label="Base Price">${sneaker.basePrice.toLocaleString()}</DataPanelItem>
-                    
-                    <h3 className="text-cyan-400 mt-6 mb-2 text-lg border-b border-cyan-800/50 pb-1">Supply</h3>
-                    <DataPanelItem label="Pairs in Prod.">{(sneaker.basePrice * 100).toLocaleString()}</DataPanelItem>
-                    <DataPanelItem label="Pairs on Market">{marketInfo?.quantity.toLocaleString() || 'N/A'}</DataPanelItem>
+                    {signals.length > 0 && (
+                        <div className="panel">
+                            <div className="panel-head"><span className="label">Live Signals</span></div>
+                            <div className="divide-y divide-[var(--line)]">
+                                {signals.map(s => {
+                                    const pct = Math.round((s.magnitude - 1) * 100);
+                                    return (
+                                        <div key={s.id} className="px-3 py-2">
+                                            <div className="numeric text-sm" style={{ color: pct >= 0 ? UP : DOWN }}>
+                                                {pct >= 0 ? '+' : ''}{pct}% · to day {s.expiresOnDay}
+                                            </div>
+                                            {s.label && <p className="text-[11px] text-[var(--ink-dim)] leading-snug mt-0.5">{s.label}</p>}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="panel p-3">
+                        <div className="label mb-1.5">Fundamentals</div>
+                        <Row label="Rarity">{sneaker.rarity}</Row>
+                        <Row label="Volatility">{(sneaker.volatility * 100).toFixed(0)}%</Row>
+                        <Row label="Base price">${sneaker.basePrice.toLocaleString()}</Row>
+                        <Row label="On shelf here">{marketInfo?.quantity ?? 0}</Row>
+                        <Row label="You own">{gameState.player.inventory.filter(i => i.sneakerId === sneaker.id).length}</Row>
+                    </div>
                 </aside>
             </div>
         </div>

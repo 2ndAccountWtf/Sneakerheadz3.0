@@ -1,191 +1,164 @@
 import React, { useState } from 'react';
 import { useGame } from '../hooks/useGame';
 import { useSoleNet } from '../hooks/useSoleNet';
-import NavButton from '../components/NavButton';
 import { Screen } from '../types';
+import ScreenHeader from '../components/ScreenHeader';
+import Img from '../components/Img';
 import type { SoleNetPost, SoleNetDm } from '../types/social';
 
-// --- SUB-COMPONENT: PostCard ---
-const PostCard: React.FC<{ post: SoleNetPost }> = ({ post }) => {
-    const timeAgo = (timestamp: number): string => {
-        const seconds = Math.floor((Date.now() - timestamp) / 1000);
-        if (seconds < 60) return `${Math.floor(seconds)}s`;
-        const minutes = seconds / 60;
-        if (minutes < 60) return `${Math.floor(minutes)}m`;
-        const hours = minutes / 60;
-        return `${Math.floor(hours)}h`;
-    };
+const POST_ACCENT: Record<SoleNetPost['type'], string> = {
+    chatter: 'var(--line)',
+    rumor: 'var(--accent-2)',
+    ad: 'var(--warn)',
+    event: 'var(--bad)',
+    chaos: 'var(--ink-faint)',
+};
 
-    const typeClasses: Record<SoleNetPost['type'], string> = {
-        chatter: 'border-transparent',
-        rumor: 'border-fuchsia-500/50',
-        ad: 'border-yellow-500/50',
-        event: 'border-red-500/50',
-        chaos: 'border-gray-600/50',
-    };
+const POST_LABEL: Record<SoleNetPost['type'], string> = {
+    chatter: '',
+    rumor: 'Rumour',
+    ad: 'Promoted',
+    event: 'Breaking',
+    chaos: 'Unhinged',
+};
 
-    return (
-        <div className={`bg-black/40 p-4 border-l-4 ${typeClasses[post.type]}`}>
-            <div className="flex items-start gap-3">
-                <img src={post.author.avatarUrl} alt={post.author.handle} className="w-12 h-12 rounded-full border-2 border-gray-700" />
-                <div className="flex-grow">
-                    <div className="flex items-baseline gap-2">
-                        <span className="font-bold text-white text-lg">{post.author.handle}</span>
-                        <span className="text-gray-500 text-sm">· {timeAgo(post.timestamp)}</span>
-                    </div>
-                    <p className="text-gray-300 mt-1 text-base">{post.content}</p>
-                    <div className="flex gap-6 mt-3 text-gray-500 text-sm">
-                        <span>🔥 {post.likes}</span>
-                        <span>💬 {Math.floor(post.reposts / 2)}</span>
-                        <span>↻ {post.reposts}</span>
-                    </div>
+const DM_ACCENT: Record<SoleNetDm['type'], string> = {
+    flavor: 'var(--ink-faint)',
+    tip: 'var(--ok)',
+    scam: 'var(--bad)',
+    mission: 'var(--warn)',
+};
+
+const timeAgo = (ts: number): string => {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    return `${Math.floor(h / 24)}d`;
+};
+
+const PostCard: React.FC<{ post: SoleNetPost }> = ({ post }) => (
+    <article className="panel p-3 border-l-2" style={{ borderLeftColor: POST_ACCENT[post.type] }}>
+        <div className="flex items-start gap-2.5">
+            <Img fallback="🧍" src={post.author.avatarUrl} alt="" className="w-9 h-9 rounded-full border border-[var(--line)] flex-shrink-0 saturate-50" />
+            <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-white truncate">{post.author.handle}</span>
+                    <span className="label">{timeAgo(post.timestamp)}</span>
+                    {POST_LABEL[post.type] && (
+                        <span className="chip !text-[9px] !py-0" style={{ borderColor: POST_ACCENT[post.type], color: POST_ACCENT[post.type] }}>
+                            {POST_LABEL[post.type]}
+                        </span>
+                    )}
+                </div>
+                <p className="text-sm text-[var(--ink)] mt-1 leading-snug">{post.content}</p>
+                <div className="flex gap-4 mt-2 label">
+                    <span>🔥 {post.likes}</span>
+                    <span>💬 {Math.floor(post.reposts / 2)}</span>
+                    <span>↻ {post.reposts}</span>
                 </div>
             </div>
         </div>
-    );
-};
+    </article>
+);
 
-
-// --- SUB-COMPONENT: UndergroundInbox ---
-const UndergroundInbox: React.FC<{ dms: SoleNetDm[]; onClose: () => void }> = ({ dms, onClose }) => {
-    const DmThreadPreview: React.FC<{ dm: SoleNetDm }> = ({ dm }) => {
-        const typeClasses: Record<SoleNetDm['type'], string> = {
-            flavor: 'bg-gray-700',
-            tip: 'bg-green-600',
-            scam: 'bg-red-600',
-            mission: 'bg-yellow-500',
-        };
-
-        return (
-            <div className="flex items-center gap-3 p-3 hover:bg-gray-800/50 cursor-pointer border-b border-gray-800">
-                <div className="relative">
-                    <img src={dm.sender.avatarUrl} alt={dm.sender.handle} className="w-14 h-14 rounded-full" />
-                    {!dm.isRead && <div className={`absolute top-0 right-0 w-3 h-3 rounded-full ${typeClasses[dm.type]} border-2 border-black`}></div>}
-                </div>
-                <div className="flex-grow overflow-hidden">
-                    <h4 className="font-bold text-white truncate">{dm.sender.handle}</h4>
-                    <p className="text-gray-400 text-sm truncate">{dm.messages[0].text}</p>
-                </div>
+const Inbox: React.FC<{ dms: SoleNetDm[]; onClose: () => void }> = ({ dms, onClose }) => (
+    <div className="fixed inset-0 z-[65] bg-black/80 backdrop-blur-sm" onClick={onClose}>
+        <div
+            className="absolute top-0 right-0 h-full w-full max-w-md bg-[var(--bg-panel)] border-l border-[var(--line-bright)] flex flex-col animate-slide-in"
+            onClick={e => e.stopPropagation()}
+        >
+            <div className="panel-head flex-shrink-0">
+                <span className="font-display text-sm uppercase text-[var(--accent)]">Underground Inbox</span>
+                <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
             </div>
-        );
-    };
-
-    return (
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-20 animate-fade-in" onClick={onClose}>
-            <div className="absolute top-0 right-0 h-full w-full max-w-md bg-black border-l-2 border-cyan-500/30 shadow-2xl animate-slide-in-right flex flex-col" onClick={(e) => e.stopPropagation()}>
-                <header className="flex-shrink-0 flex justify-between items-center p-4 border-b border-gray-800">
-                    <h2 className="text-2xl font-['Bungee'] text-cyan-300">Inbox</h2>
-                    <button onClick={onClose} className="text-3xl text-gray-500 hover:text-white">&times;</button>
-                </header>
-                <div className="flex-grow overflow-y-auto">
-                    {dms.map(dm => <DmThreadPreview key={dm.id} dm={dm} />)}
-                </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--line)]">
+                {dms.map(dm => (
+                    <div key={dm.id} className="flex items-start gap-3 p-3">
+                        <div className="relative flex-shrink-0">
+                            <Img fallback="🧍" src={dm.sender.avatarUrl} alt="" className="w-10 h-10 rounded-full saturate-50" />
+                            {!dm.isRead && (
+                                <span
+                                    className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-panel)]"
+                                    style={{ background: DM_ACCENT[dm.type] }}
+                                />
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-sm font-semibold text-white truncate">{dm.sender.handle}</span>
+                                <span className="chip !text-[9px] !py-0" style={{ borderColor: DM_ACCENT[dm.type], color: DM_ACCENT[dm.type] }}>
+                                    {dm.type}
+                                </span>
+                            </div>
+                            <p className="text-xs text-[var(--ink-dim)] mt-0.5 leading-snug">{dm.messages[0].text}</p>
+                        </div>
+                    </div>
+                ))}
             </div>
+            <p className="label p-3 border-t border-[var(--line)] flex-shrink-0">
+                Tips are sometimes true. Scams never are. Good luck telling them apart.
+            </p>
         </div>
-    );
-};
+    </div>
+);
 
+type Tab = 'all' | 'rumor' | 'chaos';
 
-// --- MAIN SCREEN ---
+/**
+ * SoleNet. Retinted onto the shared palette and given filters, because the feed
+ * is where rumours live and scrolling 30 undifferentiated posts to find one was
+ * the opposite of useful.
+ */
 const SocialScreen: React.FC = () => {
     const { gameState, changeScreen } = useGame();
     const { posts, dms } = useSoleNet();
     const [showInbox, setShowInbox] = useState(false);
+    const [tab, setTab] = useState<Tab>('all');
 
-    const unreadDms = dms.filter(dm => !dm.isRead).length;
-
-    const cityTheme: Record<string, React.CSSProperties> = {
-        'tokyo': { '--accent-color': '#00FFF7', '--accent-glow': 'rgba(0, 255, 247, 0.3)' },
-        'tel-aviv': { '--accent-color': '#FFD45A', '--accent-glow': 'rgba(255, 212, 90, 0.3)' },
-        'new-york': { '--accent-color': '#A8FF00', '--accent-glow': 'rgba(168, 255, 0, 0.3)' },
-        'los-angeles': { '--accent-color': '#FF2AA1', '--accent-glow': 'rgba(255, 42, 161, 0.3)' },
-        'paris': { '--accent-color': '#8C52FF', '--accent-glow': 'rgba(140, 82, 255, 0.3)' },
-        'chicago': { '--accent-color': '#FF0033', '--accent-glow': 'rgba(255, 0, 51, 0.3)' },
-        'default': { '--accent-color': '#00FFF7', '--accent-glow': 'rgba(0, 255, 247, 0.3)' },
-    };
-    
-    const theme = cityTheme[gameState.currentCityId] || cityTheme['default'];
-
-    const css = `
-        :root {
-             --accent-color: ${theme['--accent-color']};
-             --accent-glow: ${theme['--accent-glow']};
-        }
-        @keyframes crt-flicker {
-            0% { opacity: 0.95; } 50% { opacity: 1; } 100% { opacity: 0.95; }
-        }
-        @keyframes scanline-scroll {
-            0% { background-position: 0 0; } 100% { background-position: 0 100vh; }
-        }
-        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
-        @keyframes slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
-        .animate-slide-in-right { animation: slide-in-right 0.4s cubic-bezier(0.25, 1, 0.5, 1) forwards; }
-
-        .solenet-container {
-            position: relative;
-            background: #05080a;
-            border: 2px solid var(--accent-color);
-            box-shadow: 0 0 20px var(--accent-glow), inset 0 0 15px rgba(0,0,0,0.5);
-            padding: 1rem;
-            animation: crt-flicker 0.15s infinite;
-        }
-        .solenet-container::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.4) 50%);
-            background-size: 100% 4px;
-            pointer-events: none;
-            opacity: 0.3;
-            animation: scanline-scroll 20s linear infinite;
-        }
-        .solenet-tab {
-            font-family: 'Bungee', cursive;
-            transition: all 0.2s;
-        }
-        .solenet-tab.active {
-            color: var(--accent-color);
-            text-shadow: 0 0 5px var(--accent-color);
-        }
-    `;
+    const unread = dms.filter(d => !d.isRead).length;
+    const filtered = tab === 'all' ? posts : posts.filter(p => p.type === tab);
 
     return (
-        <div style={theme}>
-            <style>{css}</style>
-             <div className="flex justify-between items-center mb-4">
-                <h1 className="text-4xl font-bold uppercase tracking-widest font-['Bungee']" style={{color: 'var(--accent-color)'}}>SoleNet</h1>
-                <NavButton onClick={() => changeScreen(Screen.Dashboard)}>Back to City</NavButton>
-            </div>
-
-            <div className="solenet-container">
-                <header className="flex items-center border-b-2" style={{borderColor: 'var(--accent-color)'}}>
-                    <button 
-                        className={`solenet-tab p-4 text-xl active text-gray-500`}
-                    >
-                        HypeLine
-                    </button>
-                    <div className="relative">
-                        <button 
-                            className={`solenet-tab p-4 text-xl text-gray-500`}
-                            onClick={() => setShowInbox(true)}
-                        >
-                            Messages
+        <div className="pb-6">
+            <ScreenHeader
+                title={<>Sole<span className="accent">Net</span></>}
+                subtitle="Everyone is lying, some of them usefully"
+                back={Screen.Dashboard}
+                actions={
+                    <>
+                        <button className="btn btn-sm" onClick={() => changeScreen(Screen.CityFeed)}>Street Intel</button>
+                        <button className="btn btn-sm relative" onClick={() => setShowInbox(true)}>
+                            Inbox
+                            {unread > 0 && (
+                                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--accent-2)] text-black text-[9px] font-bold flex items-center justify-center">
+                                    {unread}
+                                </span>
+                            )}
                         </button>
-                        {unreadDms > 0 && (
-                            <div className="absolute top-2 right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs text-white font-bold animate-pulse">
-                                {unreadDms}
-                            </div>
-                        )}
-                    </div>
-                </header>
+                    </>
+                }
+            />
 
-                <main className="mt-4 max-h-[60vh] overflow-y-auto pr-2 space-y-2">
-                    {posts.map(post => <PostCard key={post.id} post={post} />)}
-                </main>
+            <div className="flex gap-1.5 mb-3">
+                {([['all', 'HypeLine'], ['rumor', 'Rumours'], ['chaos', 'Unhinged']] as [Tab, string][]).map(([id, label]) => (
+                    <button key={id} onClick={() => setTab(id)} className={`btn btn-sm ${tab === id ? 'btn-primary' : ''}`}>
+                        {label}
+                    </button>
+                ))}
             </div>
-            
-            {showInbox && <UndergroundInbox dms={dms} onClose={() => setShowInbox(false)} />}
+
+            <div className="space-y-2">
+                {filtered.length === 0 ? (
+                    <div className="panel p-8 text-center text-[var(--ink-dim)] font-mono text-sm">Nothing in this filter today.</div>
+                ) : (
+                    filtered.map(post => <PostCard key={post.id} post={post} />)
+                )}
+            </div>
+
+            {showInbox && <Inbox dms={dms} onClose={() => setShowInbox(false)} />}
         </div>
     );
 };

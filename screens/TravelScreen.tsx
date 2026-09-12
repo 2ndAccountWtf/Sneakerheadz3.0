@@ -8,6 +8,7 @@ import ScreenHeader from '../components/ScreenHeader';
 import { generateRumorsForCity, RumorWithContext } from '../systems/rumorEngine';
 import { TRAVEL_ENERGY_COST } from '../constants';
 import { applySignals } from '../systems/pricing';
+import Img from '../components/Img';
 
 type Trend = 'up' | 'down' | 'flat';
 
@@ -105,7 +106,7 @@ const TravelScreen: React.FC = () => {
                     return (
                         <div key={city.id} className={`panel flex flex-col ${isCurrent ? 'opacity-60' : ''}`}>
                             <div className="relative h-28 overflow-hidden">
-                                <img src={city.image} alt={city.name} className="w-full h-full object-cover opacity-40 grayscale" />
+                                <Img fallback="🏙" src={city.image} alt={city.name} className="w-full h-full object-cover opacity-40 grayscale" />
                                 <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-panel)] to-transparent" />
                                 <div className="absolute inset-0 scanlines opacity-40" />
                                 <h2 className="absolute bottom-2 left-3 font-display text-lg uppercase text-white leading-none">{city.name}</h2>

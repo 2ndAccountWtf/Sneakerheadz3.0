@@ -3,6 +3,7 @@ import { useGame } from '../hooks/useGame';
 import { Screen, AmpmItem } from '../types';
 import { AMPM_ITEMS } from '../data/ampmItems';
 import ScreenHeader from '../components/ScreenHeader';
+import Img from '../components/Img';
 import { useAmpmWorker } from '../hooks/useAmpmWorker';
 import { ampmGreeting, ampmChatter, ampmWeaponsTalk, ampmAfterPurchase } from '../data/ampm/dialogue';
 import { isPartyMode, rollAmpmEvent, AMPM_EVENT_CHANCE, AMPM_PARTY_EVENT_CHANCE } from '../systems/events/ampmEvents';
@@ -105,7 +106,8 @@ const AmpmScreen: React.FC = () => {
                 {/* Clerk */}
                 {worker && (
                     <div className={`panel p-3 mb-3 flex items-start gap-3 ${partyMode ? 'border-[var(--accent-2)]' : ''}`}>
-                        <img
+                        <Img
+                            fallback="🧍"
                             src={worker.portraitUrl}
                             alt={worker.name}
                             className="w-14 h-14 object-cover border border-[var(--line-bright)] flex-shrink-0 saturate-50"

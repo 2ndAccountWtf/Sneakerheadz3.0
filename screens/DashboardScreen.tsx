@@ -6,6 +6,7 @@ import { STORES_BY_CITY } from '../data/stores';
 import { getCredRank, TOTAL_DAYS } from '../constants';
 import { getBagValue } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
+import Img from '../components/Img';
 
 const Tile: React.FC<{
     label: string;
@@ -62,7 +63,8 @@ const DashboardScreen: React.FC = () => {
             {/* HERO */}
             <section className="relative panel overflow-hidden">
                 <div className="absolute inset-0">
-                    <img
+                    <Img
+                        fallback="🏙"
                         src={currentCity.image}
                         alt={currentCity.name}
                         className="w-full h-full object-cover opacity-25 grayscale contrast-125"

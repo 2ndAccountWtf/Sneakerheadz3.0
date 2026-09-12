@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MiniGameShell, MiniGameResult } from './MiniGameShell';
+import Img from '../Img';
 
 type Reaction = 'agree' | 'disagree' | 'mock';
 
@@ -115,7 +116,8 @@ const HypecastRoulette: React.FC<{
             quitLabel="Leave Set"
         >
             <div className="flex items-center gap-3 mb-4">
-                <img
+                <Img
+                    fallback="🎙"
                     src="https://picsum.photos/seed/brojogan/120"
                     alt=""
                     className="w-12 h-12 object-cover border border-[var(--line-bright)] saturate-50"

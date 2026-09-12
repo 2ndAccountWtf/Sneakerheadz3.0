@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CelebrityProfile } from '../../types/npcs';
 import type { AmbientNpcProfile } from '../../types/interactions';
+import Img from '../Img';
 
 interface InStoreNpcRailProps {
     ambient: AmbientNpcProfile[];
@@ -62,7 +63,8 @@ export const InStoreNpcRail: React.FC<InStoreNpcRailProps> = ({ ambient, cameo, 
                                 disabled={!interactive}
                                 className={`w-full text-left px-3 py-2.5 flex items-start gap-3 transition-colors ${interactive ? 'hover:bg-white/[0.03]' : 'cursor-default'}`}
                             >
-                                <img
+                                <Img
+                                    fallback="🧍"
                                     src={npc.portraitUrl}
                                     alt=""
                                     className="w-9 h-9 object-cover border border-[var(--line)] flex-shrink-0 saturate-50"
