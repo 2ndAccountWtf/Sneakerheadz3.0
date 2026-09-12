@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../hooks/useGame';
 import { findInteractionData } from '../../data/npcs';
 import { ScenarioNode } from '../../types/interactions';
 
 // --- TYPEWRITER HOOK ---
-const useTypewriter = (text: string, speed: number = 30) => {
+const useTypewriter = (text: string, speed: number = 22) => {
     const [displayedText, setDisplayedText] = useState('');
     const [isComplete, setIsComplete] = useState(false);
     const index = useRef(0);
@@ -15,13 +14,15 @@ const useTypewriter = (text: string, speed: number = 30) => {
         setDisplayedText('');
         setIsComplete(false);
         index.current = 0;
-        
+
         if (timerRef.current) clearInterval(timerRef.current);
 
         timerRef.current = window.setInterval(() => {
             if (index.current < text.length) {
-                setDisplayedText((prev) => prev + text.charAt(index.current));
-                index.current++;
+                // Reveal a few characters per tick so long speeches don't drag.
+                const step = text.length > 220 ? 3 : 1;
+                setDisplayedText(text.slice(0, index.current + step));
+                index.current += step;
             } else {
                 setIsComplete(true);
                 if (timerRef.current) clearInterval(timerRef.current);
@@ -42,43 +43,65 @@ const useTypewriter = (text: string, speed: number = 30) => {
     return { displayedText, isComplete, complete };
 };
 
+const TONE_STYLES: Record<string, string> = {
+    good: 'text-[var(--ok)] border-[var(--ok)]',
+    bad: 'text-[var(--bad)] border-[var(--bad)]',
+    neutral: 'text-[var(--ink-dim)] border-[var(--line)]',
+};
+
 const InteractionView: React.FC = () => {
     const { gameState, dispatch } = useGame();
-    const { activeInteraction } = gameState;
+    const { activeInteraction, outcomeLog, activeMiniGame } = gameState;
 
-    // If activeInteraction is null, render nothing
-    if (!activeInteraction) return null;
+    const npcId = activeInteraction?.npcId ?? '';
+    const scenarioId = activeInteraction?.scenarioId ?? '';
+    const currentNodeId = activeInteraction?.currentNodeId ?? '';
 
-    const { npcId, scenarioId, currentNodeId } = activeInteraction;
-    const { npc, scenario } = findInteractionData(npcId, scenarioId);
+    const { npc, scenario } = activeInteraction
+        ? findInteractionData(npcId, scenarioId)
+        : { npc: null, scenario: null };
     const node: ScenarioNode | undefined = scenario?.nodes[currentNodeId];
 
-    // Ensure hook is called unconditionally at the top level
-    // We'll handle the 'loading/error' state inside the rendering logic
-    // But first, resolve the text.
-    
-    let resolvedLine = "";
-    if (node) {
-        resolvedLine = node.npcLine;
-        // Handle dynamic random greetings
-        if (resolvedLine === "{{random_greeting}}" && npc && 'dialogue' in npc) {
-             // Aggregate all dialogue lines to ensure variety, as 'greeting' might be missing or limited
-             // This unlocks the full library of text for characters like Bro Jogan and Yasser
-             const allLines = Object.values(npc.dialogue).flat();
-             if (allLines.length > 0) {
-                resolvedLine = allLines[Math.floor(Math.random() * allLines.length)];
-             } else {
-                resolvedLine = "...";
-             }
+    // Resolve the line once per node so the typewriter doesn't reshuffle a
+    // random greeting on every render.
+    const [resolvedLine, setResolvedLine] = useState('');
+    useEffect(() => {
+        if (!node) {
+            setResolvedLine('');
+            return;
         }
-    }
+        let line = node.npcLine;
+        if (line === '{{random_greeting}}' && npc && 'dialogue' in npc && npc.dialogue) {
+            const allLines = Object.values(npc.dialogue).flat();
+            line = allLines.length ? allLines[Math.floor(Math.random() * allLines.length)] : '...';
+        }
+        setResolvedLine(line);
+    }, [node, npcId, scenarioId, currentNodeId]);
 
-    // Use the hook
-    const { displayedText, isComplete, complete } = useTypewriter(resolvedLine || "...", 20);
+    const { displayedText, isComplete, complete } = useTypewriter(resolvedLine || '...', 22);
+
+    // Apply the node's authored outcomes exactly once, on arrival. Until now
+    // these were rendered as flavour and then discarded.
+    const appliedRef = useRef<string>('');
+    useEffect(() => {
+        if (!activeInteraction || !node) return;
+        const key = `${npcId}:${scenarioId}:${currentNodeId}`;
+        if (appliedRef.current === key) return;
+        appliedRef.current = key;
+
+        if (node.outcomes && node.outcomes.length > 0) {
+            dispatch({
+                type: 'APPLY_OUTCOMES',
+                payload: { outcomes: node.outcomes, sourceName: npc?.name },
+            });
+        }
+    }, [activeInteraction, node, npcId, scenarioId, currentNodeId, npc, dispatch]);
+
+    // A mini-game takes the stage; the conversation waits behind it.
+    if (activeMiniGame) return null;
+    if (!activeInteraction) return null;
 
     if (!npc || !scenario || !node) {
-        console.error("Interaction data missing!", activeInteraction);
-        dispatch({ type: 'END_INTERACTION' });
         return null;
     }
 
@@ -86,95 +109,87 @@ const InteractionView: React.FC = () => {
         dispatch({ type: 'PROGRESS_INTERACTION', payload: { nextNodeId } });
     };
 
-    const handleEnd = () => {
-        dispatch({ type: 'END_INTERACTION' });
-    };
+    const handleEnd = () => dispatch({ type: 'END_INTERACTION' });
 
     const handleBackdropClick = () => {
-        if (!isComplete) {
-            complete();
-        }
+        if (!isComplete) complete();
     };
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200" onClick={handleBackdropClick}>
-            {/* Main Container */}
-            <div 
-                className="relative w-full max-w-3xl bg-[#09090b] border-2 border-cyan-500/60 shadow-[0_0_50px_rgba(0,255,247,0.15)] overflow-hidden flex flex-col md:flex-row"
-                onClick={(e) => e.stopPropagation()}
-                style={{ minHeight: '400px', clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%)' }}
-            >
-                {/* Background Grid FX */}
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagmonds-light.png')] opacity-5 pointer-events-none"></div>
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-cyan-500 opacity-50"></div>
+    const isTerminal = !node.choices || node.choices.length === 0;
 
-                {/* LEFT: Portrait Section */}
-                <div className="relative md:w-1/3 w-full h-48 md:h-auto bg-gradient-to-b from-gray-900 to-black border-b-2 md:border-b-0 md:border-r-2 border-cyan-500/30 flex items-center justify-center overflow-hidden group">
-                    {/* Scanline overlay on image */}
-                    <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,255,247,0.05)_50%)] bg-[length:100%_4px] pointer-events-none z-10"></div>
-                    
-                    <img 
-                        src={npc.portraitUrl || 'https://picsum.photos/seed/placeholder/300'} 
-                        alt={npc.name} 
-                        className="w-full h-full object-cover object-top opacity-90 group-hover:scale-105 transition-transform duration-1000 filter contrast-125" 
+    return (
+        <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-6"
+            onClick={handleBackdropClick}
+        >
+            <div
+                className="crt-panel relative w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col sm:flex-row"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* PORTRAIT */}
+                <div className="relative sm:w-1/3 w-full h-32 sm:h-auto sm:min-h-[26rem] bg-black border-b-2 sm:border-b-0 sm:border-r-2 border-[var(--line)] overflow-hidden flex-shrink-0">
+                    <div className="absolute inset-0 scanlines pointer-events-none z-10" />
+                    <img
+                        src={npc.portraitUrl || 'https://picsum.photos/seed/placeholder/300'}
+                        alt={npc.name}
+                        className="w-full h-full object-cover object-top opacity-90 contrast-125 saturate-50"
                     />
-                    
-                    {/* Name Tag */}
-                    <div className="absolute bottom-0 left-0 w-full bg-black/80 backdrop-blur-sm border-t border-cyan-500/30 p-3 z-20">
-                        <h2 className="text-xl font-['Orbitron'] font-bold text-cyan-400 tracking-wider uppercase drop-shadow-[0_0_5px_rgba(0,255,247,0.5)]">
+                    <div className="absolute bottom-0 left-0 w-full bg-black/85 border-t border-[var(--line)] px-3 py-2 z-20">
+                        <h2 className="font-display text-base sm:text-lg text-[var(--accent)] tracking-wider uppercase leading-tight truncate">
                             {npc.name}
                         </h2>
-                         <div className="text-[10px] text-gray-500 font-mono uppercase tracking-[0.2em] flex items-center gap-2">
-                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                            Online
+                        <div className="text-[9px] text-[var(--ink-dim)] font-mono uppercase tracking-[0.2em] flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 bg-[var(--ok)] rounded-full animate-pulse" />
+                            Transmitting
                         </div>
                     </div>
                 </div>
 
-                {/* RIGHT: Dialogue Section */}
-                <div className="flex-1 flex flex-col p-6 relative">
-                    {/* Text Area */}
-                    <div 
-                        className="flex-grow mb-6 font-['Space_Mono'] text-lg text-gray-100 leading-relaxed cursor-pointer"
+                {/* DIALOGUE */}
+                <div className="flex-1 flex flex-col p-4 sm:p-5 min-h-0">
+                    <div
+                        className="flex-grow overflow-y-auto mb-4 font-mono text-sm sm:text-base text-[var(--ink)] leading-relaxed cursor-pointer whitespace-pre-line"
                         onClick={handleBackdropClick}
                     >
-                        <span className="text-cyan-500 font-bold mr-2">{'>'}</span>
+                        <span className="text-[var(--accent)] font-bold mr-2">{'>'}</span>
                         {displayedText}
-                        {!isComplete && <span className="inline-block w-2 h-5 bg-cyan-500 ml-1 animate-pulse align-middle"></span>}
+                        {!isComplete && <span className="inline-block w-2 h-4 bg-[var(--accent)] ml-1 animate-pulse align-middle" />}
                     </div>
 
-                    {/* Choices Container */}
-                    <div className="flex flex-col gap-3 mt-auto">
-                        <div className={`transition-opacity duration-500 ${isComplete ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                            {node.choices && node.choices.map((choice, index) => (
-                                <button
-                                    key={index}
-                                    onClick={() => handleChoice(choice.next)}
-                                    className="group w-full text-left px-4 py-3 bg-gray-800/50 border border-gray-700 hover:bg-cyan-900/20 hover:border-cyan-500/50 transition-all duration-200 relative overflow-hidden"
+                    {/* OUTCOME RECEIPT */}
+                    {isComplete && outcomeLog.length > 0 && (
+                        <div className="mb-3 border border-[var(--line)] bg-black/50 divide-y divide-[var(--line)] max-h-40 overflow-y-auto flex-shrink-0">
+                            {outcomeLog.map((entry, i) => (
+                                <div
+                                    key={i}
+                                    className={`flex items-start gap-2 px-3 py-1.5 text-xs font-mono ${TONE_STYLES[entry.tone]}`}
                                 >
-                                    <div className="absolute left-0 top-0 h-full w-1 bg-gray-600 group-hover:bg-cyan-400 transition-colors"></div>
-                                    <span className="text-sm text-gray-400 group-hover:text-cyan-300 font-mono uppercase mr-3 opacity-50 group-hover:opacity-100 transition-opacity">0{index + 1}</span>
-                                    <span className="text-gray-200 font-bold group-hover:text-white">{choice.playerLine}</span>
-                                </button>
+                                    <span className="flex-shrink-0">{entry.icon}</span>
+                                    <span className="flex-1">{entry.text}</span>
+                                </div>
                             ))}
-
-                            {node.outcomes && (
-                                <button
-                                    onClick={handleEnd}
-                                    className="group w-full text-center px-4 py-3 bg-cyan-600 hover:bg-cyan-500 text-black font-bold uppercase tracking-widest clip-corner-br transition-colors shadow-[0_0_15px_rgba(0,255,247,0.3)]"
-                                    style={{ clipPath: "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)" }}
-                                >
-                                    End Transmission
-                                </button>
-                            )}
                         </div>
-                    </div>
-                    
-                    {/* Decorative Tech Elements */}
-                    <div className="absolute top-2 right-2 flex gap-1">
-                        <div className="w-1 h-1 bg-gray-700"></div>
-                        <div className="w-1 h-1 bg-gray-700"></div>
-                        <div className="w-1 h-1 bg-gray-700"></div>
+                    )}
+
+                    <div className={`flex flex-col gap-2 mt-auto flex-shrink-0 transition-opacity duration-300 ${isComplete ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        {node.choices?.map((choice, index) => (
+                            <button
+                                key={index}
+                                onClick={() => handleChoice(choice.next)}
+                                className="group w-full text-left px-3 py-2.5 bg-white/[0.03] border border-[var(--line)] hover:bg-[var(--accent)]/10 hover:border-[var(--accent)] transition-colors"
+                            >
+                                <span className="text-[10px] text-[var(--ink-dim)] group-hover:text-[var(--accent)] font-mono mr-2">
+                                    {String(index + 1).padStart(2, '0')}
+                                </span>
+                                <span className="text-sm text-[var(--ink)] group-hover:text-white">{choice.playerLine}</span>
+                            </button>
+                        ))}
+
+                        {isTerminal && (
+                            <button onClick={handleEnd} className="btn-primary w-full">
+                                End Transmission
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

@@ -1,102 +1,162 @@
-
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
 import { CITIES } from '../data/cities';
+import { STORES_BY_CITY } from '../data/stores';
+import { getCredRank, TOTAL_DAYS } from '../constants';
+import { getBagValue } from '../systems/pricing';
+import { generateRumorsForCity } from '../systems/rumorEngine';
 
-const DashboardTile: React.FC<{ 
-    label: string; 
-    sublabel?: string; 
-    icon: string; 
-    onClick: () => void; 
-    color?: string 
-}> = ({ label, sublabel, icon, onClick, color = "border-cyan-500/30 hover:border-cyan-400" }) => (
-    <button 
+const Tile: React.FC<{
+    label: string;
+    sublabel: string;
+    icon: string;
+    onClick: () => void;
+    accent?: string;
+    badge?: string;
+}> = ({ label, sublabel, icon, onClick, accent = 'var(--accent)', badge }) => (
+    <button
         onClick={onClick}
-        className={`
-            group relative flex flex-col items-start justify-between p-6 h-40 
-            bg-gray-900/40 backdrop-blur-sm border-2 ${color}
-            hover:bg-gray-800/60 transition-all duration-300 ease-out
-            clip-corner-br text-left overflow-hidden
-        `}
+        className="group relative panel p-4 text-left overflow-hidden transition-colors hover:border-[var(--line-bright)] no-tap-highlight"
+        style={{ minHeight: '112px' }}
     >
-        <div className="absolute -right-4 -top-4 text-9xl opacity-5 group-hover:opacity-10 transition-opacity select-none">
-            {icon}
-        </div>
-        <div className="text-4xl mb-2 filter drop-shadow-lg group-hover:scale-110 transition-transform duration-300">{icon}</div>
-        <div>
-            <h3 className="text-xl font-bold text-white font-['Orbitron'] tracking-wider group-hover:text-cyan-300 transition-colors">{label}</h3>
-            {sublabel && <p className="text-xs text-gray-400 font-mono mt-1">{sublabel}</p>}
+        <span
+            className="absolute left-0 top-0 h-full w-[3px] transition-all group-hover:w-[5px]"
+            style={{ background: accent }}
+        />
+        <div className="absolute -right-3 -bottom-4 text-7xl opacity-[0.06] select-none pointer-events-none">{icon}</div>
+        <div className="relative flex flex-col h-full">
+            <span className="text-2xl leading-none mb-2">{icon}</span>
+            <span className="font-display text-xs sm:text-sm uppercase text-white leading-tight">{label}</span>
+            <span className="text-[11px] text-[var(--ink-dim)] mt-1 leading-snug">{sublabel}</span>
+            {badge && <span className="chip chip-accent mt-2 self-start">{badge}</span>}
         </div>
     </button>
 );
 
+/**
+ * The city hub. Replaces the old grid-of-six-with-a-"More Apps Soon"-hole with
+ * a live briefing: what your bag is worth right now, what the street is
+ * saying, and what state you're in.
+ */
 const DashboardScreen: React.FC = () => {
     const { gameState, changeScreen } = useGame();
-    const currentCity = CITIES.find(city => city.id === gameState.currentCityId);
+    const { player, currentCityId, day, quests, activeMarketSignals } = gameState;
 
-    if (!currentCity) return <div>Loading City...</div>;
+    const currentCity = CITIES.find(city => city.id === currentCityId);
+    const storeCount = STORES_BY_CITY[currentCityId]?.length ?? 0;
+    const rank = getCredRank(player.streetCred);
+    const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
+
+    const headline = useMemo(() => {
+        const rumors = generateRumorsForCity(currentCityId, day);
+        return rumors.find(r => r.type === 'Intel Drop') ?? rumors[0];
+    }, [currentCityId, day]);
+
+    const liveSignals = activeMarketSignals.filter(s => s.expiresOnDay > day);
+
+    if (!currentCity) return <div className="label">Loading city…</div>;
 
     return (
-        <div className="flex flex-col gap-8 pb-20">
-            {/* Hero Section */}
-            <section className="relative rounded-lg overflow-hidden border border-gray-800 h-64 flex items-end p-6 group">
+        <div className="flex flex-col gap-4 sm:gap-5 pb-6">
+            {/* HERO */}
+            <section className="relative panel overflow-hidden">
                 <div className="absolute inset-0">
-                    <img src={currentCity.image} alt={currentCity.name} className="w-full h-full object-cover opacity-40 group-hover:opacity-50 transition-opacity duration-700 grayscale group-hover:grayscale-0" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#05080a] via-[#05080a]/60 to-transparent" />
+                    <img
+                        src={currentCity.image}
+                        alt={currentCity.name}
+                        className="w-full h-full object-cover opacity-25 grayscale contrast-125"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] via-[var(--bg)]/75 to-transparent" />
+                    <div className="absolute inset-0 scanlines opacity-40" />
                 </div>
-                <div className="relative z-10">
-                    <p className="text-cyan-400 text-sm font-bold tracking-[0.3em] mb-2 uppercase">Welcome to</p>
-                    <h1 className="text-5xl md:text-7xl font-black text-white font-['Bungee'] uppercase tracking-wide leading-none">
+                <div className="relative p-4 sm:p-6">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <span className="label" style={{ color: 'var(--accent)' }}>Day {day} of {TOTAL_DAYS}</span>
+                        <span className="w-1 h-1 rounded-full bg-[var(--ink-faint)]" />
+                        <span className="label">{rank.icon} {rank.title}</span>
+                    </div>
+                    <h1 className="font-display text-3xl sm:text-5xl uppercase text-white leading-none mb-2">
                         {currentCity.name}
                     </h1>
-                    <p className="text-gray-300 max-w-xl mt-4 text-sm md:text-base line-clamp-2">{currentCity.description}</p>
+                    <p className="text-[var(--ink-dim)] text-sm max-w-xl leading-snug">{currentCity.description}</p>
+
+                    <div className="flex flex-wrap gap-2 mt-4">
+                        <span className="chip chip-accent">👟 {storeCount} shops</span>
+                        <span className="chip">📦 Bag worth ${bagValue.toLocaleString()}</span>
+                        {liveSignals.length > 0 && <span className="chip chip-warn">📊 {liveSignals.length} live signal{liveSignals.length > 1 ? 's' : ''}</span>}
+                        {player.heat >= 40 && <span className="chip chip-bad">🚨 Heat {Math.round(player.heat)}</span>}
+                        {player.buffs.slice(0, 2).map(b => (
+                            <span key={b.id} className="chip chip-accent">✦ {b.label}</span>
+                        ))}
+                    </div>
                 </div>
             </section>
-            
-            {/* App Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <DashboardTile 
-                    label="Stores" 
-                    sublabel="Buy & Sell Kicks" 
-                    icon="👟" 
-                    onClick={() => changeScreen(Screen.CityStores)}
-                    color="border-green-500/30 hover:border-green-400"
-                />
-                <DashboardTile 
-                    label="Inventory" 
-                    sublabel="Manage Stock" 
-                    icon="📦" 
-                    onClick={() => changeScreen(Screen.Inventory)}
-                />
-                <DashboardTile 
-                    label="Travel" 
-                    sublabel="Change City" 
-                    icon="✈️" 
-                    onClick={() => changeScreen(Screen.Travel)}
-                    color="border-purple-500/30 hover:border-purple-400"
-                />
-                <DashboardTile 
-                    label="AM/PM" 
-                    sublabel="Items & Gear" 
-                    icon="🏪" 
-                    onClick={() => changeScreen(Screen.Ampm)}
-                    color="border-yellow-500/30 hover:border-yellow-400"
-                />
-                <DashboardTile 
-                    label="Intel" 
-                    sublabel="Rumors & News" 
-                    icon="📡" 
+
+            {/* STREET INTEL TICKER */}
+            {headline && (
+                <button
                     onClick={() => changeScreen(Screen.CityFeed)}
+                    className="panel p-3 text-left flex items-start gap-3 hover:border-[var(--line-bright)] transition-colors"
+                >
+                    <span className="text-lg leading-none flex-shrink-0">📡</span>
+                    <div className="min-w-0">
+                        <div className="label mb-0.5">Street Intel · {headline.type}</div>
+                        <p className="text-sm text-[var(--ink)] leading-snug line-clamp-2">{headline.text}</p>
+                    </div>
+                    <span className="label flex-shrink-0 self-center">More →</span>
+                </button>
+            )}
+
+            {/* ACTIONS */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                <Tile
+                    label="Shops"
+                    sublabel="Buy low, sell high, get legit-checked"
+                    icon="👟"
+                    accent="var(--ok)"
+                    onClick={() => changeScreen(Screen.CityStores)}
+                    badge={storeCount ? `${storeCount} open` : 'None here'}
                 />
-                {/* Placeholder for future features */}
-                 <div className="relative flex items-center justify-center p-6 h-40 border-2 border-dashed border-gray-800 rounded-lg opacity-50">
-                    <span className="text-gray-600 font-mono text-sm">More Apps Soon...</span>
-                </div>
+                <Tile
+                    label="Travel"
+                    sublabel="Next city, next day, next problem"
+                    icon="✈️"
+                    accent="var(--accent-2)"
+                    onClick={() => changeScreen(Screen.Travel)}
+                    badge={`⚡ costs 15`}
+                />
+                <Tile
+                    label="AM/PM"
+                    sublabel="Burekas, weapons, questionable hummus"
+                    icon="🏪"
+                    accent="var(--warn)"
+                    onClick={() => changeScreen(Screen.Ampm)}
+                />
+                <Tile
+                    label="Arcade"
+                    sublabel="Brawls, chases, boxes, blacktop"
+                    icon="🕹"
+                    accent="var(--legend)"
+                    onClick={() => changeScreen(Screen.Arcade)}
+                />
+                <Tile
+                    label="Odd Jobs"
+                    sublabel="Errands that rarely pay what they should"
+                    icon="🗺"
+                    onClick={() => changeScreen(Screen.Quests)}
+                    badge={quests.length ? `${quests.length} active` : undefined}
+                />
+                <Tile
+                    label="SoleNet"
+                    sublabel="The feed, the DMs, the lies"
+                    icon="📱"
+                    accent="var(--accent-2)"
+                    onClick={() => changeScreen(Screen.Social)}
+                />
             </div>
         </div>
     );
 };
 
 export default DashboardScreen;
-    

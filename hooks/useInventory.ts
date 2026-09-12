@@ -4,6 +4,7 @@ import { UseInventoryOpts, SneakerItem } from '../types/shoestore';
 import { useGame } from './useGame';
 import { SNEAKERS } from '../data/sneakers';
 import { MAX_OOS_ITEMS_TO_SHOW } from '../constants';
+import { applySignals, getBuyPrice } from '../systems/pricing';
 
 export function useInventory(opts: UseInventoryOpts): {
   items: SneakerItem[];
@@ -12,7 +13,7 @@ export function useInventory(opts: UseInventoryOpts): {
   reload: () => void;
 } {
     const { gameState } = useGame();
-    const { currentCityId, markets, activeMarketSignals } = gameState;
+    const { currentCityId, markets, activeMarketSignals, day, player } = gameState;
 
     const items = useMemo(() => {
         const cityMarket = markets[currentCityId];
@@ -29,22 +30,13 @@ export function useInventory(opts: UseInventoryOpts): {
                     return null;
                 }
 
-                // --- APPLY MARKET SIGNALS ---
-                let finalPrice = marketSneaker.price;
-                const relevantSignals = activeMarketSignals.filter(signal => 
-                    signal.targets.some(target => 
-                        (target.kind === 'model' && target.value === details.id) ||
-                        (target.kind === 'rarity' && target.value === details.rarity)
-                    )
-                );
-                
-                relevantSignals.forEach(signal => {
-                    finalPrice *= signal.magnitude;
-                });
+                // News, rumours and scenario signals move the sticker price;
+                // a store-discount buff then moves what the player actually pays.
+                const signalled = applySignals(marketSneaker.price, details, activeMarketSignals, day, player);
 
                 return {
                     ...details,
-                    price: Math.round(finalPrice),
+                    price: getBuyPrice(signalled, player),
                     quantity: marketSneaker.quantity,
                     // Ensure we pass the fake status to the UI item
                     isFake: marketSneaker.isFake,
@@ -64,7 +56,7 @@ export function useInventory(opts: UseInventoryOpts): {
         // Combine and sort for final display (e.g., by price)
         return [...inStockItems, ...visibleOOSItems].sort((a, b) => b.basePrice - a.basePrice);
 
-    }, [currentCityId, markets, opts.groupRef, activeMarketSignals]);
+    }, [currentCityId, markets, opts.groupRef, activeMarketSignals, day, player]);
     
     const loading = false;
     const total = items.length;

@@ -25,7 +25,7 @@ export function useCityFeed(): { feed: ActiveRumor[] } {
                         id: signalId,
                         effect: payload.effect,
                         magnitude: payload.magnitude,
-                        expiresAt: Date.now() + payload.durationHrs * 60 * 60 * 1000,
+                        expiresOnDay: day + Math.max(1, Math.ceil(payload.durationHrs / 24)),
                         targets: [{ 
                             kind: payload.target.kind, 
                             value: (payload.target.value === '{sneaker_id}' && rumor.sneakerTargetId) 
@@ -33,6 +33,7 @@ export function useCityFeed(): { feed: ActiveRumor[] } {
                                    : payload.target.value 
                         }],
                         sourceNewsId: `rumor-${rumor.id}`,
+                        label: rumor.text,
                     };
                     
                     if (!gameState.activeMarketSignals.some(s => s.id === signalId)) {

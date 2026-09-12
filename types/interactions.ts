@@ -12,9 +12,31 @@ export interface ScenarioChoice {
   next: string; // The key of the next node in the scenario
 }
 
-// Data structure for the outcome of a dialogue path
+// Data structure for the outcome of a dialogue path.
+//
+// Every one of these is interpreted by `systems/outcomes/outcomeEngine.ts`.
+// Outcomes carrying `condition: 'win' | 'lose'` are held back and applied by
+// whichever mini-game the same node launched.
+export type ScenarioOutcomeType =
+  | 'combat'            // hands off to the Street Brawl mini-game
+  | 'inventoryChange'   // add/remove cash, sneakers or storage items
+  | 'notification'
+  | 'streetCred'
+  | 'statusEffect'      // becomes a day-scoped Buff
+  | 'reputation'
+  | 'priceMarkup'       // < 1 = store discount, >= 1 = resale bonus
+  | 'freebie'
+  | 'marketSignal'
+  | 'stat_change'       // health / energy
+  | 'flag'              // sets a named world-state switch
+  | 'bibiApproval'
+  | 'heat'
+  | 'miniGame'          // launches an arbitrary mini-game
+  | 'inventoryMultiplier' // the Bibi/Drip collab supernova
+  | 'quest';
+
 export interface ScenarioOutcome {
-  type: 'combat' | 'inventoryChange' | 'notification' | 'streetCred' | 'statusEffect' | 'reputation' | 'priceMarkup' | 'freebie' | 'marketSignal' | 'stat_change';
+  type: ScenarioOutcomeType;
   description: string;
   [key: string]: any; // Allows for flexible properties like 'change', 'condition', 'message', etc.
 }

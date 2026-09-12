@@ -38,7 +38,8 @@ const ODD_NEWS = [{title: "City Duck Elected Night Mayor", body: "Platform inclu
 const SURGE_CAUSES = ["a celebrity sighting", "a podcast mention", "a production shortage"];
 
 export const useNewsEngine = () => {
-    const { dispatch } = useGame();
+    const { dispatch, gameState } = useGame();
+    const day = gameState.day;
 
     useEffect(() => {
         const tick = () => {
@@ -76,7 +77,7 @@ export const useNewsEngine = () => {
                     id: `signal-${newsId}`,
                     effect: 'surge',
                     magnitude,
-                    expiresAt: Date.now() + durationHrs * 60 * 60 * 1000,
+                    expiresOnDay: day + Math.max(1, Math.ceil(durationHrs / 24)),
                     targets: [{ kind: 'model', value: sneaker.id }],
                     sourceNewsId: newsId,
                 };
@@ -101,7 +102,7 @@ export const useNewsEngine = () => {
                     id: `signal-${newsId}`,
                     effect: 'collapse',
                     magnitude,
-                    expiresAt: Date.now() + durationHrs * 60 * 60 * 1000,
+                    expiresOnDay: day + Math.max(1, Math.ceil(durationHrs / 24)),
                     targets: [{ kind: 'model', value: sneaker.id }],
                     sourceNewsId: newsId,
                 };
@@ -139,5 +140,5 @@ export const useNewsEngine = () => {
 
         const interval = setInterval(tick, 5000); // Check every 5 seconds
         return () => clearInterval(interval);
-    }, [dispatch]);
+    }, [dispatch, day]);
 };

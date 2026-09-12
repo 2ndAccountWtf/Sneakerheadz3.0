@@ -11,6 +11,8 @@ import StorageScreen from './screens/StorageScreen';
 import StatsScreen from './screens/StatsScreen';
 import CityFeedScreen from './screens/CityFeedScreen';
 import MarketAnalysisScreen from './screens/MarketAnalysisScreen';
+import ArcadeScreen from './screens/ArcadeScreen';
+import QuestsScreen from './screens/QuestsScreen';
 import { Screen } from './types';
 import Layout from './components/Layout';
 import Notification from './components/Notification';
@@ -49,6 +51,10 @@ const ScreenManager: React.FC = () => {
                 return <CityFeedScreen />;
             case Screen.MarketAnalysis:
                 return <MarketAnalysisScreen />;
+            case Screen.Arcade:
+                return <ArcadeScreen />;
+            case Screen.Quests:
+                return <QuestsScreen />;
             default:
                 return <DashboardScreen />;
         }

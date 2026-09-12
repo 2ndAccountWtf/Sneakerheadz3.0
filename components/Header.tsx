@@ -1,59 +1,91 @@
-
 import React from 'react';
 import { useGame } from '../hooks/useGame';
 import { CITIES } from '../data/cities';
-import { MAX_INVENTORY_SIZE, TOTAL_DAYS } from '../constants';
+import { MAX_INVENTORY_SIZE, TOTAL_DAYS, getCredRank } from '../constants';
 
-const Stat: React.FC<{ label: string; value: string | number; color?: string }> = ({ label, value, color = "text-white" }) => (
-    <div className="flex flex-col items-start md:items-center md:flex-row gap-1 md:gap-2 bg-black/40 border border-white/10 px-3 py-1 rounded-sm clip-corner-br">
-        <span className="text-[10px] md:text-xs text-gray-500 font-bold uppercase tracking-wider">{label}</span>
-        <span className={`text-sm md:text-lg font-['Share_Tech_Mono'] font-bold ${color}`}>{value}</span>
+const Gauge: React.FC<{ label: string; value: number; max: number; color: string; icon: string }> = ({
+    label, value, max, color, icon,
+}) => (
+    <div className="flex items-center gap-1.5" title={`${label}: ${value}/${max}`}>
+        <span className="text-[11px] leading-none">{icon}</span>
+        <div className="meter w-10 sm:w-14">
+            <i style={{ width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`, background: color }} />
+        </div>
     </div>
 );
 
+/**
+ * The persistent HUD. Cash and day were the only things surfaced before; the
+ * new survival and reputation stats need to be readable at a glance or the
+ * systems driving them are invisible.
+ */
 const Header: React.FC = () => {
     const { gameState } = useGame();
     const { player, currentCityId, day } = gameState;
 
     const currentCity = CITIES.find(city => city.id === currentCityId);
+    const rank = getCredRank(player.streetCred);
+    const activeBuffs = player.buffs.length;
 
     return (
-        <header className="sticky top-0 z-40 w-full bg-[#05080a]/80 backdrop-blur-md border-b border-cyan-500/20 shadow-lg shadow-cyan-500/5">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-                {/* Left: Branding / Location */}
-                <div className="flex items-center gap-4">
-                    <div className="hidden sm:block text-2xl font-['Orbitron'] font-black italic text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">
-                        SDW
-                    </div>
-                    <div className="h-8 w-[1px] bg-gray-700 hidden sm:block"></div>
-                    <div>
-                        <div className="text-[10px] text-cyan-500/80 uppercase tracking-[0.2em]">Current Location</div>
-                        <div className="text-lg sm:text-xl font-bold text-white uppercase tracking-wide leading-none">
+        <header className="sticky top-0 z-40 w-full bg-[var(--bg)]/92 backdrop-blur-md border-b border-[var(--line)]">
+            <div className="max-w-6xl mx-auto px-3 sm:px-5 h-[var(--header-h)] flex items-center justify-between gap-3">
+                {/* Location */}
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className="font-display text-[var(--accent)] text-sm sm:text-base leading-none hidden xs:inline">SDW</span>
+                    <div className="h-6 w-px bg-[var(--line)] hidden sm:block" />
+                    <div className="min-w-0">
+                        <div className="label leading-none">Day {day}/{TOTAL_DAYS}</div>
+                        <div className="text-sm sm:text-base font-semibold text-white uppercase tracking-wide leading-tight truncate">
                             {currentCity?.name}
                         </div>
                     </div>
                 </div>
 
-                {/* Right: Stats HUD */}
-                <div className="flex items-center gap-2 sm:gap-4">
-                    <Stat label="Day" value={`${day}/${TOTAL_DAYS}`} color="text-yellow-400" />
-                    <Stat label="Cash" value={`$${player.cash.toLocaleString()}`} color="text-green-400" />
-                    <div className="hidden sm:block">
-                         <Stat label="Inv" value={`${player.inventory.length}/${MAX_INVENTORY_SIZE}`} color="text-cyan-300" />
+                {/* Stats */}
+                <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+                    <div className="hidden md:flex items-center gap-3">
+                        <Gauge label="Health" value={player.health} max={100} color="var(--bad)" icon="❤️" />
+                        <Gauge label="Energy" value={player.energy} max={100} color="var(--warn)" icon="⚡" />
+                        {player.heat > 0 && <Gauge label="Heat" value={player.heat} max={100} color="var(--accent-2)" icon="🚨" />}
+                    </div>
+
+                    <div className="hidden sm:flex items-center gap-1.5 chip chip-accent" title={`${rank.title} — ${player.streetCred} street cred`}>
+                        <span>{rank.icon}</span>
+                        <span className="numeric">{player.streetCred}</span>
+                    </div>
+
+                    {activeBuffs > 0 && (
+                        <div className="chip chip-warn hidden lg:flex" title={player.buffs.map(b => b.label).join(' · ')}>
+                            ✦ {activeBuffs}
+                        </div>
+                    )}
+
+                    <div className="text-right leading-none">
+                        <div className="label hidden sm:block">Cash</div>
+                        <div className="numeric text-base sm:text-lg text-[var(--ok)]">
+                            ${player.cash.toLocaleString()}
+                        </div>
+                    </div>
+
+                    <div className="text-right leading-none hidden sm:block">
+                        <div className="label">Bag</div>
+                        <div className="numeric text-base text-[var(--ink)]">
+                            {player.inventory.length}/{MAX_INVENTORY_SIZE}
+                        </div>
                     </div>
                 </div>
             </div>
-            
-            {/* Mobile Inventory Bar */}
-            <div className="sm:hidden h-1 w-full bg-gray-800">
-                <div 
-                    className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 transition-all duration-500" 
-                    style={{ width: `${(player.inventory.length / MAX_INVENTORY_SIZE) * 100}%` }}
-                />
+
+            {/* Compact mobile stat strip */}
+            <div className="md:hidden flex items-center gap-3 px-3 pb-1.5">
+                <Gauge label="Health" value={player.health} max={100} color="var(--bad)" icon="❤️" />
+                <Gauge label="Energy" value={player.energy} max={100} color="var(--warn)" icon="⚡" />
+                <Gauge label="Bag" value={player.inventory.length} max={MAX_INVENTORY_SIZE} color="var(--accent)" icon="📦" />
+                <span className="chip chip-accent ml-auto">{rank.icon} {player.streetCred}</span>
             </div>
         </header>
     );
 };
 
 export default Header;
-    
