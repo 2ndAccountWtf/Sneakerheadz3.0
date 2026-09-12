@@ -1,117 +1,96 @@
-
 import React, { useState } from 'react';
-import type { Sneaker } from '../types';
-import NavButton from './NavButton';
+import type { Sneaker, InventoryItem } from '../types';
 import { useGame } from '../hooks/useGame';
 import { MAX_INVENTORY_SIZE } from '../constants';
+import { getSellPrice } from '../systems/pricing';
 
-interface SneakerCardProps {
+const RARITY_CLASS: Record<Sneaker['rarity'], string> = {
+    Common: 'rarity-common',
+    Uncommon: 'rarity-uncommon',
+    Rare: 'rarity-rare',
+    Legendary: 'rarity-legendary',
+};
+
+/** Store listing: buy with a quantity stepper, sell duplicates you're carrying. */
+export const StoreSneakerCard: React.FC<{
     sneaker: Sneaker;
     price?: number;
     quantity?: number;
-    actionButton?: React.ReactNode;
-    purchasePrice?: number;
-    variant?: 'inventory' | 'store';
-    isFake?: boolean; // Explicitly pass fake status
-}
+    isFake?: boolean;
+    onAnalyse?: () => void;
+}> = ({ sneaker, price, quantity, isFake, onAnalyse }) => {
+    const { gameState, buySneaker } = useGame();
+    const [amount, setAmount] = useState(1);
 
-const getRarityColor = (rarity: Sneaker['rarity']) => {
-    switch (rarity) {
-        case 'Common': return '#9ca3af'; // gray-400
-        case 'Uncommon': return '#4ade80'; // green-400
-        case 'Rare': return '#60a5fa'; // blue-400
-        case 'Legendary': return '#fbbf24'; // amber-400
-        default: return '#ffffff';
-    }
-};
-
-const StoreSneakerCard: React.FC<Omit<SneakerCardProps, 'variant' | 'actionButton' | 'purchasePrice'>> = ({ sneaker, price, quantity, isFake }) => {
-    const { gameState, buySneaker, sellSneaker } = useGame();
-    const [buyAmount, setBuyAmount] = useState(1);
-
-    const isSoldOut = quantity !== undefined && quantity <= 0;
-    const rarityColor = getRarityColor(sneaker.rarity);
-    
-    const ownedItems = gameState.player.inventory.filter(item => item.sneakerId === sneaker.id);
-    const hasOwned = ownedItems.length > 0;
-
-    const maxCanBuy = Math.min(quantity || 0, MAX_INVENTORY_SIZE - gameState.player.inventory.length);
-    const canBuy = price && !isSoldOut && (price * buyAmount <= gameState.player.cash) && buyAmount <= maxCanBuy && maxCanBuy > 0;
-
-    const handleBuy = () => {
-        if (price && canBuy) {
-            buySneaker(sneaker.id, price, buyAmount, isFake);
-            setBuyAmount(1);
-        }
-    };
+    const soldOut = quantity !== undefined && quantity <= 0;
+    const owned = gameState.player.inventory.filter(i => i.sneakerId === sneaker.id);
+    const room = MAX_INVENTORY_SIZE - gameState.player.inventory.length;
+    const maxBuy = Math.max(0, Math.min(quantity ?? 0, room));
+    const canBuy = !!price && !soldOut && maxBuy > 0 && price * amount <= gameState.player.cash && amount <= maxBuy;
 
     return (
-        <div className="group relative w-full bg-gray-900/80 backdrop-blur-sm border border-gray-700 hover:border-gray-500 transition-all duration-300 overflow-hidden flex flex-col h-[24rem] rounded-sm shadow-lg hover:shadow-cyan-500/10">
-            {/* Rarity Line */}
-            <div className="h-1 w-full" style={{ backgroundColor: rarityColor }} />
+        <div className={`panel ${RARITY_CLASS[sneaker.rarity]} flex flex-col h-full group`}>
+            <div className="h-[3px] w-full" style={{ background: 'var(--rarity)' }} />
 
-            {/* Image Area */}
-            <div className="relative h-40 w-full bg-black/50 flex items-center justify-center p-4 overflow-hidden">
-                <img 
-                    src={sneaker.imageUrl} 
-                    alt={sneaker.name} 
-                    className="max-h-full max-w-full object-contain transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-3 filter drop-shadow-xl" 
+            <div className="relative h-32 bg-[var(--bg-sunken)] flex items-center justify-center p-3 overflow-hidden">
+                <img
+                    src={sneaker.imageUrl}
+                    alt={sneaker.name}
+                    loading="lazy"
+                    className="max-h-full max-w-full object-contain transition-transform duration-500 group-hover:scale-105"
                 />
-                {isSoldOut && (
-                    <div className="absolute inset-0 bg-black/80 flex items-center justify-center backdrop-blur-sm">
-                        <span className="text-3xl font-black text-red-500 -rotate-12 border-4 border-red-500 p-2">SOLD OUT</span>
+                {soldOut && (
+                    <div className="absolute inset-0 bg-black/85 flex items-center justify-center">
+                        <span className="font-display text-sm text-[var(--bad)] border border-[var(--bad)] px-2 py-1 -rotate-6">
+                            SOLD OUT
+                        </span>
                     </div>
                 )}
-                <div className="absolute top-2 right-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-black/80 border border-gray-700 text-gray-300 rounded-full">
-                        {sneaker.rarity}
-                    </span>
-                </div>
+                <span
+                    className="absolute top-2 right-2 chip !text-[9px] !py-0.5"
+                    style={{ borderColor: 'var(--rarity)', color: 'var(--rarity)' }}
+                >
+                    {sneaker.rarity}
+                </span>
+                {isFake && <span className="absolute top-2 left-2 chip chip-bad !text-[9px] !py-0.5">⚠ REP</span>}
             </div>
 
-            {/* Info Area */}
-            <div className="flex-grow p-4 flex flex-col justify-between">
+            <div className="p-3 flex flex-col flex-grow gap-2">
                 <div>
-                    <h3 className="text-lg font-bold font-['Orbitron'] leading-tight text-white mb-1 truncate" title={sneaker.name}>
+                    <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2 min-h-[2.2em]" title={sneaker.name}>
                         {sneaker.name}
                     </h3>
-                    <div className="flex justify-between items-center">
-                         <span className={`text-2xl font-bold font-['Space_Mono'] ${price ? 'text-green-400' : 'text-gray-500'}`}>
-                            ${price?.toLocaleString() ?? '---'}
+                    <div className="flex items-baseline justify-between mt-1">
+                        <span className={`numeric text-lg ${price ? 'text-[var(--ok)]' : 'text-[var(--ink-faint)]'}`}>
+                            ${price?.toLocaleString() ?? '—'}
                         </span>
-                        {hasOwned && <span className="text-xs text-cyan-400 bg-cyan-900/30 px-2 py-1 rounded">Owned: {ownedItems.length}</span>}
+                        {owned.length > 0 && <span className="chip chip-accent !text-[9px] !py-0.5">Own {owned.length}</span>}
                     </div>
                 </div>
 
-                {/* Actions */}
-                <div className="space-y-3 mt-4">
-                    {!isSoldOut && (
-                        <div className="flex items-center gap-2">
-                            <div className="flex items-center bg-black border border-gray-700 rounded overflow-hidden">
-                                <button 
-                                    onClick={() => setBuyAmount(Math.max(1, buyAmount - 1))}
-                                    className="px-3 py-1 hover:bg-gray-800 text-gray-400 transition-colors"
-                                >-</button>
-                                <span className="w-8 text-center font-bold text-sm">{buyAmount}</span>
-                                <button 
-                                    onClick={() => buyAmount < maxCanBuy && setBuyAmount(buyAmount + 1)}
-                                    className="px-3 py-1 hover:bg-gray-800 text-gray-400 transition-colors"
+                <div className="mt-auto space-y-2">
+                    {!soldOut && (
+                        <div className="flex items-stretch gap-1.5">
+                            <div className="flex items-center border border-[var(--line)] bg-[var(--bg-sunken)]">
+                                <button
+                                    className="px-2.5 text-[var(--ink-dim)] hover:text-white"
+                                    onClick={() => setAmount(a => Math.max(1, a - 1))}
+                                    aria-label="Fewer"
+                                >−</button>
+                                <span className="numeric w-6 text-center text-xs">{amount}</span>
+                                <button
+                                    className="px-2.5 text-[var(--ink-dim)] hover:text-white"
+                                    onClick={() => setAmount(a => Math.min(maxBuy || 1, a + 1))}
+                                    aria-label="More"
                                 >+</button>
                             </div>
-                            <NavButton onClick={handleBuy} disabled={!canBuy} className="flex-grow text-xs py-2" variant="primary">
-                                Buy
-                            </NavButton>
+                            <button className="btn btn-primary btn-sm flex-1" disabled={!canBuy} onClick={() => { buySneaker(sneaker.id, price!, amount, isFake); setAmount(1); }}>
+                                {room <= 0 ? 'Bag Full' : 'Buy'}
+                            </button>
                         </div>
                     )}
-                    
-                    {hasOwned && price && (
-                        <NavButton 
-                            onClick={() => sellSneaker(ownedItems[0].instanceId, price)} 
-                            className="w-full text-xs py-2" 
-                            variant="danger"
-                        >
-                            Sell One
-                        </NavButton>
+                    {onAnalyse && (
+                        <button className="btn btn-ghost btn-sm w-full" onClick={onAnalyse}>Chart</button>
                     )}
                 </div>
             </div>
@@ -119,60 +98,81 @@ const StoreSneakerCard: React.FC<Omit<SneakerCardProps, 'variant' | 'actionButto
     );
 };
 
-const InventorySneakerCard: React.FC<Omit<SneakerCardProps, 'variant'>> = ({ sneaker, price, actionButton, purchasePrice, isFake }) => {
-    const rarityColor = getRarityColor(sneaker.rarity);
-    const profit = price !== undefined && purchasePrice !== undefined ? price - purchasePrice : null;
+/** Bag listing: shows true resale value, condition tags and blessing multipliers. */
+export const InventorySneakerCard: React.FC<{
+    sneaker: Sneaker;
+    item: InventoryItem;
+    marketPrice?: number;
+    onSell?: () => void;
+    onAnalyse?: () => void;
+}> = ({ sneaker, item, marketPrice, onSell, onAnalyse }) => {
+    const { gameState } = useGame();
+    const sellPrice = marketPrice !== undefined ? getSellPrice(marketPrice, item, gameState.player) : undefined;
+    const profit = sellPrice !== undefined ? sellPrice - item.purchasePrice : null;
+    const blessed = (item.valueMultiplier ?? 1) > 1.01;
 
     return (
-        <div className="group relative bg-gray-900/80 backdrop-blur-sm border border-gray-700 hover:border-cyan-500/50 transition-all duration-300 p-4 flex flex-col h-full">
-             <div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: rarityColor }} />
-             
-             {isFake && (
-                <div className="absolute top-2 right-2 z-20">
-                    <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded border border-red-400 animate-pulse">
-                        ⚠ REPLICA
-                    </span>
-                </div>
-             )}
+        <div className={`panel ${RARITY_CLASS[sneaker.rarity]} flex flex-col h-full`}>
+            <div className="h-[3px] w-full" style={{ background: 'var(--rarity)' }} />
 
-             <div className="relative h-32 mb-4 bg-black/30 rounded-lg flex items-center justify-center p-2 overflow-hidden">
-                <img src={sneaker.imageUrl} alt={sneaker.name} className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-500" />
-             </div>
-
-             <h3 className="font-bold text-white truncate mb-2">{sneaker.name}</h3>
-             <div className="text-xs space-y-1 mb-4 text-gray-400">
-                <div className="flex justify-between">
-                    <span>Market:</span>
-                    <span className="text-white font-bold">${price?.toLocaleString() ?? '---'}</span>
-                </div>
-                {purchasePrice !== undefined && (
-                    <div className="flex justify-between">
-                        <span>Paid:</span>
-                        <span>${purchasePrice.toLocaleString()}</span>
-                    </div>
-                )}
-                {profit !== null && (
-                    <div className="flex justify-between border-t border-gray-800 pt-1 mt-1">
-                        <span>P/L:</span>
-                        <span className={`${profit >= 0 ? 'text-green-400' : 'text-red-400'} font-bold`}>
-                            {profit >= 0 ? '+' : ''}${profit.toLocaleString()}
+            <div className="relative h-28 bg-[var(--bg-sunken)] flex items-center justify-center p-3 overflow-hidden">
+                <img src={sneaker.imageUrl} alt={sneaker.name} loading="lazy" className="max-h-full max-w-full object-contain" />
+                <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+                    {item.isFake && <span className="chip chip-bad !text-[9px] !py-0.5">⚠ REPLICA</span>}
+                    {blessed && (
+                        <span className="chip !text-[9px] !py-0.5" style={{ borderColor: 'var(--legend)', color: 'var(--legend)' }}>
+                            ✦ ×{(item.valueMultiplier ?? 1).toFixed(1)}
                         </span>
-                    </div>
-                )}
-             </div>
+                    )}
+                    {item.condition?.map(c => (
+                        <span key={c} className="chip chip-warn !text-[9px] !py-0.5">{c}</span>
+                    ))}
+                </div>
+            </div>
 
-             <div className="mt-auto">
-                {actionButton}
-             </div>
+            <div className="p-3 flex flex-col flex-grow gap-2">
+                <h3 className="text-sm font-semibold text-white leading-tight line-clamp-2 min-h-[2.2em]">{sneaker.name}</h3>
+
+                <dl className="text-[11px] font-mono space-y-0.5 text-[var(--ink-dim)]">
+                    <div className="flex justify-between">
+                        <dt>Sells for</dt>
+                        <dd className="text-white numeric">{sellPrice !== undefined ? `$${sellPrice.toLocaleString()}` : '—'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                        <dt>Paid</dt>
+                        <dd className="numeric">${item.purchasePrice.toLocaleString()}</dd>
+                    </div>
+                    {profit !== null && (
+                        <div className="flex justify-between border-t border-[var(--line)] pt-0.5 mt-0.5">
+                            <dt>P/L</dt>
+                            <dd className="numeric font-bold" style={{ color: profit >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                                {profit >= 0 ? '+' : '−'}${Math.abs(profit).toLocaleString()}
+                            </dd>
+                        </div>
+                    )}
+                </dl>
+
+                <div className="mt-auto flex gap-1.5">
+                    {onAnalyse && <button className="btn btn-ghost btn-sm" onClick={onAnalyse}>Chart</button>}
+                    {onSell && (
+                        <button className="btn btn-primary btn-sm flex-1" disabled={sellPrice === undefined} onClick={onSell}>
+                            Sell
+                        </button>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };
 
-const SneakerCard: React.FC<SneakerCardProps> = ({ variant = 'inventory', ...props }) => {
-    if (variant === 'store') {
-        return <StoreSneakerCard {...props} />;
-    }
-    return <InventorySneakerCard {...props} />;
-};
+/** Legacy default export kept so the store grid keeps working unchanged. */
+const SneakerCard: React.FC<{
+    sneaker: Sneaker;
+    price?: number;
+    quantity?: number;
+    isFake?: boolean;
+    variant?: 'store' | 'inventory';
+    onAnalyse?: () => void;
+}> = ({ variant = 'store', ...props }) => <StoreSneakerCard {...props} />;
 
 export default SneakerCard;

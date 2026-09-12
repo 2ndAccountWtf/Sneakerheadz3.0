@@ -1,140 +1,195 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useGame } from '../hooks/useGame';
 import { Screen, AmpmItem } from '../types';
 import { AMPM_ITEMS } from '../data/ampmItems';
-import NavButton from '../components/NavButton';
+import ScreenHeader from '../components/ScreenHeader';
 import { useAmpmWorker } from '../hooks/useAmpmWorker';
-import { AmbientNpcProfile } from '../types/interactions';
+import { ampmGreeting, ampmChatter, ampmWeaponsTalk, ampmAfterPurchase } from '../data/ampm/dialogue';
+import { isPartyMode, rollAmpmEvent, AMPM_EVENT_CHANCE, AMPM_PARTY_EVENT_CHANCE } from '../systems/events/ampmEvents';
 
-const AmpmItemCard: React.FC<{ item: AmpmItem, onBuy: () => void, disabled: boolean }> = ({ item, onBuy, disabled }) => {
-    return (
-        <div className="bg-gray-800 border border-cyan-400/30 p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center text-left">
-            <div className="flex-grow mb-4 sm:mb-0">
-                <h3 className="text-xl font-bold text-white">{item.name}</h3>
-                <p className="text-gray-400 text-sm">{item.description}</p>
-                <p className="text-xs text-yellow-500 mt-1">{item.effect}</p>
-            </div>
-            <div className="flex-shrink-0 flex flex-col items-start sm:items-end w-full sm:w-auto">
-                <p className="text-2xl font-bold text-green-400 mb-2">${item.price}</p>
-                 <NavButton onClick={onBuy} disabled={disabled} className="px-4 py-1 text-sm w-full sm:w-auto">
-                    Buy
-                </NavButton>
-            </div>
-        </div>
-    );
-};
-
-const CATEGORIES: Record<string, string> = {
+const CATEGORY_ICON: Record<string, string> = {
     'Food & Drinks': '🍔',
     'Tools & Gear': '🛠️',
     'Local Specialties': '✨',
 };
 
+/**
+ * The AM/PM. The clerk now actually talks — a greeting on entry, ambient
+ * chatter as you browse, a line after every purchase — and the store can
+ * descend into a 3am Tel Aviv rave, which comes with real discounts and real
+ * consequences.
+ */
 const AmpmScreen: React.FC = () => {
-    const { gameState, changeScreen, startInteraction, buyStorageItem } = useGame();
-    const { player, currentCityId } = gameState;
+    const { gameState, startInteraction, buyStorageItem, dispatch } = useGame();
+    const { player, currentCityId, day } = gameState;
     const [selectedCategory, setSelectedCategory] = useState<string>('Food & Drinks');
-    
-    // Get the active worker for this store visit
-    const worker = useAmpmWorker();
 
-    // Trigger a random interaction on store entry
+    const worker = useAmpmWorker();
+    const partyMode = useMemo(() => isPartyMode(currentCityId, day), [currentCityId, day]);
+
+    const [line, setLine] = useState(() => ampmGreeting(currentCityId, partyMode));
+    const [event, setEvent] = useState<null | { text: string; tone: 'good' | 'bad' | 'neutral' }>(null);
+    const enteredRef = useRef('');
+
+    // Greeting + possible event on entry, once per city-day visit.
     useEffect(() => {
-        if (worker && worker.scenarios.length > 0 && Math.random() < 0.3) { // 30% chance on entry
+        const key = `${currentCityId}-${day}`;
+        if (enteredRef.current === key) return;
+        enteredRef.current = key;
+
+        setLine(ampmGreeting(currentCityId, partyMode));
+
+        if (Math.random() < (partyMode ? AMPM_PARTY_EVENT_CHANCE : AMPM_EVENT_CHANCE)) {
+            const rolled = rollAmpmEvent(partyMode);
+            setEvent({ text: rolled.text, tone: rolled.tone });
+            if (rolled.outcomes.length) {
+                dispatch({ type: 'APPLY_OUTCOMES', payload: { outcomes: rolled.outcomes, sourceName: 'AM/PM' } });
+            }
+        }
+
+        // A scripted clerk scenario still fires occasionally on top of the banter.
+        if (worker && worker.scenarios.length > 0 && Math.random() < 0.22) {
             const scenario = worker.scenarios[Math.floor(Math.random() * worker.scenarios.length)];
             startInteraction(worker.id, scenario.id);
         }
-    }, [worker, startInteraction]);
+    }, [currentCityId, day, partyMode, worker, startInteraction, dispatch]);
 
-    const availableItems = useMemo(() => {
-        return AMPM_ITEMS.filter(item => !item.cities || item.cities.includes(currentCityId));
-    }, [currentCityId]);
+    // Ambient chatter on a slow loop.
+    useEffect(() => {
+        const t = setInterval(() => setLine(ampmChatter(currentCityId, partyMode)), 9000);
+        return () => clearInterval(t);
+    }, [currentCityId, partyMode]);
 
-    const groupedItems = useMemo(() => {
-         return availableItems.reduce((acc, item) => {
-            const category = item.category;
-            if (!acc[category]) {
-                acc[category] = [];
-            }
-            acc[category].push(item);
-            return acc;
-        }, {} as Record<string, AmpmItem[]>);
-    }, [availableItems]);
+    const availableItems = useMemo(
+        () => AMPM_ITEMS.filter(item => !item.cities || item.cities.includes(currentCityId)),
+        [currentCityId],
+    );
 
-    const availableCategories = Object.keys(groupedItems);
-    
-    if (!availableCategories.includes(selectedCategory) && availableCategories.length > 0) {
-        setSelectedCategory(availableCategories[0]);
-    }
+    const groupedItems = useMemo(() => availableItems.reduce((acc, item) => {
+        (acc[item.category] ||= []).push(item);
+        return acc;
+    }, {} as Record<string, AmpmItem[]>), [availableItems]);
+
+    const categories = Object.keys(groupedItems);
+    const activeCategory = categories.includes(selectedCategory) ? selectedCategory : categories[0];
 
     const handleBuy = (item: AmpmItem) => {
         buyStorageItem(item.id, item.price);
-        // Trigger a random interaction after purchase
-        if (worker && worker.scenarios.length > 0 && Math.random() < 0.5) { // 50% chance on purchase
-            const scenario = worker.scenarios[Math.floor(Math.random() * worker.scenarios.length)];
-            startInteraction(worker.id, scenario.id);
+        setLine(item.category === 'Tools & Gear' ? ampmWeaponsTalk() : ampmAfterPurchase(partyMode));
+
+        if (Math.random() < (partyMode ? AMPM_PARTY_EVENT_CHANCE : AMPM_EVENT_CHANCE) * 0.6) {
+            const rolled = rollAmpmEvent(partyMode);
+            setEvent({ text: rolled.text, tone: rolled.tone });
+            if (rolled.outcomes.length) {
+                dispatch({ type: 'APPLY_OUTCOMES', payload: { outcomes: rolled.outcomes, sourceName: 'AM/PM' } });
+            }
         }
     };
 
     return (
-        <div className="bg-gray-900 p-2 sm:p-4">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-4xl font-bold text-cyan-400 uppercase tracking-widest">AM/PM</h1>
-                <div className="flex items-center gap-4">
-                    <NavButton onClick={() => changeScreen(Screen.Dashboard)}>Back to City</NavButton>
-                </div>
-            </div>
-
-            {/* Worker Display */}
-            {worker && (
-                 <div className="flex items-center gap-4 p-4 mb-6 bg-gray-800/50 border border-cyan-500/20">
-                    <img src={worker.portraitUrl} alt={worker.name} className="w-16 h-16 object-cover border-2 border-cyan-700" />
-                    <div>
-                        <p className="text-gray-400 text-sm">On Duty:</p>
-                        <p className="text-xl font-bold text-white">{worker.name}</p>
-                    </div>
-                </div>
+        <div className={`pb-6 ${partyMode ? 'relative' : ''}`}>
+            {partyMode && (
+                <div
+                    className="fixed inset-0 z-0 pointer-events-none"
+                    style={{ background: 'radial-gradient(ellipse at 50% 0%, rgba(255,46,136,0.18), transparent 60%)', animation: 'pulse-glow 1.4s ease-in-out infinite' }}
+                />
             )}
 
-            <div className="flex items-center justify-center flex-wrap gap-2 mb-6 border-b-2 border-cyan-500/20 pb-4">
-                {availableCategories.map(category => {
-                    const isActive = selectedCategory === category;
-                    return (
+            <div className="relative">
+                <ScreenHeader
+                    title={partyMode ? <>AM/PM <span className="accent">AFTER DARK</span></> : <>AM/<span className="accent">PM</span></>}
+                    subtitle={partyMode ? 'The clerk has decided this is a nightclub now' : 'Snacks, gear, and questionably sourced hummus'}
+                    back={Screen.Dashboard}
+                />
+
+                {/* Clerk */}
+                {worker && (
+                    <div className={`panel p-3 mb-3 flex items-start gap-3 ${partyMode ? 'border-[var(--accent-2)]' : ''}`}>
+                        <img
+                            src={worker.portraitUrl}
+                            alt={worker.name}
+                            className="w-14 h-14 object-cover border border-[var(--line-bright)] flex-shrink-0 saturate-50"
+                        />
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="label">On duty</span>
+                                <span className="text-sm font-semibold text-white">{worker.name}</span>
+                                {partyMode && <span className="chip chip-bad animate-pulse">🔊 MUSIC AT MAXIMUM</span>}
+                            </div>
+                            <p className="text-sm text-[var(--ink)] mt-1 leading-snug italic">“{line}”</p>
+                        </div>
+                        {worker.scenarios.length > 0 && (
+                            <button
+                                className="btn btn-ghost btn-sm flex-shrink-0"
+                                onClick={() => startInteraction(worker.id, worker.scenarios[Math.floor(Math.random() * worker.scenarios.length)].id)}
+                            >
+                                Talk
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {/* Ambient event */}
+                {event && (
+                    <div
+                        className="panel p-3 mb-3 flex items-start gap-2.5 animate-rise"
+                        style={{ borderColor: event.tone === 'good' ? 'var(--ok)' : event.tone === 'bad' ? 'var(--bad)' : 'var(--line-bright)' }}
+                    >
+                        <span className="flex-shrink-0">{event.tone === 'good' ? '✨' : event.tone === 'bad' ? '⚠️' : '👀'}</span>
+                        <p className="text-sm flex-1" style={{ color: event.tone === 'good' ? 'var(--ok)' : event.tone === 'bad' ? 'var(--bad)' : 'var(--ink-dim)' }}>
+                            {event.text}
+                        </p>
+                        <button className="label hover:text-white flex-shrink-0" onClick={() => setEvent(null)}>✕</button>
+                    </div>
+                )}
+
+                {/* Categories */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                    {categories.map(category => (
                         <button
                             key={category}
                             onClick={() => setSelectedCategory(category)}
-                            className={`
-                                px-4 py-2 text-lg font-bold rounded-md transition-all duration-200
-                                flex items-center space-x-2
-                                ${isActive
-                                    ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/30'
-                                    : 'bg-gray-800 text-cyan-400 hover:bg-gray-700/50'
-                                }
-                            `}
+                            className={`btn btn-sm ${activeCategory === category ? 'btn-primary' : ''}`}
                         >
-                            <span>{CATEGORIES[category as keyof typeof CATEGORIES]}</span>
-                            <span>{category}</span>
+                            {CATEGORY_ICON[category] ?? '•'} {category}
                         </button>
-                    );
-                })}
-            </div>
-
-            <div className="space-y-4">
-                {(groupedItems[selectedCategory] || []).map(item => (
-                    <AmpmItemCard
-                        key={item.id}
-                        item={item}
-                        onBuy={() => handleBuy(item)}
-                        disabled={player.cash < item.price}
-                    />
-                ))}
-            </div>
-
-            {(!groupedItems[selectedCategory] || groupedItems[selectedCategory].length === 0) && (
-                <div className="text-center text-gray-500 mt-8 p-4">
-                    <p>Nothing in this section.</p>
+                    ))}
                 </div>
-            )}
+
+                {/* Items */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {(groupedItems[activeCategory] ?? []).map(item => {
+                        const price = partyMode ? Math.max(1, Math.round(item.price * 0.75)) : item.price;
+                        const afford = player.cash >= price;
+                        return (
+                            <div key={item.id} className="panel p-3 flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <h3 className="text-sm font-semibold text-white leading-tight">{item.name}</h3>
+                                    <p className="text-xs text-[var(--ink-dim)] mt-1 leading-snug">{item.description}</p>
+                                    <span className="chip chip-warn mt-2">{item.effect}</span>
+                                </div>
+                                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                                    <div className="text-right">
+                                        {partyMode && <div className="text-[10px] line-through text-[var(--ink-faint)] numeric">${item.price}</div>}
+                                        <div className="numeric text-lg text-[var(--ok)]">${price}</div>
+                                    </div>
+                                    <button className="btn btn-primary btn-sm" disabled={!afford} onClick={() => handleBuy(item)}>
+                                        Buy
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {(groupedItems[activeCategory] ?? []).length === 0 && (
+                    <div className="panel p-8 text-center text-[var(--ink-dim)]">Nothing in this section.</div>
+                )}
+
+                <p className="label text-center mt-5">
+                    Nothing you eat here has a fixed effect. That is the point.
+                </p>
+            </div>
         </div>
     );
 };
