@@ -12,6 +12,8 @@ const GENERIC_PATRON_POOL = AMBIENT_NPCS.filter(npc => [
     'wiz-k',
     'gutter-gabe',
     'bibi',
+    // ADC turns up wherever commerce is happening, which is the whole map.
+    'adc',
 ].includes(npc.id));
 
 export function useStoreNPCs(storeId: string, npcs: ShoeStoreNpcProps, behavior: BehaviorProps): {

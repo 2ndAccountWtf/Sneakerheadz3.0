@@ -2,6 +2,36 @@ import type { SoleNetNpcProfile } from '../types/social';
 
 export const SOLE_NET_NPCS: SoleNetNpcProfile[] = [
     {
+        id: 'npc-adc',
+        handle: '@ADC_Official',
+        avatarUrl: 'https://picsum.photos/seed/adc/100',
+        // 'chaos-agent' so her posts land in the Unhinged filter, where they belong.
+        type: 'chaos-agent',
+        messagePool: {
+            chatter: [
+                "Thread. 1/47.",
+                "Nobody is talking about what {sneaker_name} does to the people who don't have it.",
+                "I have been asked to stop posting about {city_name}. Consider who benefits from that request.",
+                "Reminder that every price is a decision somebody made. About you. Personally.",
+                "Was refused a discount today purely on the basis that I had not bought anything.",
+                "If you are not uncomfortable you are not paying attention. If you are uncomfortable, that is also the system.",
+                "Have you considered the systemic implications of that?",
+                "I'm organising. I don't know what yet. But I'm organising.",
+                "Update: the committee has formed a second committee. Progress.",
+                "The {sneaker_rarity} designation is itself a hierarchy. I will be raising this.",
+                "Someone in {city_name} said 'it's just shoes' to me today and I have not recovered.",
+                "Correction to my earlier thread: it was a different war. The point stands.",
+            ],
+            rumors: [],
+            dms: [
+                "Hi! Quick one — you've been identified as economically advantaged. I'll send over the paperwork.",
+                "Following up on the solidarity contribution. And the follow-up to the follow-up.",
+                "I'm putting together a working group. There is catering. There is no agenda.",
+                "You were seen entering a store. I'm not accusing you of anything. I'm documenting it.",
+            ],
+        },
+    },
+    {
         id: 'npc-prophet',
         handle: '@SneakerProphet',
         avatarUrl: 'https://picsum.photos/seed/prophet/100',

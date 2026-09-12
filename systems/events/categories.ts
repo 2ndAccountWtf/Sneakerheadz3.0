@@ -11,7 +11,10 @@ export type EventCategory =
   | "hustle"        // street basketball wager
   | "boxman"        // back-alley mystery box
   | "authenticator" // legit-check booth
-  | "podcast";      // Bro Jogan drags you onto the show
+  | "podcast"       // Bro Jogan drags you onto the show
+  | "cart-heist"    // The Game escapes downhill on a shopping cart
+  | "hijack"        // Flight 404 — Yasser takes the plane mid-flight
+  | "adc";          // the Activist Department of Complaints finds you
 
 export interface TravelEventStub {
     id: string;

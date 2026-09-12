@@ -37,24 +37,30 @@ export const weightsConfig: WeightsConfig = {
     { id: 'boxman', weight: 14 },
     { id: 'authenticator', weight: 12 },
     { id: 'podcast', weight: 8 },
+    { id: 'cart-heist', weight: 13 },
+    // ADC turns up constantly. That is the entire point of ADC.
+    { id: 'adc', weight: 26 },
   ],
   rare: [
-    { id: 'rare-chaos', weight: 100 },
+    { id: 'rare-chaos', weight: 55 },
+    // You are already on a plane when you travel, so this is the one event
+    // that could only ever happen here.
+    { id: 'hijack', weight: 45 },
   ],
   bias: {
     byCity: {
       // Where each kind of trouble actually lives.
       'new-york': { snatch: 8, hustle: 6, boxman: 4 },
-      'los-angeles': { podcast: 8, authenticator: 4, snatch: 4 },
+      'los-angeles': { podcast: 8, authenticator: 4, snatch: 4, adc: 8 },
       'chicago': { hustle: 10, mugging: 4 },
       'tel-aviv': { grandma: 8, boxman: 6 },
       'tokyo': { authenticator: 8, boxman: -4 },
-      'paris': { customs: 8, hustle: -8 },
+      'paris': { customs: 8, hustle: -8, adc: 6 },
     },
     byTime: {
-      night: { mugging: 10, snatch: 8, scalper: -5, authenticator: -6 },
+      night: { mugging: 10, snatch: 8, scalper: -5, authenticator: -6, adc: -10, 'cart-heist': 6 },
       morning: { customs: 5, lucky: 5, hustle: 4 },
-      afternoon: { hustle: 6, podcast: 3 },
+      afternoon: { hustle: 6, podcast: 3, adc: 8, 'cart-heist': 5 },
       evening: { boxman: 5, podcast: 4 },
     },
   },

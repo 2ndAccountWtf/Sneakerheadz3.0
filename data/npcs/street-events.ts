@@ -170,6 +170,97 @@ export const STREET_EVENTS: AmbientNpcProfile = {
             },
         },
 
+
+        // --- THE CART HEIST (downhill chase) ---
+        {
+            id: 'cart-heist',
+            startNode: 'intro',
+            nodes: {
+                intro: {
+                    npcLine: 'You hear the wheels before you see him.\n\nThe Game has your box under one arm and a stolen AM/PM shopping cart under the rest of him, and the street ahead of you goes downhill for a very long way.\n\nThe Game: "RESPECT THE GRIND!"',
+                    choices: [
+                        { playerLine: 'Go after him.', next: 'chase' },
+                        { playerLine: 'Watch him hit the first parked car.', next: 'watch' },
+                        { playerLine: 'Shout something about his mixtape.', next: 'taunt' },
+                    ],
+                },
+                chase: {
+                    npcLine: 'You push off. The hill does the rest.',
+                    outcomes: [
+                        { type: 'miniGame', game: 'cart-race', title: 'Downhill', config: { thief: 'The Game' }, description: 'The chase is on.' },
+                        { type: 'inventoryChange', condition: 'win', add: [{ kind: 'item', value: 'random-rare', qty: 1 }], description: 'You get the box back, and he was carrying someone else\'s too.' },
+                        { type: 'streetCred', condition: 'win', change: 11, description: 'The whole street watched you run down a shopping cart.' },
+                        { type: 'inventoryChange', condition: 'lose', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'The box is gone. So is the cart. So is he.' },
+                        { type: 'stat_change', condition: 'lose', payload: { stat: 'health', value: -12 }, description: 'You went over the handlebars of something.' },
+                    ],
+                },
+                watch: {
+                    npcLine: 'He hits the first parked car. The cart keeps going without him. He gets up, retrieves it, and continues, slightly slower.',
+                    choices: [
+                        { playerLine: 'Fine. NOW go after him.', next: 'chase' },
+                        { playerLine: 'Let him have it.', next: 'concede' },
+                    ],
+                },
+                taunt: {
+                    npcLine: 'You shout that nobody has ever heard the mixtape. He brakes — with his feet, on a hill, which does not work — and comes back to argue about it.',
+                    outcomes: [
+                        { type: 'inventoryChange', add: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'He hands the box back mid-argument without noticing.' },
+                        { type: 'streetCred', change: 4, description: 'You beat him with words, which he did not see coming.' },
+                        { type: 'notification', message: 'He leaves still listing the features of the mixtape.', description: '' },
+                    ],
+                },
+                concede: {
+                    npcLine: 'You let him go. He looks back twice, disappointed nobody is chasing him.',
+                    outcomes: [
+                        { type: 'inventoryChange', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'Gone.' },
+                        { type: 'stat_change', payload: { stat: 'energy', value: 6 }, description: 'You did, at least, not run down a hill.' },
+                    ],
+                },
+            },
+        },
+
+        // --- FLIGHT 404 (mid-air hijack) ---
+        {
+            id: 'flight-404',
+            startNode: 'intro',
+            nodes: {
+                intro: {
+                    npcLine: 'Somewhere over the Mediterranean the seatbelt sign goes off and a man stands up at the front of the cabin holding a megaphone he brought through security.\n\nYasser Abbasfat: "NOBODY MOVE! THIS AIRCRAFT IS NOW... IT IS NOW PART OF THE STRUGGLE!"\n\nA flight attendant sighs. Someone in 14C keeps eating.',
+                    choices: [
+                        { playerLine: 'Get up.', next: 'act' },
+                        { playerLine: 'Stay seated like a reasonable person.', next: 'sit' },
+                        { playerLine: '"Part of the WHAT?"', next: 'question' },
+                    ],
+                },
+                question: {
+                    npcLine: 'Yasser: "THE STRUGGLE! IT IS A SYSTEM! THE WHOLE THING IS A SYSTEM!"\n\nHe has not said what the system is. He does not appear to be planning to.',
+                    choices: [
+                        { playerLine: 'Right. Get up.', next: 'act' },
+                        { playerLine: 'Sit back down.', next: 'sit' },
+                    ],
+                },
+                act: {
+                    npcLine: 'You unbuckle. The man in 14C wishes you luck without looking up.',
+                    outcomes: [
+                        { type: 'miniGame', game: 'flight-404', title: 'Flight 404', description: 'You start walking toward the front.' },
+                        { type: 'streetCred', condition: 'win', change: 30, description: 'You personally ended a hijacking. It is on every feed.' },
+                        { type: 'inventoryChange', condition: 'win', add: [{ kind: 'currency', value: 'cash', qty: 2200 }], description: 'The airline settles quietly and quickly.' },
+                        { type: 'statusEffect', condition: 'win', effect: 'protection', duration: '72h', label: 'Air Marshal Energy', description: 'Nobody tries you for a while.' },
+                        { type: 'bibiApproval', condition: 'win', change: 18, description: 'Decisive action. He notices decisive action.' },
+                        { type: 'stat_change', condition: 'lose', payload: { stat: 'health', value: -30 }, description: 'You are subdued with a drinks trolley.' },
+                        { type: 'streetCred', condition: 'lose', change: -4, description: 'The footage is not flattering.' },
+                    ],
+                },
+                sit: {
+                    npcLine: 'You stay seated. Ninety minutes later the plane lands normally. Yasser is escorted off still explaining. The airline gives everyone a voucher.',
+                    outcomes: [
+                        { type: 'inventoryChange', add: [{ kind: 'currency', value: 'cash', qty: 120 }], description: 'A travel voucher, redeemed for cash at a loss.' },
+                        { type: 'notification', message: 'You did nothing and were rewarded. This is the correct lesson to take from air travel.', description: '' },
+                    ],
+                },
+            },
+        },
+
         // --- THE SCALPER STING ---
         {
             id: 'scalper-sting',

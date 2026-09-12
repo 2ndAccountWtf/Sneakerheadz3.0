@@ -53,6 +53,22 @@ const eventPool: Record<EventCategory, ResolvedEvent[]> = {
     podcast: [
         { npcId: BRO_JOGAN_PROFILE.id, scenarioId: 'hypecast-roulette' },
     ],
+    'cart-heist': [
+        { npcId: 'street-events', scenarioId: 'cart-heist' },
+    ],
+    hijack: [
+        { npcId: 'street-events', scenarioId: 'flight-404' },
+    ],
+    adc: [
+        { npcId: 'adc', scenarioId: 'adc-protest' },
+        { npcId: 'adc', scenarioId: 'adc-protest-2' },
+        { npcId: 'adc', scenarioId: 'adc-protest-3' },
+        { npcId: 'adc', scenarioId: 'adc-taxation' },
+        { npcId: 'adc', scenarioId: 'adc-boycott' },
+        { npcId: 'adc', scenarioId: 'adc-minigame' },
+        { npcId: 'adc', scenarioId: 'adc-yasser-alliance' },
+        { npcId: 'adc', scenarioId: 'adc-vs-bibi' },
+    ],
 };
 
 export function resolveEventStub(stub: TravelEventStub, context: TravelContext): ResolvedEvent | null {

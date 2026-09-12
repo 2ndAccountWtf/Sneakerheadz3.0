@@ -14,6 +14,7 @@ import { TSA_AGENT } from './tsa-agent';
 import { SCALPER_SID } from './scalper-sid';
 import { SYSTEM_EVENTS } from './system-events';
 import { STREET_EVENTS } from './street-events';
+import { ADC } from './adc';
 
 
 export const AMBIENT_NPCS: AmbientNpcProfile[] = [
@@ -35,4 +36,5 @@ export const AMBIENT_NPCS: AmbientNpcProfile[] = [
     SCALPER_SID,
     SYSTEM_EVENTS,
     STREET_EVENTS,
+    ADC,
 ];
