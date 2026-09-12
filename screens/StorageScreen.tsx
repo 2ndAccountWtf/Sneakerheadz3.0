@@ -4,6 +4,7 @@ import { Screen } from '../types';
 import type { ItemType, StorageItem } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
 import Img from '../components/Img';
+import { getWeapon } from '../systems/weapons';
 
 const FILTERS: { label: string; type: ItemType }[] = [
     { label: 'All', type: 'All' },
@@ -140,6 +141,7 @@ const StorageScreen: React.FC = () => {
                     {items.map(item => {
                         const isOpen = expanded === item.id;
                         const canUse = !!item.effects?.length;
+                        const weapon = getWeapon(item.id);
 
                         return (
                             <div key={item.id} className={`panel ${RARITY_CLASS[item.rarity]} flex flex-col`}>
@@ -163,6 +165,27 @@ const StorageScreen: React.FC = () => {
 
                                 <div className="p-2.5 flex flex-col flex-grow gap-2">
                                     <h3 className="text-xs font-semibold text-white leading-tight line-clamp-2 min-h-[2.2em]">{item.name}</h3>
+
+                                    {/* Carrying a weapon arms you in every mini-game it applies to —
+                                        there is nothing to equip, so the card has to say so. */}
+                                    {weapon && (
+                                        <div className="border border-[var(--line)] bg-black/30 px-2 py-1.5">
+                                            <div className="flex items-center justify-between gap-1">
+                                                <span className="label" style={{ color: 'var(--accent)' }}>
+                                                    {weapon.glyph} {weapon.klass}
+                                                </span>
+                                                {weapon.damage > 0 && (
+                                                    <span className="numeric text-[10px] text-[var(--bad)]">{weapon.damage} dmg</span>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {weapon.returns && <span className="chip !text-[8px] !py-0">returns</span>}
+                                                {weapon.piercing && <span className="chip !text-[8px] !py-0">pierces</span>}
+                                                {weapon.slows && <span className="chip !text-[8px] !py-0">slows</span>}
+                                                {weapon.uses !== undefined && <span className="chip !text-[8px] !py-0">{weapon.uses} uses</span>}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {isOpen ? (
                                         <>
@@ -203,7 +226,8 @@ const StorageScreen: React.FC = () => {
             )}
 
             <p className="label text-center mt-5">
-                Consumables roll on an effect table. You know the tendency, never the outcome.
+                Consumables roll on an effect table — you know the tendency, never the outcome.
+                Anything marked as a weapon is automatically in your hands in any mini-game it works in.
             </p>
         </div>
     );
