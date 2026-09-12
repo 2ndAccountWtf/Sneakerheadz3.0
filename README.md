@@ -13,6 +13,7 @@ and a Prime Minister who may or may not hand you a titanium wallet.
 npm install
 npm run dev      # http://localhost:3000
 npm run build    # production build to dist/
+npm test         # engine + content checks
 ```
 
 No environment variables or API keys are required.
@@ -52,6 +53,17 @@ same node launched — which is how a `combat` outcome becomes a playable fight
 whose stakes were written in the dialogue file.
 
 To add content, write a scenario; you do not need to touch any engine code.
+
+### Tests
+
+`npm test` covers the two things most likely to rot:
+
+1. The OutcomeEngine's handling of every authored outcome shape — clamping,
+   day-scoped expiry, conditional win/lose payloads, pricing knock-ons.
+2. The integrity of the content itself. It walks all ~100 scenarios and asserts
+   there are no dangling choice targets, no dead-end nodes, and no outcome type
+   the engine cannot apply. Adding dialogue that references a node you forgot to
+   write fails the suite rather than shipping an empty modal.
 
 ### Time
 
