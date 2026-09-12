@@ -1,6 +1,40 @@
 import type { AmpmItem } from '../types';
 
 export const AMPM_ITEMS: AmpmItem[] = [
+    {
+        id: 'itm-frisbee',
+        name: 'Beach Frisbee',
+        description: 'Venice Beach classic. Returns to you. Usually.',
+        price: 18,
+        effect: 'Thrown weapon — pierces, returns',
+        category: 'Tools & Gear',
+    },
+    {
+        id: 'itm-dog-launcher',
+        name: 'Chicago Dog Launcher',
+        description: 'It was out of stock for a long time. Do not ask why.',
+        price: 340,
+        effect: 'Rapid-fire ranged weapon',
+        category: 'Local Specialties',
+        cities: ['chicago'],
+    },
+    {
+        id: 'itm-slushie',
+        name: 'Blue Slushie',
+        description: 'From the machine. The one that talks.',
+        price: 6,
+        effect: 'Drinkable. Also throwable — slows targets.',
+        category: 'Food & Drinks',
+    },
+    {
+        id: 'itm-longboard',
+        name: 'Venice Longboard',
+        description: 'For when somebody steals your box and takes off downhill.',
+        price: 260,
+        effect: 'Lets you actually win a cart chase',
+        category: 'Local Specialties',
+        cities: ['los-angeles'],
+    },
     // GLOBAL ITEMS
     {
         id: 'itm-energy-drink',

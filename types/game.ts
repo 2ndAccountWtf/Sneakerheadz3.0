@@ -37,12 +37,17 @@ export interface OutcomeLogEntry {
 }
 
 export type MiniGameId =
-    | 'street-brawl'
+    // Ids are stable: `street-brawl` and `street-ball` keep their names so the
+    // ~223 already-authored `combat` outcomes keep resolving, even though both
+    // are now full 2D canvas games rather than the original text prototypes.
+    | 'street-brawl'      // 2D fighter
+    | 'street-ball'       // 2D arcade hoops
     | 'hypecast-roulette'
     | 'sneaker-chase'
     | 'mystery-box'
     | 'legit-check'
-    | 'street-ball';
+    | 'flight-404'        // run-and-gun plane rescue
+    | 'cart-race';        // downhill shopping cart chase
 
 /** A request to hand control to a mini-game, plus what to do with the result. */
 export interface MiniGameRequest {
