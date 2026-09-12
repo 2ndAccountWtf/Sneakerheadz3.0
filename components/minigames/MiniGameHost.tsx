@@ -38,7 +38,7 @@ const MiniGameHost: React.FC = () => {
         case 'street-brawl':
             return <StreetBrawl opponent={req.config?.opponent ?? 'Some Guy'} onFinish={finish} onQuit={quit} />;
         case 'hypecast-roulette':
-            return <HypecastRoulette onFinish={finish} onQuit={quit} />;
+            return <HypecastRoulette deckId={req.config?.deckId} title={req.title} onFinish={finish} onQuit={quit} />;
         case 'sneaker-chase':
             return <SneakerChase thief={req.config?.thief} onFinish={finish} onQuit={quit} />;
         case 'mystery-box':

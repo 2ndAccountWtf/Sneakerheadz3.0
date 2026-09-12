@@ -378,7 +378,7 @@ export const ADC: AmbientNpcProfile = {
                             type: 'miniGame',
                             game: 'hypecast-roulette',
                             title: 'ADC vs You: The Debate',
-                            config: { opponent: 'ADC', topic: 'the systemic implications of literally anything' },
+                            config: { deckId: 'adc', opponent: 'ADC', topic: 'the systemic implications of literally anything' },
                             description: 'The microphone comes on and the crowd goes quiet.',
                         },
                         { type: 'inventoryChange', condition: 'win', add: [{ kind: 'currency', value: 'cash', qty: 900 }], description: 'The crowd passes a hat around. For you. In front of her.' },
