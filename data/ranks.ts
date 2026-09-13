@@ -86,6 +86,30 @@ export const getRunGrade = (netWorth: number, startingCash: number): RunGrade =>
     return grade;
 };
 
+export interface RunClock {
+    /** Days of trading left *after* today. Zero means this is the last one. */
+    daysLeft: number;
+    /** Short form for chips and buttons. */
+    label: string;
+    /** Theme token, so the deadline reads the same on every screen. */
+    color: string;
+    /** True once the deadline is close enough to change how you play. */
+    urgent: boolean;
+}
+
+/**
+ * The deadline, resolved once so the Dashboard, the Departures board and the
+ * Dossier cannot drift on what "days left" means. A run can overshoot day 30
+ * (naps and hospital stays cost days), hence the clamp at zero.
+ */
+export const getRunClock = (day: number, totalDays: number): RunClock => {
+    const daysLeft = Math.max(0, totalDays - day);
+    if (daysLeft <= 0) return { daysLeft: 0, label: 'Final day', color: 'var(--bad)', urgent: true };
+    if (daysLeft <= 3) return { daysLeft, label: `${daysLeft} days left`, color: 'var(--bad)', urgent: true };
+    if (daysLeft <= 7) return { daysLeft, label: `${daysLeft} days left`, color: 'var(--warn)', urgent: true };
+    return { daysLeft, label: `${daysLeft} days left`, color: 'var(--accent)', urgent: false };
+};
+
 /** Theme token for a grade, so the summary and the projection agree on colour. */
 export const gradeColor = (tone: RunGrade['tone']): string => ({
     bad: 'var(--bad)',

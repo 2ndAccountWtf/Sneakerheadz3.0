@@ -2,9 +2,10 @@ import React, { useMemo } from 'react';
 import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
-import { getCredRank, CRED_RANKS, TOTAL_DAYS, MAX_INVENTORY_SIZE } from '../constants';
+import { getCredRank, CRED_RANKS, TOTAL_DAYS, MAX_INVENTORY_SIZE, INITIAL_PLAYER_CASH } from '../constants';
 import { getBagValue } from '../systems/pricing';
 import { GIFT_APPROVAL_THRESHOLD } from '../systems/events/bibiEvents';
+import { getRunClock, getRunGrade, gradeColor } from '../data/ranks';
 
 const Stat: React.FC<{
     label: string;
@@ -42,6 +43,16 @@ const StatsScreen: React.FC = () => {
         ? ((player.streetCred - rank.min) / (nextRank.min - rank.min)) * 100
         : 100;
 
+    // Trajectory, not just position. The rate is measured over days *completed*
+    // so day 1 does not divide by zero and claim an infinite career.
+    const clock = getRunClock(day, TOTAL_DAYS);
+    const netChange = netWorth - INITIAL_PLAYER_CASH;
+    const daysTraded = Math.max(1, day - 1);
+    const perDay = netChange / daysTraded;
+    const projected = Math.max(0, Math.round(netWorth + perDay * clock.daysLeft));
+    const currentGrade = getRunGrade(netWorth, INITIAL_PLAYER_CASH);
+    const projectedGrade = getRunGrade(projected, INITIAL_PLAYER_CASH);
+
     const badges = Object.entries(player.flags)
         .filter(([k, v]) => k.startsWith('badge-') && v)
         .map(([k]) => k.replace('badge-', '').replace(/-/g, ' '));
@@ -65,6 +76,64 @@ const StatsScreen: React.FC = () => {
                 }
             />
 
+            {/* RUN PROGRESS — where the deadline, the money and the grade meet. */}
+            <section className="panel p-4">
+                <div className="flex items-baseline justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                        <div className="label">Run progress</div>
+                        <div className="font-display text-base sm:text-lg uppercase text-white leading-tight">
+                            Day {day} of {TOTAL_DAYS}
+                        </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                        <div className="numeric text-2xl leading-none" style={{ color: clock.color }}>
+                            {clock.daysLeft === 0 ? 'LAST' : clock.daysLeft}
+                        </div>
+                        <div className="label">{clock.daysLeft === 0 ? 'day' : 'days left'}</div>
+                    </div>
+                </div>
+                <div className="meter h-2 mb-3">
+                    <i style={{ width: `${Math.min(100, (day / TOTAL_DAYS) * 100)}%`, background: clock.color }} />
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="min-w-0">
+                        <div className="label">Started with</div>
+                        <div className="numeric text-base mt-0.5 text-[var(--ink-dim)]">${INITIAL_PLAYER_CASH.toLocaleString()}</div>
+                    </div>
+                    <div className="min-w-0">
+                        <div className="label">Worth now</div>
+                        <div className="numeric text-base mt-0.5 text-[var(--accent)]">${netWorth.toLocaleString()}</div>
+                    </div>
+                    <div className="min-w-0">
+                        <div className="label">Per day</div>
+                        <div className="numeric text-base mt-0.5" style={{ color: perDay >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                            {perDay >= 0 ? '+' : '−'}${Math.abs(Math.round(perDay)).toLocaleString()}
+                        </div>
+                    </div>
+                    <div className="min-w-0">
+                        <div className="label">At this rate</div>
+                        <div className="numeric text-base mt-0.5" style={{ color: gradeColor(projectedGrade.tone) }}>
+                            ${projected.toLocaleString()}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-[var(--line)] flex flex-wrap items-center gap-2">
+                    <span className="chip" style={{ borderColor: gradeColor(currentGrade.tone), color: gradeColor(currentGrade.tone) }}>
+                        Grade today · {currentGrade.title}
+                    </span>
+                    {clock.daysLeft > 0 && (
+                        <span className="chip" style={{ borderColor: gradeColor(projectedGrade.tone), color: gradeColor(projectedGrade.tone) }}>
+                            Day {TOTAL_DAYS} projection · {projectedGrade.title}
+                        </span>
+                    )}
+                </div>
+                <p className="text-[11px] text-[var(--ink-faint)] leading-snug mt-2">
+                    Unsold pairs are counted at market value when the books close, which is rarely what you paid.
+                </p>
+            </section>
+
             {/* RANK */}
             <section className="panel p-4">
                 <div className="flex items-center justify-between gap-3 mb-3">
@@ -86,6 +155,28 @@ const StatsScreen: React.FC = () => {
                 <p className="label">
                     {nextRank ? `${toNext} more to reach ${nextRank.title}` : 'Top of the ladder. Nowhere left to climb.'}
                 </p>
+
+                {/* The whole ladder, so "what is still reachable" is a fact rather
+                    than a guess the player has to make from one next-rank line. */}
+                <ol className="mt-3 pt-3 border-t border-[var(--line)] space-y-1">
+                    {CRED_RANKS.map(r => {
+                        const reached = player.streetCred >= r.min;
+                        const isCurrent = r.title === rank.title;
+                        return (
+                            <li
+                                key={r.title}
+                                className="flex items-center gap-2 text-xs font-mono"
+                                style={{ color: isCurrent ? 'var(--accent)' : reached ? 'var(--ink-dim)' : 'var(--ink-faint)' }}
+                            >
+                                <span className={`leading-none flex-shrink-0 ${reached ? '' : 'opacity-40 grayscale'}`}>{r.icon}</span>
+                                <span className="truncate flex-grow">{r.title}</span>
+                                <span className="numeric flex-shrink-0">
+                                    {reached ? (isCurrent ? 'here' : 'cleared') : `+${r.min - player.streetCred}`}
+                                </span>
+                            </li>
+                        );
+                    })}
+                </ol>
                 {badges.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-[var(--line)]">
                         {badges.map(b => <span key={b} className="chip chip-accent capitalize">🏅 {b}</span>)}

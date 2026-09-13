@@ -5,6 +5,7 @@ import InteractionView from './interactions/InteractionView';
 import NewsModal from './news/NewsModal';
 import CutsceneView from './cutscene/CutsceneView';
 import EmergencyBanner from './EmergencyBanner';
+import CityEventModal from './CityEventModal';
 import MiniGameHost from './minigames/MiniGameHost';
 import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
@@ -46,6 +47,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <MiniGameHost />
             <CutsceneView />
             <NewsModal />
+            <CityEventModal />
             <EmergencyBanner />
         </>
     );

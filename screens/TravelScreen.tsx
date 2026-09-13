@@ -6,8 +6,9 @@ import { STORES_BY_CITY } from '../data/stores';
 import { Screen } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
 import { generateRumorsForCity, RumorWithContext } from '../systems/rumorEngine';
-import { TRAVEL_ENERGY_COST } from '../constants';
+import { TRAVEL_ENERGY_COST, TOTAL_DAYS } from '../constants';
 import { applySignals } from '../systems/pricing';
+import { getRunClock } from '../data/ranks';
 import Img from '../components/Img';
 
 type Trend = 'up' | 'down' | 'flat';
@@ -68,6 +69,10 @@ const TravelScreen: React.FC = () => {
 
     const destination = CITIES.find(c => c.id === departingTo);
     const lowEnergy = player.energy < TRAVEL_ENERGY_COST;
+    const clock = getRunClock(day, TOTAL_DAYS);
+    // A flight is the only thing that advances the calendar, so on the last day
+    // the Departures board is where the run actually ends.
+    const isLastFlight = clock.daysLeft <= 0;
 
     return (
         <div className="pb-6">
@@ -76,6 +81,55 @@ const TravelScreen: React.FC = () => {
                 subtitle={`One flight = one day = ${TRAVEL_ENERGY_COST} energy`}
                 back={Screen.Dashboard}
             />
+
+            {/* FARE — the price of a flight, spelled out. With a hard deadline the
+                day is the expensive half, and it used to be a line of subtitle. */}
+            <section className="panel p-3 mb-4 grid grid-cols-3 gap-3">
+                <div className="min-w-0">
+                    <div className="label">Costs</div>
+                    <div className="numeric text-lg sm:text-xl leading-none mt-0.5 text-[var(--warn)]">1 day</div>
+                    <div className="text-[10px] font-mono text-[var(--ink-faint)] mt-1 leading-tight">
+                        Day {day} → {day + 1}
+                    </div>
+                </div>
+                <div className="min-w-0">
+                    <div className="label">Energy</div>
+                    <div
+                        className="numeric text-lg sm:text-xl leading-none mt-0.5"
+                        style={{ color: lowEnergy ? 'var(--bad)' : 'var(--warn)' }}
+                    >
+                        −{TRAVEL_ENERGY_COST}
+                    </div>
+                    <div className="text-[10px] font-mono text-[var(--ink-faint)] mt-1 leading-tight">
+                        You have {Math.round(player.energy)}
+                    </div>
+                </div>
+                <div className="min-w-0">
+                    <div className="label">Deadline</div>
+                    <div className="numeric text-lg sm:text-xl leading-none mt-0.5" style={{ color: clock.color }}>
+                        {isLastFlight ? 'LAST' : clock.daysLeft}
+                    </div>
+                    <div className="text-[10px] font-mono text-[var(--ink-faint)] mt-1 leading-tight">
+                        of {TOTAL_DAYS} days
+                    </div>
+                </div>
+            </section>
+
+            {isLastFlight ? (
+                <div className="panel p-3 mb-4 flex items-start gap-2 text-sm" style={{ borderColor: 'var(--bad)' }}>
+                    <span className="flex-shrink-0">🛬</span>
+                    <span className="text-[var(--bad)] leading-snug">
+                        Day {TOTAL_DAYS} of {TOTAL_DAYS}. Board this flight and the run is over when it lands — sell what you want counted as cash first.
+                    </span>
+                </div>
+            ) : clock.urgent && (
+                <div className="panel p-3 mb-4 flex items-start gap-2 text-sm" style={{ borderColor: clock.color }}>
+                    <span className="flex-shrink-0">⏳</span>
+                    <span className="leading-snug" style={{ color: clock.color }}>
+                        {clock.daysLeft} flights and the month is gone. Each one is a day you are not selling in.
+                    </span>
+                </div>
+            )}
 
             {lowEnergy && (
                 <div className="panel p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: 'var(--warn)' }}>
@@ -136,11 +190,15 @@ const TravelScreen: React.FC = () => {
                                 )}
 
                                 <button
-                                    className="btn btn-primary w-full mt-auto"
+                                    className={`btn w-full mt-auto ${isLastFlight ? 'btn-danger' : 'btn-primary'}`}
                                     disabled={isCurrent || !!departingTo}
                                     onClick={() => handleTravel(city.id)}
                                 >
-                                    {isCurrent ? 'Current City' : `Fly — 1 Day`}
+                                    {isCurrent
+                                        ? 'Current City'
+                                        : isLastFlight
+                                            ? 'Fly · ends the run'
+                                            : `Fly · 1 day · ⚡${TRAVEL_ENERGY_COST}`}
                                 </button>
                             </div>
                         </div>

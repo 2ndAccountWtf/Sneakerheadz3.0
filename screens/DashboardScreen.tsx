@@ -1,11 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
 import { CITIES } from '../data/cities';
 import { STORES_BY_CITY } from '../data/stores';
-import { getCredRank, TOTAL_DAYS } from '../constants';
+import { getCredRank, TOTAL_DAYS, INITIAL_PLAYER_CASH, TRAVEL_ENERGY_COST } from '../constants';
 import { getBagValue } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
+import { venuesIn, isVenueOpen } from '../data/venues';
+import { getRunClock } from '../data/ranks';
 import Img from '../components/Img';
 
 const Tile: React.FC<{
@@ -41,13 +43,21 @@ const Tile: React.FC<{
  * saying, and what state you're in.
  */
 const DashboardScreen: React.FC = () => {
-    const { gameState, changeScreen } = useGame();
+    const { gameState, changeScreen, rollCityEvent } = useGame();
     const { player, currentCityId, day, quests, activeMarketSignals } = gameState;
 
     const currentCity = CITIES.find(city => city.id === currentCityId);
     const storeCount = STORES_BY_CITY[currentCityId]?.length ?? 0;
     const rank = getCredRank(player.streetCred);
     const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
+    const netWorth = player.cash + bagValue;
+    const netChange = netWorth - INITIAL_PLAYER_CASH;
+    const clock = getRunClock(day, TOTAL_DAYS);
+
+    // Two tiers of tired. Below the travel cost you are actually stuck; above
+    // it you are simply about to be, which is when telling the player is useful.
+    const cannotFly = player.energy < TRAVEL_ENERGY_COST;
+    const lowEnergy = player.energy < 40;
 
     const headline = useMemo(() => {
         const rumors = generateRumorsForCity(currentCityId, day);
@@ -55,6 +65,19 @@ const DashboardScreen: React.FC = () => {
     }, [currentCityId, day]);
 
     const liveSignals = activeMarketSignals.filter(s => s.expiresOnDay > day);
+
+    const openVenues = useMemo(
+        () => venuesIn(currentCityId).filter(v => isVenueOpen(v, day)).length,
+        [currentCityId, day],
+    );
+
+    // Give the arrival notification a beat to clear, then see whether anything
+    // is happening. Keyed on city+day so it fires once per arrival, not on
+    // every re-render.
+    useEffect(() => {
+        const t = setTimeout(() => rollCityEvent(), 1200);
+        return () => clearTimeout(t);
+    }, [currentCityId, day, rollCityEvent]);
 
     if (!currentCity) return <div className="label">Loading city…</div>;
 
@@ -74,7 +97,7 @@ const DashboardScreen: React.FC = () => {
                 </div>
                 <div className="relative p-4 sm:p-6">
                     <div className="flex items-center gap-2 mb-1.5">
-                        <span className="label" style={{ color: 'var(--accent)' }}>Day {day} of {TOTAL_DAYS}</span>
+                        <span className="label" style={{ color: clock.color }}>Day {day} of {TOTAL_DAYS} · {clock.label}</span>
                         <span className="w-1 h-1 rounded-full bg-[var(--ink-faint)]" />
                         <span className="label">{rank.icon} {rank.title}</span>
                     </div>
@@ -94,6 +117,90 @@ const DashboardScreen: React.FC = () => {
                     </div>
                 </div>
             </section>
+
+            {/* RUN CLOCK — the day counter is a deadline now, so it gets to say so. */}
+            <section className="panel p-3 sm:p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 items-start">
+                <div className="min-w-0">
+                    <div className="label">Days left</div>
+                    <div className="numeric text-2xl leading-none mt-0.5" style={{ color: clock.color }}>
+                        {clock.daysLeft === 0 ? 'LAST' : clock.daysLeft}
+                    </div>
+                    <div className="meter mt-2">
+                        <i style={{ width: `${Math.min(100, (day / TOTAL_DAYS) * 100)}%`, background: clock.color }} />
+                    </div>
+                </div>
+
+                <div className="min-w-0">
+                    <div className="label">Net worth</div>
+                    <div className="numeric text-2xl leading-none mt-0.5 text-[var(--accent)]">
+                        ${netWorth.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-mono mt-1.5 leading-tight" style={{ color: netChange >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                        {netChange >= 0 ? '+' : '−'}${Math.abs(netChange).toLocaleString()} on ${INITIAL_PLAYER_CASH.toLocaleString()}
+                    </div>
+                </div>
+
+                <div className="min-w-0">
+                    <div className="label">Energy</div>
+                    <div className="numeric text-2xl leading-none mt-0.5" style={{ color: cannotFly ? 'var(--bad)' : lowEnergy ? 'var(--warn)' : 'var(--ok)' }}>
+                        {Math.round(player.energy)}
+                    </div>
+                    <div className="meter mt-2">
+                        <i style={{ width: `${player.energy}%`, background: cannotFly ? 'var(--bad)' : 'var(--warn)' }} />
+                    </div>
+                </div>
+
+                <div className="min-w-0">
+                    <div className="label">Cred</div>
+                    <div className="numeric text-2xl leading-none mt-0.5 text-[var(--legend)]">{player.streetCred}</div>
+                    <div className="text-[10px] font-mono mt-1.5 leading-tight text-[var(--ink-faint)] truncate">{rank.title}</div>
+                </div>
+            </section>
+
+            {clock.urgent && (
+                <div className="panel p-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3" style={{ borderColor: clock.color }}>
+                    <span className="text-sm leading-snug flex-grow" style={{ color: clock.color }}>
+                        {clock.daysLeft === 0
+                            ? 'Day 30. Whatever is still in your bag is worth what it is worth when the books close — sell it or own it.'
+                            : `${clock.daysLeft} days of trading left. Unsold pairs count at market value at the end, not at what you hoped for.`}
+                    </span>
+                    <button className="btn btn-sm flex-shrink-0" onClick={() => changeScreen(Screen.Inventory)}>
+                        Check the bag
+                    </button>
+                </div>
+            )}
+
+            {/* The Arcade and the Departures board quietly lock themselves when you
+                run dry. Naming the two fixes is the difference between a system
+                and a wall the player walks into. */}
+            {lowEnergy && (
+                <div className="panel p-3" style={{ borderColor: cannotFly ? 'var(--bad)' : 'var(--warn)' }}>
+                    <div className="flex items-start gap-2.5">
+                        <span className="text-lg leading-none flex-shrink-0">{cannotFly ? '🪫' : '⚡'}</span>
+                        <div className="min-w-0">
+                            <div className="label" style={{ color: cannotFly ? 'var(--bad)' : 'var(--warn)' }}>
+                                {cannotFly ? `Under ${TRAVEL_ENERGY_COST} energy` : 'Running low'}
+                            </div>
+                            <p className="text-sm text-[var(--ink-dim)] leading-snug mt-0.5">
+                                {cannotFly
+                                    ? `A flight costs ${TRAVEL_ENERGY_COST} energy and takes the shortfall out of your health instead. Most of the Arcade is already locked.`
+                                    : `Flights cost ${TRAVEL_ENERGY_COST}; Arcade games cost 4 to 25. You will hit the floor in two or three moves.`}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        <button className="btn btn-sm btn-accent" onClick={() => changeScreen(Screen.Inventory)}>
+                            😴 Nap in your bag
+                        </button>
+                        <button className="btn btn-sm" onClick={() => changeScreen(Screen.Storage)}>
+                            🍱 Eat from storage
+                        </button>
+                        <button className="btn btn-sm btn-ghost" onClick={() => changeScreen(Screen.Ampm)}>
+                            🏪 Buy food at AM/PM
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* STREET INTEL TICKER */}
             {headline && (
@@ -126,7 +233,7 @@ const DashboardScreen: React.FC = () => {
                     icon="✈️"
                     accent="var(--accent-2)"
                     onClick={() => changeScreen(Screen.Travel)}
-                    badge={`⚡ costs 15`}
+                    badge={`1 day · ⚡${TRAVEL_ENERGY_COST}`}
                 />
                 <Tile
                     label="AM/PM"
@@ -141,6 +248,14 @@ const DashboardScreen: React.FC = () => {
                     icon="🕹"
                     accent="var(--legend)"
                     onClick={() => changeScreen(Screen.Arcade)}
+                />
+                <Tile
+                    label="Around Town"
+                    sublabel="Courts, bars, alleys — and who is in them"
+                    icon="📍"
+                    accent="var(--accent)"
+                    onClick={() => changeScreen(Screen.Venues)}
+                    badge={openVenues ? `${openVenues} open` : 'All shut'}
                 />
                 <Tile
                     label="Odd Jobs"

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { MiniGameResult } from './MiniGameShell';
-import { ArcadeShell, useInput, PAL, KIT, clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band, shakeOffset, banner } from './engine';
+import { ArcadeShell, useInput, PAL, KIT, clear, rect, outline, circle, line, text, glyph, shadow, bar, actor, SWAP, band, shakeOffset, banner } from './engine';
 import type { Btn } from './engine';
 import { useGame } from '../../hooks/useGame';
 import { armsFor, FISTS } from '../../systems/weapons';
@@ -1209,8 +1209,25 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, s: FightState) {
     ctx.restore();
 }
 
+/**
+ * Sprite ids for the two fighters.
+ *
+ * These are STRING ids looked up in the engine's sprite registry, never
+ * imports — the art files under data/sprites are authored separately and any of
+ * them may be absent. `actor()` resolves the id at draw time and falls back to
+ * the old block `figure()` with the same kit colours if nobody drew it, so the
+ * fight never renders an empty stage.
+ *
+ * The colourways are preserved as palette swaps: sprites are authored with c/C
+ * as the kit colour, c/C is already the teal accent, so the player needs no
+ * swap and the rival becomes magenta with { c: 'm', C: 'M' }.
+ */
+const FIGHTER_SPRITE = { player: 'player', rival: 'player' } as const;
+
 function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
     const kit = f.isPlayer ? KIT.player : KIT.rival;
+    const spriteId = f.isPlayer ? FIGHTER_SPRITE.player : FIGHTER_SPRITE.rival;
+    const swap = f.isPlayer ? SWAP.teal : { ...SWAP.magenta, ...SWAP.skinDark };
     const airborne = f.y < GROUND - 0.5;
     const hurt = f.flash > 0;
 
@@ -1220,7 +1237,9 @@ function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
         ctx.save();
         ctx.translate(f.x + f.facing * 6, GROUND);
         ctx.rotate((-f.facing * Math.PI) / 2);
-        figure(ctx, 0, 0, FIG_H, { kit, facing: 1, stride: 0, hurt });
+        actor(ctx, spriteId, 0, 0, {
+            height: FIG_H, facing: 1, frame: 0, swap, kit, hurt, shadow: false,
+        });
         ctx.restore();
         if (f.state === 'ko') glyph(ctx, '💫', f.x, GROUND - 38 + Math.sin(s.elapsed * 4) * 2, 9);
         return;
@@ -1249,8 +1268,12 @@ function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
         ctx.restore();
     }
 
-    figure(ctx, f.x, f.y, FIG_H, {
-        kit, facing: f.facing, stride, armUp,
+    // `height: FIG_H` makes the sprite exactly as tall as the hurtbox the sim
+    // uses, so what you see is still what gets hit. Everything drawn after this
+    // (guard arm, attack limbs, thrown objects) is unchanged and still keyed off
+    // f.x / f.y / BODY_W, so the frame data and the picture stay in sync.
+    actor(ctx, spriteId, f.x, f.y, {
+        height: FIG_H, facing: f.facing, stride, swap, kit, armUp,
         crouch: f.crouch || f.state === 'crouch', hurt,
     });
 

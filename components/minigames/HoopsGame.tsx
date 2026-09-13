@@ -14,7 +14,8 @@ import {
     glyph,
     shadow,
     bar,
-    figure,
+    actor,
+    SWAP,
     band,
     shakeOffset,
     banner as drawBanner,
@@ -168,7 +169,21 @@ const SAY = {
 /* World types                                                         */
 /* ------------------------------------------------------------------ */
 
-interface Kit { main: string; trim: string; skin: string }
+/**
+ * A colourway. `main`/`trim`/`skin` are the CSS colours the block `figure()`
+ * fallback uses; `sprite` + `swap` are the pixel-art equivalent. Both are kept
+ * so that a missing sprite file still produces a correctly coloured player
+ * rather than an empty court — see `actor()` in engine/draw.ts.
+ */
+interface Kit {
+    main: string;
+    trim: string;
+    skin: string;
+    /** Registered sprite id. */
+    sprite: string;
+    /** Palette recolour applied to that sprite. */
+    swap: Record<string, string>;
+}
 
 interface Player {
     id: number;
@@ -333,10 +348,26 @@ const mkBall = (): Ball => ({
  * shorts simply vanish against a night-time blacktop.
  */
 const KITS: Record<'you' | 'mate' | 'foe' | 'cousin', Kit> = {
-    you: { main: KIT.player.main, trim: '#0c6d5e', skin: PAL.skin },
-    mate: { main: '#2bd07a', trim: '#1b6b45', skin: PAL.skinDark },
-    foe: { main: KIT.rival.main, trim: '#8d1a4c', skin: PAL.skinDark },
-    cousin: { main: '#ff8c3a', trim: '#8a4413', skin: PAL.skin },
+    // The sprites are authored with c/C as the kit colour and s/S as skin, so
+    // one 24-row character grid yields all four players. 'player' is the base
+    // sprite; the two ids below it are only used if that art file landed, and
+    // actor() falls back to figure() for any id nobody drew.
+    you: {
+        main: KIT.player.main, trim: '#0c6d5e', skin: PAL.skin,
+        sprite: 'player', swap: SWAP.teal,
+    },
+    mate: {
+        main: '#2bd07a', trim: '#1b6b45', skin: PAL.skinDark,
+        sprite: 'player', swap: { ...SWAP.green, ...SWAP.skinDark },
+    },
+    foe: {
+        main: KIT.rival.main, trim: '#8d1a4c', skin: PAL.skinDark,
+        sprite: 'player', swap: { ...SWAP.magenta, ...SWAP.skinDark },
+    },
+    cousin: {
+        main: '#ff8c3a', trim: '#8a4413', skin: PAL.skin,
+        sprite: 'player', swap: SWAP.gold,
+    },
 };
 
 export const createWorld = (seed: number, opponent: string): World => {
@@ -1285,13 +1316,22 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     }
     if (p.y > 2) shadow(ctx, x, floorY(p.z), 5 * sc(p.z), 2 * sc(p.z), 0.35);
 
-    figure(ctx, x, feet, h, {
-        kit: p.kit,
+    // Pixel-art cast. `height` keeps the sprite the exact size the block figure
+    // was, so every hitbox, arrow and meter below still lines up. If no sprite
+    // is registered under p.kit.sprite (the art file is absent or renamed),
+    // actor() draws the old figure() with the same kit colours instead.
+    actor(ctx, p.kit.sprite, x, feet, {
+        height: h,
         facing: p.facing,
+        // Walk cycle is driven by position, as before — stride picks the frame.
         stride: p.stride,
+        swap: p.kit.swap,
+        kit: p.kit,
         armUp,
         crouch: p.charge > 0.15 && p.charge < 0.6,
         hurt: false,
+        // The heat haze / jump shadow above already handles the ground contact.
+        shadow: p.y <= 2,
     });
 
     if (p.onFire) glyph(ctx, '🔥', x - p.facing * 7, feet - h - 4, 9 + Math.sin(w.t * 14) * 1.5);

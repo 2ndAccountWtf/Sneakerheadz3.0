@@ -14,6 +14,7 @@ import MarketAnalysisScreen from './screens/MarketAnalysisScreen';
 import ArcadeScreen from './screens/ArcadeScreen';
 import QuestsScreen from './screens/QuestsScreen';
 import BathroomsScreen from './screens/BathroomsScreen';
+import VenuesScreen from './screens/VenuesScreen';
 import { Screen } from './types';
 import Layout from './components/Layout';
 import Notification from './components/Notification';
@@ -58,6 +59,8 @@ const ScreenManager: React.FC = () => {
                 return <QuestsScreen />;
             case Screen.Bathrooms:
                 return <BathroomsScreen />;
+            case Screen.Venues:
+                return <VenuesScreen />;
             default:
                 return <DashboardScreen />;
         }

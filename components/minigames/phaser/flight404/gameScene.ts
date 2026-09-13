@@ -49,6 +49,29 @@ type Txt = PhaserNS.GameObjects.Text;
 const body = (o: unknown): ArcadeBody => (o as { body: ArcadeBody }).body;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
+/**
+ * Pick the two colliding objects apart by what they are, not by which slot they
+ * arrived in.
+ *
+ * A genuine Phaser trap, and one that fails *silently*: the argument order of an
+ * overlap callback does not reliably match the order the two sides were declared
+ * in. `World.collideObjects` flattens any group whose `physicsType` is undefined
+ * (i.e. a plain `add.group()`) into an array, and the resulting
+ * `collideHandler(group, sprite)` dispatch calls `collideSpriteVsGroup(sprite,
+ * group)` — which hands the *sprite* to the callback first. So
+ * `overlap(bullets, enemies, cb)` can call `cb(enemy, bullet)`.
+ *
+ * Nothing errors; the handler just reads the wrong fields, returns early, and
+ * every shot passes harmlessly through every enemy. Sorting the arguments in the
+ * handler is the only version of this that stays correct no matter how the
+ * groups are constructed.
+ */
+const sort2 = <A, B>(a: unknown, b: unknown, isA: (o: unknown) => boolean): [A, B] =>
+    (isA(a) ? [a, b] : [b, a]) as [A, B];
+
+const isShot = (o: unknown): boolean => !!(o as Shot | undefined)?.sd;
+const isMook = (o: unknown): boolean => !!(o as Mook | undefined)?.md;
+
 interface MookData {
     id: number;
     kind: MookKind;
@@ -146,8 +169,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private playerProp!: Img;
         private torch?: Img;
         private boltIcon?: Img;
-        private mooks!: PhaserNS.GameObjects.Group;
-        private hostages!: PhaserNS.GameObjects.Group;
+        private mooks!: PhaserNS.Physics.Arcade.Group;
+        private hostages!: PhaserNS.Physics.Arcade.Group;
         private shots!: PhaserNS.Physics.Arcade.Group;
         private melee!: PhaserNS.Physics.Arcade.Group;
         private hostiles!: PhaserNS.Physics.Arcade.Group;
@@ -224,8 +247,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.input.keyboard!.addCapture('UP,DOWN,LEFT,RIGHT,SPACE');
 
             // --- groups.
-            this.mooks = this.add.group();
-            this.hostages = this.add.group();
+            // Arcade groups rather than plain ones: a plain Group has no
+            // `physicsType`, which is what triggers the argument-swap described
+            // at `sort2`. Bodies are still enabled explicitly per actor, since
+            // these hold Containers with hand-placed offsets.
+            this.mooks = this.physics.add.group();
+            this.hostages = this.physics.add.group();
             this.trolleys = this.physics.add.staticGroup();
             // PHASER: pooled physics groups. `group.get()` recycles a dead body
             // instead of allocating, so a Dog Launcher firing 6/s never churns
@@ -249,6 +276,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             cam.startFollow(this.player, true, 0.14, 0.14, 0, -18);
             cam.setDeadzone(48, VIEW_H);
 
+            (globalThis as unknown as Record<string, unknown>).__F404_DEBUG = this;
             this.events.once(P.Scenes.Events.SHUTDOWN, () => {
                 this.time.removeAllEvents();
                 this.tweens.killAll();
@@ -399,7 +427,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 img.setOrigin(0.5, 1).setDepth(12);
                 const sb = img.body as unknown as PhaserNS.Physics.Arcade.StaticBody;
                 sb.setSize(22, 22);
-                sb.position.set(tx - 11, FLOOR_Y - 26);
+                sb.position.set(tx - 11, FLOOR_Y - 24);
                 sb.updateCenter();
             }
 
@@ -577,7 +605,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             };
             fig.setFacing(-1);
 
-            this.physics.add.existing(fig);
+            // Order matters, and getting it wrong fails quietly: adding to an
+            // Arcade Group both enables the body AND stamps the group's
+            // defaults over it, so `setCollideWorldBounds(true)` set before the
+            // add is reset to the group default and the mook drops through the
+            // floor forever.
+            this.mooks.add(fig);
             const b = body(fig);
             const half = def.perch ? 9 : 6;
             b.setSize(half * 2, h, false);
@@ -586,7 +619,6 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // walk underneath, which is what `aim up` is for.
             b.setAllowGravity(!def.perch);
             b.setCollideWorldBounds(true);
-            this.mooks.add(fig);
 
             if (def.perch) {
                 fig.md.bin = this.add.image(def.x, 36, T('bin-open')).setOrigin(0.5, 0).setDepth(7);
@@ -616,13 +648,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             fig.setDepth(6);
             fig.hd = { freed: false, dwell: 0, bubbleT: 0 };
             fig.setPose({ crouch: true });
-            this.physics.add.existing(fig);
+            this.hostages.add(fig);      // before the body setup — see spawnMook
             const b = body(fig);
             b.setSize(14, 22, false);
             b.setOffset(-7, -22);
             b.setAllowGravity(false);
             b.setImmovable(true);
-            this.hostages.add(fig);
 
             // Seatbelt, duct tape and a face about it.
             fig.hd.belt = this.add.image(x, FLOOR_Y - 14, T('belt')).setDepth(7);
@@ -701,6 +732,23 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // ==================================================================
         // Weapons
         // ==================================================================
+        /**
+         * Size an arcade body in *screen* pixels.
+         *
+         * A genuine Phaser sharp edge: `Body.setSize(w, h)` is in texture-source
+         * units and then multiplied by the game object's scale
+         * (`body.width = sourceWidth * scaleX`). Every emoji here is a 40px
+         * baked texture drawn at ~9px, so passing the size you actually want
+         * produces a body a quarter of that — projectiles sail straight through
+         * people and nothing reports an error. Converting through the scale is
+         * the fix, and it has to be done after `setDisplaySize`.
+         */
+        private fitBody(obj: PhaserNS.GameObjects.Image, w: number, h: number) {
+            const sx = Math.abs(obj.scaleX) || 1;
+            const sy = Math.abs(obj.scaleY) || 1;
+            body(obj).setSize(w / sx, h / sy, true);
+        }
+
         private glyphTex(ch: string) {
             const k = GLYPH_KEY_BY_CHAR[ch];
             return k ? TG(k) : TG('boom');
@@ -750,7 +798,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 hit.setActive(true).setVisible(true).setAlpha(0.4).setTint(C.white).setDepth(19);
                 hit.setDisplaySize(18, up ? 26 : 16);
                 body(hit).setEnable(true);
-                body(hit).setSize(18, up ? 26 : 16, true);
+                this.fitBody(hit, 18, up ? 26 : 16);
                 body(hit).setAllowGravity(false);
                 body(hit).setVelocity(0, 0);
                 hit.sd = {
@@ -781,7 +829,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             s.setDisplaySize(wp.klass === 'ranged' ? 8 : 10, wp.klass === 'ranged' ? 8 : 10);
             const b = body(s);
             b.setEnable(true);
-            b.setSize(7, 7, true);
+            this.fitBody(s, 8, 8);
             b.setAllowGravity(arcs);
             if (arcs) b.setGravityY(300 - GRAVITY);   // world gravity is 620
             else b.setGravityY(0);
@@ -812,7 +860,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             s.setDisplaySize(w + 2, h + 2);
             const b = body(s);
             b.setEnable(true);
-            b.setSize(w, h, true);
+            this.fitBody(s, w, h);
             b.setAllowGravity(gravity > 0);
             b.setGravityY(gravity > 0 ? gravity - GRAVITY : 0);
             b.setVelocity(vx, vy);
@@ -823,8 +871,13 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (kind !== 'ring') this.tweens.add({ targets: s, angle: 360, duration: 700, repeat: -1 });
             else {
                 // PHASER: a megaphone ring expands as it travels. Scale tween.
-                s.setScale(0.6);
-                this.tweens.add({ targets: s, scaleX: 1.5, scaleY: 1.5, duration: 900 });
+                // Its body keeps the size set above; the growth is visual, which
+                // is the honest reading (the ring hits you at head height, and
+                // ducking is the counter either way).
+                s.setScale(s.scaleX * 0.7, s.scaleY * 0.7);
+                this.tweens.add({
+                    targets: s, scaleX: s.scaleX * 2.1, scaleY: s.scaleY * 2.1, duration: 900,
+                });
             }
             return s;
         }
@@ -847,9 +900,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // ==================================================================
         // Collision handlers
         // ==================================================================
-        private onShotTrolley = (obj: unknown) => {
-            const s = obj as Shot;
-            if (!s.active || !s.sd) return;
+        private onShotTrolley = (a: unknown, b: unknown) => {
+            const [s] = sort2<Shot, unknown>(a, b, isShot);
+            if (!s?.active || !s.sd) return;
             this.float(s.x, s.y - 10, 'CLANK', PAL.dim);
             this.pBoom.emitParticleAt(s.x, s.y, 1);
             // Whichever brother is hiding behind it is delighted.
@@ -860,9 +913,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         };
 
         private onShotMook = (a: unknown, b: unknown) => {
-            const s = a as Shot;
-            const m = b as Mook;
-            if (!s.active || !m.active || !s.sd || m.md.ko) return;
+            const [s, m] = sort2<Shot, Mook>(a, b, isShot);
+            if (!s?.active || !m?.active || !s.sd || !m.md || m.md.ko) return;
             if (s.sd.hits.has(m.md.id)) return;
             s.sd.hits.add(m.md.id);
             this.damageMook(m, s.sd.dmg, s.x);
@@ -875,9 +927,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
         /** Never do this. */
         private onShotHostage = (a: unknown, b: unknown) => {
-            const s = a as Shot;
-            const h = b as Hostage;
-            if (!s.active || !h.active || !s.sd) return;
+            const [s, h] = sort2<Shot, Hostage>(a, b, isShot);
+            if (!s?.active || !h?.active || !s.sd || !h.hd) return;
             this.hostageHits++;
             this.score -= 150;
             this.say(h as unknown as Mook, this.rng.pick(WITHERED_LINES), 2600, PAL.bad, 0);
@@ -887,10 +938,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         };
 
         private onHostileHitsPlayer = (a: unknown, b: unknown) => {
-            // Argument order follows the collider declaration, but Phaser can
-            // hand them either way round when one side is a Container.
-            const s = ((a as Shot).sd ? a : b) as Shot;
-            if (!s.active || !s.sd) return;
+            const [s] = sort2<Shot, unknown>(a, b, isShot);
+            if (!s?.active || !s.sd) return;
             this.hurtPlayer(s.sd.dmg, s.x);
             this.pSplat.emitParticleAt(s.x, s.y, 2);
             this.killShot(s);
@@ -898,14 +947,15 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
         /** Running into you is the charger's only real attack. */
         private mookCanTouch = (a: unknown, b: unknown) => {
-            const m = ((a as Mook).md ? a : b) as Mook;
-            if (!m.md) return false;
+            const [m] = sort2<Mook, unknown>(a, b, isMook);
+            if (!m?.md) return false;
             const upright = !m.md.ko && m.md.state !== 'trip' && m.md.state !== 'getup' && m.md.state !== 'bonk';
             return upright && m.md.hitCd <= 0 && !m.md.perch;
         };
 
         private onMookTouch = (a: unknown, b: unknown) => {
-            const m = ((a as Mook).md ? a : b) as Mook;
+            const [m] = sort2<Mook, unknown>(a, b, isMook);
+            if (!m?.md) return;
             this.hurtPlayer(m.md.kind === 'charger' ? 6 : 5, m.x);
             m.md.hitCd = 0.9;
             body(m).setVelocityX(-m.md.facing * 70);
@@ -913,8 +963,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         };
 
         private onPickup = (a: unknown, b: unknown) => {
-            const k = ((a as Img).getData?.('kind') ? a : b) as Img;
-            const kind = k.getData('kind');
+            const [k] = sort2<Img, unknown>(a, b, o => !!(o as Img | undefined)?.getData?.('kind'));
+            const kind = k?.getData('kind');
+            if (!kind) return;
             if (kind === 'bureka') {
                 this.pHp = Math.min(100, this.pHp + 25);
                 this.float(this.player.x, this.player.y - 34, '+25 BUREKA', PAL.ok);
@@ -1029,7 +1080,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             k.setData('kind', kind);
             const b = body(k);
             b.setEnable(true);
-            b.setSize(12, 12, true);
+            this.fitBody(k, 14, 14);
             b.setAllowGravity(true);
             b.setVelocity(0, -30);
             b.setBounce(0.3);

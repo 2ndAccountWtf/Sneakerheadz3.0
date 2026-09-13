@@ -26,6 +26,7 @@ import { generateSideQuest, QUEST_OFFER_CHANCE, MAX_ACTIVE_QUESTS } from '../sys
 import { rollDigestiveOutcome, attemptBathroom, disasterOutcomes, emergencyHeadline, startEmergency } from '../systems/digestion/emergency';
 import { rollGasIncident, settleGas } from '../systems/digestion/gas';
 import { bathroomsIn } from '../data/bathrooms';
+import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { MAX_SOFT_STAT } from '../constants';
 
 // Game Actions
@@ -62,7 +63,11 @@ type Action =
     // --- Digestion ---
     | { type: 'USE_BATHROOM'; payload: { bathroomId: string } }
     | { type: 'EMERGENCY_EXPIRED' }
-    | { type: 'GAS_INCIDENT'; payload: { npcId: string } };
+    | { type: 'GAS_INCIDENT'; payload: { npcId: string } }
+    // --- City happenings ---
+    | { type: 'ROLL_CITY_EVENT' }
+    | { type: 'ACCEPT_CITY_EVENT' }
+    | { type: 'DECLINE_CITY_EVENT' };
 
 interface GameContextType {
     gameState: GameState;
@@ -79,6 +84,7 @@ interface GameContextType {
     launchMiniGame: (req: MiniGameRequest) => void;
     takeNap: () => void;
     useBathroom: (bathroomId: string) => void;
+    rollCityEvent: () => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -277,6 +283,8 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             }
 
             // Nothing dramatic happened — somebody may still want an errand run.
+            // (A city event is rolled separately once the player is on the
+            // dashboard, so an arrival never stacks two modals.)
             const offerQuest =
                 state.quests.length < MAX_ACTIVE_QUESTS && Math.random() < QUEST_OFFER_CHANCE;
 
@@ -850,6 +858,27 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             };
         }
 
+        case 'ROLL_CITY_EVENT': {
+            // Never interrupt something already on screen.
+            if (state.activeCityEvent || state.activeMiniGame || state.activeInteraction || state.activeCutscene) return state;
+            const event = rollCityEvent(state.player, state.currentCityId, state.day);
+            return event ? { ...state, activeCityEvent: event } : state;
+        }
+
+        case 'ACCEPT_CITY_EVENT': {
+            const event = state.activeCityEvent;
+            if (!event) return state;
+            if (!event.match) return { ...state, activeCityEvent: null };
+            return { ...state, activeCityEvent: null, activeMiniGame: event.match, outcomeLog: [] };
+        }
+
+        case 'DECLINE_CITY_EVENT': {
+            const event = state.activeCityEvent;
+            if (!event) return state;
+            const next = withOutcomes({ ...state, activeCityEvent: null }, event.onDecline, event.headline);
+            return { ...next, activeCityEvent: null };
+        }
+
         case 'ABANDON_QUEST':
             return {
                 ...state,
@@ -908,6 +937,7 @@ const initialState: GameState = {
     activeMiniGame: null,
     quests: [],
     activeCutscene: null,
+    activeCityEvent: null,
 };
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -970,6 +1000,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'USE_BATHROOM', payload: { bathroomId } });
     }, []);
 
+    const rollCityEventNow = useCallback(() => {
+        dispatch({ type: 'ROLL_CITY_EVENT' });
+    }, []);
+
     // The emergency clock is real time, so something has to watch it.
     useEffect(() => {
         const emergency = gameState.player.emergency;
@@ -1010,6 +1044,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 launchMiniGame,
                 takeNap,
                 useBathroom,
+                rollCityEvent: rollCityEventNow,
             },
         },
         children,

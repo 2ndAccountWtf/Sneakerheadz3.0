@@ -211,6 +211,8 @@ export interface GameState {
     quests: SideQuest[];
     /** Cinematic full-screen takeover (Bibi gifts, the Drip collab). */
     activeCutscene: Cutscene | null;
+    /** A challenge or happening in the city you are standing in. */
+    activeCityEvent: import('./systems/events/cityEvents').CityEvent | null;
 }
 
 export interface Cutscene {
@@ -240,6 +242,7 @@ export enum Screen {
     Arcade = 'ARCADE',
     Quests = 'QUESTS',
     Bathrooms = 'BATHROOMS',
+    Venues = 'VENUES',
 }
 
 export interface AmpmItem {
