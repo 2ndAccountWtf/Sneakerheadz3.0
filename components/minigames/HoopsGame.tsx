@@ -2165,6 +2165,54 @@ const statLine = (w: World): string => {
     return bits.join(', ') + '.';
 };
 
+/**
+ * `banner()` (the shared engine helper `shout()` feeds `w.bannerText` into)
+ * draws one line at whatever size it is given and does not measure it
+ * against the canvas — fine for a short shout like "THREE!", not for the
+ * longer `SAY` lines that also become banner text (a made dunk can pick
+ * "He dunked it and then apologised. Sort of.", 44 characters, and at the
+ * banner's normal size that is wider than the whole 352px canvas — centred
+ * text that wide clips at both edges with neither its start nor its end on
+ * screen). `banner()` lives in the shared engine and is not this file's to
+ * change, so the fit happens on this side: measure in the exact font it
+ * uses and shrink the size handed to it until the string actually fits.
+ */
+const fitBannerSize = (ctx: CanvasRenderingContext2D, str: string, want: number, maxW = VW - 20): number => {
+    let size = want;
+    ctx.save();
+    ctx.font = `bold ${size}px 'Bungee', Impact, system-ui, sans-serif`;
+    while (size > 8 && ctx.measureText(str).width > maxW) {
+        size -= 1;
+        ctx.font = `bold ${size}px 'Bungee', Impact, system-ui, sans-serif`;
+    }
+    ctx.restore();
+    return size;
+};
+
+/**
+ * Same problem for the small commentator ticker (`say()` / `w.say`): shrink
+ * first, and only truncate with an ellipsis if it still will not fit even at
+ * the smallest legible size — the SAY table has some genuinely long lines
+ * mixed in with the short ones, and it will only grow.
+ */
+const fitTickerText = (ctx: CanvasRenderingContext2D, str: string, want: number, maxW = VW - 12): { text: string; size: number } => {
+    const font = (s: number) => `${s}px 'IBM Plex Mono', ui-monospace, monospace`;
+    ctx.save();
+    let size = want;
+    ctx.font = font(size);
+    while (size > 5 && ctx.measureText(str).width > maxW) {
+        size -= 0.5;
+        ctx.font = font(size);
+    }
+    let out = str;
+    if (ctx.measureText(out).width > maxW) {
+        while (out.length > 1 && ctx.measureText(out + '…').width > maxW) out = out.slice(0, -1);
+        out = out + '…';
+    }
+    ctx.restore();
+    return { text: out, size };
+};
+
 export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     // Cleared once at identity, before the camera transform below: zoomed out
     // on a fast break, the transformed scene is smaller than the physical
@@ -2246,19 +2294,24 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     bar(ctx, 6, VH - 10, 48, 4, you.onFire ? 1 : you.turbo, you.onFire ? PAL.warn : PAL.accent, PAL.panel);
     text(ctx, you.onFire ? 'ON FIRE' : 'TURBO', 58, VH - 11, { size: 6, color: you.onFire ? PAL.warn : PAL.faint });
 
-    // Commentator ticker.
+    // Commentator ticker. Shrinks (or, failing that, truncates) so a long
+    // SAY line never runs past the edges of a 352px canvas — see fitTickerText.
     if (w.sayT > 0) {
         const a = clamp(w.sayT / 0.6, 0, 1);
         ctx.save();
         ctx.globalAlpha = a;
         rect(ctx, 0, VH - 24, VW, 11, 'rgba(4,6,10,0.78)');
-        text(ctx, `🎙 ${w.say}`, VW / 2, VH - 19, { size: 7, color: PAL.warn, align: 'center', baseline: 'middle' });
+        const fit = fitTickerText(ctx, `🎙 ${w.say}`, 7);
+        text(ctx, fit.text, VW / 2, VH - 19, { size: fit.size, color: PAL.warn, align: 'center', baseline: 'middle' });
         ctx.restore();
     }
 
     if (w.bannerT > 0) {
         const pop = w.phase === 'over' ? 20 : 16 + Math.sin(w.t * 22) * 2;
-        drawBanner(ctx, w.bannerText, VW, 66, w.bannerColor, pop);
+        // Same fix, for the big centred banner — see fitBannerSize: a long
+        // SAY line lands here too (any dunk/alley/ignition shout) and this
+        // one is bold and much bigger, so it is the one that actually clips.
+        drawBanner(ctx, w.bannerText, VW, 66, w.bannerColor, fitBannerSize(ctx, w.bannerText, pop));
     }
     // A buzzer-beater's big banner is the hype line, not the score — spell
     // out who actually won underneath it so the card still reads at a glance.
