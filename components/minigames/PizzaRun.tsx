@@ -133,9 +133,14 @@ const START_LIVES = 4;
 /** Seconds of grace when the last box leaves your hands. Find a crate. */
 const DRY_GRACE = 11;
 
-/** Speed ramp: the shift gets later, the street gets emptier, you get braver. */
+/**
+ * Speed ramp. Deliberately keyed to DISTANCE down the street rather than to the
+ * clock: ramping on time would mean the longboard finishes the route before it
+ * ever reached its own ceiling, so the faster rig would post the lower top speed.
+ * Ramping on distance means both rigs spend the back half of the street flat out.
+ */
 const SPEED_START = 62;
-const SPEED_RAMP = 1.9;   // px/s of cruise added per second of shift
+const SPEED_RAMP = 105;   // px/s of cruise added across the whole route
 
 const SCORE_DELIVER = 100;
 const SCORE_WINDOW = 250;
@@ -1031,7 +1036,7 @@ export function stepRun(s: RunState, inp: RunInput, dt: number): void {
     // Cruise ramps with the shift and is capped by the rig. Holding right is a
     // sprint, holding left is the only brake you have and the main way to buy
     // yourself another half second to line a doorstep up.
-    s.cruise = Math.min(s.rig.top * s.fitness, SPEED_START + s.t * SPEED_RAMP);
+    s.cruise = Math.min(s.rig.top * s.fitness, SPEED_START + (s.x / ROUTE) * SPEED_RAMP);
     let target = s.cruise;
     if (s.wipeT > 0) target = 26;                       // sliding down the road
     else if (inp.right) target = s.cruise * s.rig.sprint;
