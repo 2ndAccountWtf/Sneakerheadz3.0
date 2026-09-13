@@ -123,6 +123,40 @@ const SWAP_COOL = 0.4;          // debounce on PASS-to-swap-control so one tap i
 export const ALLEY_HOOP_R = 80; // close enough to the rim that a jump here is a lob call
 const ALLEY_CALL_TIME = 0.5;    // how long the "I'm open, throw it here" cue shows
 const THREE_DIST = 118;         // beyond this a bucket is worth 3
+/** A look from deep with nobody within this reads as genuinely open — worth
+ * the risk. Inside CONTEST_R from deep reads as a bad shot, not just a long
+ * two. See the `threeModifier` note on `shotChance` for why this exists. */
+const THREE_OPEN_R = 46;
+
+/**
+ * PASS is two buttons in one, same as SHOOT already is. Tap it and it is
+ * gone before anyone reacts — a flat, fast bullet, beaten only by a body
+ * already standing in the lane. Hold it a beat and the wind-up tell (see the
+ * charge pip in `drawPlayer`) turns into a lob: high, slow, visibly coming,
+ * and the one throw that actually clears a man standing in between — which
+ * is the whole point, since it is also the only throw an alley-oop finishes
+ * off. `PASS_HOLD_TIME` is short enough that "I meant to bullet it" never
+ * accidentally lobs, but long enough that a deliberate hold reads as one;
+ * `PASS_MAX_HOLD` exists only so a stuck button does not sit there forever —
+ * it just lets go as a lob once you have clearly committed to holding it.
+ */
+const PASS_HOLD_TIME = 0.16;
+const PASS_MAX_HOLD = 0.55;
+const BULLET_ARC = 16;   // flat — this is the number that used to be the only pass
+const LOB_ARC = 48;      // high enough to read as a real lob, not just a bigger bullet
+/** A defender who reads the wind-up and gets under the landing spot with
+ * this much of the flight still to go can pick a lob off — "getting under it
+ * early", not merely being nearby when it lands. See the `camper` field on
+ * `Ball` and the two-phase check in `stepBall`. */
+const LOB_CAMP_R = 15;
+
+/** How close a shot in flight has to be getting to the rim, and how far into
+ * its own flight, before it is legally goaltendable — see the in-flight
+ * check in `stepBall`. Too early and a defender could swat a shot that just
+ * left the shooter's hand from half the court away; this keeps it to what it
+ * actually is: a save on the way down, near the hoop. */
+const GOALTEND_R = 30;
+const GOALTEND_MIN_T = 0.52;
 
 export const SHOT_CHARGE_TIME = 0.62;  // seconds for the release meter to fill
 export const SHOT_SWEET = 0.84;        // sweet spot near the top of the meter
@@ -159,7 +193,24 @@ const SLOWMO_FACTOR = 0.42;
 /* Commentary                                                          */
 /* ------------------------------------------------------------------ */
 
-const SAY = {
+/**
+ * The short punch that goes over the top of a basket, paired with the pool the
+ * commentary line underneath is drawn from. Two jobs, two voices: the banner
+ * hits, the ticker talks about it.
+ *
+ * These three used to `shout` and `say` out of the *same* pool, so one basket
+ * fired two different jokes at once and, whenever the random pick landed twice
+ * on the same entry, the identical sentence appeared on screen in two sizes.
+ * Keyed by pool name so `tests/hoops.test.mts` can assert the banner is never
+ * a line its own ticker could also say.
+ */
+export const BANNER = {
+    alley: 'ALLEY-OOP!',
+    putback: 'TIP IN!',
+    dunk: 'BOOMSHAKALAKA!',
+} as const;
+
+export const SAY = {
     make: [
         'Count it. And the trash talk.',
         'Wet. Absolutely wet.',
@@ -173,7 +224,8 @@ const SAY = {
         'Deep! Deeper than his knowledge of the rules.',
     ],
     dunk: [
-        'BOOMSHAKALAKA!',
+        // No 'BOOMSHAKALAKA!' here — that is the banner over the top of this
+        // line, and the two must never be able to say the same words.
         'The rim owes him money!',
         'Somebody check on that backboard.',
         'He dunked it and then apologised. Sort of.',
@@ -214,9 +266,23 @@ const SAY = {
         'On the ground! Somebody help him up. Eventually.',
     ],
     alley: [
-        'ALLEY-OOP!',
+        // No 'ALLEY-OOP!' here — that is the banner. Same rule as SAY.dunk.
         'OFF THE PASS!',
         'They called that one at the diner!',
+    ],
+    // A rebound claimed in the air, near the rim, finished before landing —
+    // see the tip-in branch of the loose-ball pickup in stepBall.
+    putback: [
+        'PUT IT BACK!',
+        'HE CLEANS UP HIS OWN MESS!',
+        'SECOND CHANCE, NO CHANCE!',
+    ],
+    // Legal here, unlike real basketball — a shot swatted on the way down.
+    // See the in-flight goaltend check in stepBall.
+    goaltend: [
+        'GOALTENDING! AND IT COUNTS!',
+        'HE SWATTED IT ON THE WAY DOWN!',
+        'THAT WAS GOING IN AND HE SAID NO!',
     ],
     heat: ['He is heating up!', 'Two in a row — he is feeling it.'],
     fire: ['HE IS ON FIRE!', 'CALL THE FIRE DEPARTMENT!'],
@@ -286,8 +352,10 @@ export interface Player {
     dunkFrom: { x: number; z: number };
     dunkHoop: number;
     dunkSlammed: boolean;
-    /** What kind of slam this is — drives the announcer line and the flourish. */
-    dunkKind: 'normal' | 'turbo' | 'alley';
+    /** What kind of slam this is — drives the announcer line and the flourish.
+     * 'tip' is a put-back finished straight out of a rebound jump, not a
+     * drive — see the tip-in branch of the loose-ball pickup in stepBall. */
+    dunkKind: 'normal' | 'turbo' | 'alley' | 'tip';
     aiTimer: number;            // AI re-decides on a cadence, not every frame
     /** Shoved: down and uncontrollable until this reaches 0. See attemptShove(). */
     stumbleT: number;
@@ -295,6 +363,19 @@ export interface Player {
     alleyCall: number;
     /** Debounce after a PASS-button control swap. */
     swapCool: number;
+    /**
+     * Seconds PASS has been held with the ball; < 0 means "not charging a
+     * pass". Mirrors `charge` for shots: release (or let it run past
+     * PASS_MAX_HOLD) decides bullet vs lob off how long this has run. See
+     * the wind-up pip in `drawPlayer` and the release logic in
+     * `humanControl`.
+     */
+    passChargeT: number;
+    /** Give-and-go window: set the instant this player passes the ball away
+     * (see `launchPass`) so the AI off-ball branch in `aiThink` cuts hard to
+     * the rim looking for it right back, instead of just spacing up like any
+     * other off-ball moment. Counts down to 0 in `stepWorld`. */
+    cutT: number;
 }
 
 export type BallMode = 'held' | 'flight' | 'loose';
@@ -324,6 +405,23 @@ export interface Ball {
      * physics and the brick-instead-of-ball render in `drawBall`.
      */
     brick: boolean;
+    /** True for a held-PASS lob, false for a tapped bullet. Decides which
+     * interception rule applies in `stepBall` and whether a catch in the air
+     * near the rim can finish as an alley-oop. See `launchPass`. */
+    lob: boolean;
+    /** id of the defender who read a lob's wind-up and got under the landing
+     * spot early enough to contest the catch — set once, mid-flight, by the
+     * "camp" check in `stepBall`; null until (and unless) that happens. */
+    camper: number | null;
+    /** True while this loose ball is specifically a missed-shot rebound
+     * (as opposed to one that came loose from a block, a shove or a steal) —
+     * gates the rebound stat, the jump-contest weighting and tip-ins in the
+     * loose-ball pickup logic in `stepBall`. Reset to false by `looseBall`
+     * and set true only by the two miss branches. */
+    rebound: boolean;
+    /** The shooting team, valid only while `rebound` is true — who a
+     * put-back in the loose-ball scramble below actually credits. */
+    missTeam: 0 | 1;
 }
 
 interface Particle {
@@ -396,6 +494,11 @@ export interface World {
         shots: number; makes: number; dunks: number; steals: number; blocks: number;
         /** Completed passes and the picks that killed them — separate from hand steals. */
         passes: number; interceptions: number;
+        /** The two pass kinds, split out — see `launchPass` — and, since they
+         * are picked off in completely different ways, the interceptions
+         * split the same way. `interceptions` is always their sum. */
+        bulletPasses: number; lobPasses: number;
+        bulletPicks: number; lobPicks: number;
         /** TURBO+PASS on defence: attempts and the ones that connected. */
         shoves: number; shovesLanded: number;
         alleyOops: number; turboDunks: number;
@@ -403,6 +506,15 @@ export interface World {
         fires: number;
         /** Misses ugly enough to render as an actual brick. See `launchShot`. */
         bricks: number;
+        /** Deliberate three-point makes — see the `threeModifier` note on `shotChance`. */
+        threes: number;
+        /** Every board off a missed shot, and the subset kept by the shooting
+         * team. See the loose-ball pickup logic in `stepBall`. */
+        rebounds: number; offRebounds: number;
+        /** A rebound claimed in the air, near the rim, finished immediately. */
+        tipIns: number;
+        /** A shot swatted in flight, on its way down near the rim — legal. */
+        goaltends: number;
     };
 }
 
@@ -449,7 +561,8 @@ const shout = (w: World, s: string, color: string, hold = 1.4) => {
  */
 const sfx = (
     _id: 'swish' | 'three' | 'dunk' | 'brick' | 'block' | 'shove' | 'steal'
-        | 'intercept' | 'alley' | 'fire' | 'buzzer' | 'whistle',
+        | 'intercept' | 'alley' | 'fire' | 'buzzer' | 'whistle'
+        | 'pass' | 'lob' | 'goaltend' | 'tipin' | 'rebound',
 ): void => {
     // no-op — see the note above.
 };
@@ -560,6 +673,7 @@ const mkPlayer = (
     turbo: 1, charge: -1, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
+    passChargeT: -1, cutT: 0,
 });
 
 const mkBall = (): Ball => ({
@@ -569,6 +683,7 @@ const mkBall = (): Ball => ({
     t: 0, dur: 1, sx: 0, sz: 0, sy: 0, tx: 0, tz: 0, ty: 0, arc: 0,
     kind: 'pass', made: false, pts: 2, shooter: 0, target: 0,
     looseT: 0, pickCool: 0, brick: false,
+    lob: false, camper: null, rebound: false, missTeam: 0,
 });
 
 /**
@@ -636,8 +751,11 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
         endReason: 'target',
         stats: {
             shots: 0, makes: 0, dunks: 0, steals: 0, blocks: 0,
-            passes: 0, interceptions: 0, shoves: 0, shovesLanded: 0,
+            passes: 0, interceptions: 0, bulletPasses: 0, lobPasses: 0,
+            bulletPicks: 0, lobPicks: 0,
+            shoves: 0, shovesLanded: 0,
             alleyOops: 0, turboDunks: 0, fires: 0, bricks: 0,
+            threes: 0, rebounds: 0, offRebounds: 0, tipIns: 0, goaltends: 0,
         },
     };
     say(w, pick(w, SAY.tip));
@@ -651,6 +769,7 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
 const giveBall = (w: World, id: number) => {
     w.possession = id;
     w.players[id].touchT = 0;
+    w.players[id].passChargeT = -1;
     w.ball.mode = 'held';
     w.ball.pickCool = 0.25;
     w.ball.brick = false;         // caught clean — whatever it was, it isn't one anymore
@@ -668,6 +787,10 @@ const looseBall = (w: World, x: number, z: number, y: number, vx: number, vy: nu
     // Default to "not a brick" — the one call site that wants it (a bad miss,
     // in stepBall) sets it back to true right after calling this.
     b.brick = false;
+    // Default to "not a rebound" — only the two miss branches in stepBall set
+    // this true right after calling looseBall, same pattern as brick above.
+    // A ball loose from a block, a shove or a steal is not a rebound battle.
+    b.rebound = false;
 };
 
 /**
@@ -689,7 +812,7 @@ const inbound = (w: World, receivingTeam: 0 | 1) => {
     for (const p of w.players) {
         p.vx = 0; p.vz = 0; p.y = 0; p.vy = 0;
         p.charge = -1; p.cool = 0; p.dunkT = 0;
-        p.stumbleT = 0; p.alleyCall = 0;
+        p.stumbleT = 0; p.alleyCall = 0; p.passChargeT = -1; p.cutT = 0;
         p.facing = p.team === receivingTeam ? (inw as 1 | -1) : (-inw as 1 | -1);
     }
     giveBall(w, recv[0].id);
@@ -726,13 +849,36 @@ const contestFactor = (w: World, p: Player) => {
 export const releaseQuality = (charge: number) =>
     clamp(1 - Math.abs(charge - SHOT_SWEET) / SHOT_WINDOW, 0, 1);
 
+/**
+ * A three is barely a decision on its own: `baseFromDist` is a single line
+ * all the way out, so a deep shot is just "a longer two" with worse odds —
+ * nothing about it is a genuinely different choice. This is the sharpening:
+ * a look from behind the arc with real space (nobody within THREE_OPEN_R) is
+ * meaningfully BETTER than the plain distance falloff says, because that
+ * space is exactly what you traded the closer, safer two for — and a three
+ * taken with a hand already in your face is meaningfully WORSE, because nothing
+ * about being 20 feet out instead of 15 makes a bad, contested look a good
+ * idea. Two-point shots are untouched; this only ever multiplies a shot that
+ * is already beyond THREE_DIST.
+ */
+const threeModifier = (w: World, p: Player, d: number) => {
+    if (d <= THREE_DIST) return 1;
+    const open = openness(w, p);
+    if (open >= THREE_OPEN_R) return 1.3;
+    if (open < CONTEST_R) return 0.6;
+    return 1;
+};
+
 const shotChance = (w: World, p: Player, q: number, skill: number) => {
     const h = HOOPS[attackHoop(p.team)];
     const d = hoopDist(p, h);
     // Release quality is the biggest lever the player actually controls.
     const rel = 0.5 + 0.75 * q;
     const fire = p.onFire ? 1.42 : 1;
-    return clamp(baseFromDist(d) * contestFactor(w, p) * rel * fire * skill, 0.03, p.onFire ? 0.97 : 0.93);
+    return clamp(
+        baseFromDist(d) * contestFactor(w, p) * threeModifier(w, p, d) * rel * fire * skill,
+        0.03, p.onFire ? 0.97 : 0.93,
+    );
 };
 
 const launchShot = (w: World, p: Player, q: number, skill: number, heave = false) => {
@@ -800,16 +946,46 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
  * the lane, is genuinely more interceptable: see the pick check in
  * `stepBall`, which samples the ball's actual interpolated position, not the
  * receiver's.
+ *
+ * Two kinds, chosen by how long PASS was held (see `humanControl`) or by
+ * which situation the AI is reading (an explicit `{ lob: true }` for a
+ * deliberate alley-oop feed, nothing for the everyday bullet):
+ *
+ *  - A **bullet** (`lob` false) is fast and flat. It has to get over a
+ *    standing defender or it is not a pass at all — see the long note this
+ *    replaced below on why the arc sits at BULLET_ARC and not lower. It is
+ *    genuinely interceptable by a body already in the passing lane, which is
+ *    exactly the risk a tap-pass is supposed to carry.
+ *  - A **lob** (`lob` true) is slower and arcs high enough that it sails
+ *    clean over anyone standing in between — the trade is that it is
+ *    telegraphed (see the wind-up pip in `drawPlayer`), so a defender who
+ *    reads it and gets under the landing spot early enough can still take it
+ *    away. See the two-phase "camp" check in `stepBall`. It is also the only
+ *    pass kind that finishes as an alley-oop if it lands on a man already up
+ *    over the rim — a bullet arriving on a jumping teammate is just a catch.
+ *
+ * This was one pass for everything, at a fixed dur/arc regardless of which
+ * you meant to throw — see the interception-rate history in `stepBall`'s
+ * pick check for why that flattened the whole passing game and how the
+ * numbers were actually measured.
  */
-const launchPass = (w: World, from: Player, to: Player) => {
+const launchPass = (w: World, from: Player, to: Player, opts: { lob?: boolean } = {}) => {
     const b = w.ball;
+    const lob = !!opts.lob;
     const d = dist2d(from.x, from.z, to.x, to.z);
-    const dur = 0.2 + d / 420;      // passes are fast; this is not a patient sport
+    // A bullet is fast — this is not a patient sport. A lob deliberately
+    // hangs longer over the same distance: that extra time in the air is the
+    // whole reason it is readable, and why holding for one over a short gap
+    // (where the receiver is basically already open) barely costs anything,
+    // while holding one over a long gap gives the defence real time to close.
+    const dur = lob ? 0.34 + d / 300 : 0.2 + d / 420;
     // Lead by where the receiver will be when the ball actually arrives.
     const leadX = clamp(to.x + to.vx * dur, COURT_L, COURT_R);
     const leadZ = clamp(to.z + to.vz * dur, Z_MIN, Z_MAX);
     b.mode = 'flight';
     b.kind = 'pass';
+    b.lob = lob;
+    b.camper = null;
     b.shooter = from.id;
     b.target = to.id;
     b.made = false;
@@ -817,7 +993,7 @@ const launchPass = (w: World, from: Player, to: Player) => {
     b.dur = dur;
     b.sx = from.x; b.sz = from.z; b.sy = 18 + from.y;
     b.tx = leadX; b.tz = leadZ; b.ty = 18;
-    // A pass has to get over a standing defender, or it is not a pass.
+    // A bullet has to get over a standing defender, or it is not a pass.
     //
     // This was 7, which puts the ball's mid-flight peak at y≈25 against an
     // interception ceiling of y<26 — so every pass flew flat, a single pixel
@@ -832,23 +1008,34 @@ const launchPass = (w: World, from: Player, to: Player) => {
     // the catch. A long pass is still the risky one — `dur` scales with
     // distance, so it spends longer hanging over the receiver with defenders
     // converging, which is exactly the lazy cross-court ball that should be
-    // punished.
-    b.arc = 16;
+    // punished. A lob goes much higher still (LOB_ARC) — high enough that the
+    // in-lane pick below never applies to it at all; its risk is the entirely
+    // separate "camp the landing spot" check.
+    b.arc = lob ? LOB_ARC : BULLET_ARC;
     from.facing = to.x > from.x ? 1 : -1;
     from.cool = 0.2;
+    // Give-and-go: you just gave the ball up — cut to the rim looking for it
+    // right back instead of standing around spacing up like any other
+    // off-ball moment. Not for a lob: that throw is already the deliberate
+    // alley-oop feed, and the passer there is not the one who should cut.
+    if (!lob) from.cutT = 0.9;
     w.possession = null;
     w.stats.passes++;
+    if (lob) w.stats.lobPasses++; else w.stats.bulletPasses++;
+    sfx(lob ? 'lob' : 'pass');
 };
 
-const startDunk = (w: World, p: Player, opts: { kind?: 'normal' | 'turbo' | 'alley' } = {}) => {
+const startDunk = (w: World, p: Player, opts: { kind?: 'normal' | 'turbo' | 'alley' | 'tip' } = {}) => {
     const hi = attackHoop(p.team);
     // Non-zero: dunkT > 0 IS the "I am dunking" flag, and the frame loop hands
     // the body over to stepDunk on that test. Starting it at exactly 0 would
     // leave the dunk un-run and re-triggerable every frame.
     p.dunkT = 0.0001;
-    // An alley-oop starts from wherever the player already is (airborne, near
-    // the rim) so the finish is quick; everything else gets the full drive.
-    p.dunkDur = opts.kind === 'alley' ? 0.38 : opts.kind === 'turbo' ? 0.8 : 0.72;
+    // An alley-oop or a tip-in both start from wherever the player already is
+    // (airborne, near the rim) so the finish is quick; a drive gets the full
+    // wind-up. A tip is the quickest of all — it is a ball already at the rim
+    // being redirected, not a body travelling to meet one.
+    p.dunkDur = opts.kind === 'tip' ? 0.28 : opts.kind === 'alley' ? 0.38 : opts.kind === 'turbo' ? 0.8 : 0.72;
     p.dunkFrom = { x: p.x, z: p.z };
     p.dunkHoop = hi;
     p.dunkSlammed = false;
@@ -879,6 +1066,7 @@ const attemptShove = (w: World, defender: Player, handler: Player) => {
     w.stats.shovesLanded++;
     handler.stumbleT = STUMBLE_TIME;
     handler.charge = -1;
+    handler.passChargeT = -1;
     const dir = handler.x >= defender.x ? 1 : -1;
     handler.vx = dir * 130;
     handler.vz = (rng(w) - 0.5) * 0.6;
@@ -904,13 +1092,19 @@ const attemptShove = (w: World, defender: Player, handler: Player) => {
  *  4. Any bucket by the other team also resets your streak counter, which is
  *     why "he's heating up" has to be earned in one possession run.
  */
-const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal' | 'turbo' | 'alley' = 'none') => {
-    const viaDunk = dunkKind !== 'none';
+const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal' | 'turbo' | 'alley' | 'tip' = 'none') => {
+    // 'tip' is its own thing: a put-back finished straight out of a rebound
+    // jump, not a drive to the rim — it gets the announcer beat and the
+    // hitstop of a real highlight, but it is not a "dunk" for the box score
+    // or for the backboard-shatter/turbo-dunk counters below.
+    const viaDunk = dunkKind === 'normal' || dunkKind === 'turbo' || dunkKind === 'alley';
+    const viaTip = dunkKind === 'tip';
     w.score[scorer.team] += pts;
     w.lastScorer = scorer.team;
     w.stats.makes++;
+    if (pts === 3) w.stats.threes++;
     w.rimFlash[attackHoop(scorer.team)] = 0.55;
-    sfx(dunkKind === 'alley' ? 'alley' : viaDunk ? 'dunk' : pts === 3 ? 'three' : 'swish');
+    sfx(dunkKind === 'alley' ? 'alley' : viaTip ? 'tipin' : viaDunk ? 'dunk' : pts === 3 ? 'three' : 'swish');
 
     // Points, popping off the scorer rather than only up in the corner —
     // a bucket should read at the basket, where you were looking.
@@ -951,10 +1145,21 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
             });
         }
     } else if (dunkKind === 'alley') {
-        shout(w, pick(w, SAY.alley), PAL.legend, 1.6);
+        // Banner and ticker are two different jobs — the banner is the punch,
+        // the ticker is the commentary on it. These three used to draw both
+        // from the same pool, which meant two jokes fired at once for one
+        // basket and, whenever `pick` happened to land twice on the same
+        // entry, the identical sentence appeared in two sizes on one screen.
+        // Everywhere else in this function already does it the right way
+        // ('THREE!' over the top, a different line underneath); these are now
+        // consistent with it.
+        shout(w, BANNER.alley, PAL.legend, 1.6);
         say(w, pick(w, SAY.alley));
+    } else if (viaTip) {
+        shout(w, BANNER.putback, PAL.ok, 1.2);
+        say(w, pick(w, SAY.putback));
     } else if (viaDunk) {
-        shout(w, pick(w, SAY.dunk).replace(/[.!]$/, '!'), PAL.legend, 1.5);
+        shout(w, BANNER.dunk, PAL.legend, 1.5);
         say(w, pick(w, SAY.dunk));
     } else if (scorer.streak === 2) {
         // "Heating up" is the tension cue — it beats the plain three-point
@@ -972,12 +1177,16 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
     w.stats.dunks += viaDunk ? 1 : 0;
     if (dunkKind === 'turbo') w.stats.turboDunks++;
     if (dunkKind === 'alley') w.stats.alleyOops++;
+    if (viaTip) w.stats.tipIns++;
 
     // Hitstop on a made dunk, scaled to how big a deal it is — a plain slam
     // barely registers, a fire dunk is the biggest freeze in the game (see
     // the backboard-shatter block just below, which stacks its own on top).
+    // A tip-in is a hustle play, not a highlight — a much smaller punch.
     if (viaDunk) {
         w.hitstop = Math.max(w.hitstop, dunkKind === 'alley' ? 0.09 : dunkKind === 'turbo' ? 0.08 : 0.06);
+    } else if (viaTip) {
+        w.hitstop = Math.max(w.hitstop, 0.05);
     }
 
     // Backboard shatter: earned, not cheap — only a dunk landed by a player
@@ -997,7 +1206,7 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
     }
 
     w.phase = 'score';
-    w.phaseT = viaDunk ? 1.15 : 0.95;
+    w.phaseT = (viaDunk || viaTip) ? 1.15 : 0.95;
     w.possession = null;
     w.ball.mode = 'loose';
     w.ball.brick = false;
@@ -1057,24 +1266,106 @@ const speedOf = (p: Player, turbo: boolean) => {
     return s;
 };
 
-const applyMove = (p: Player, dx: number, dz: number, speed: number, dt: number) => {
+/**
+ * Movement has weight. `applyMove` used to assign velocity directly — a body
+ * went from a dead stop to full speed, or full speed to a dead stop, in one
+ * frame, and a player sprinting one way could reverse into the other
+ * direction just as instantly. Nothing about that reads as a body; it reads
+ * as a cursor. Real acceleration fixes three things at once:
+ *
+ *  - Starting to move ramps up rather than snapping to top speed.
+ *  - Letting go of the stick coasts to a stop (`MOVE_FRICTION`) rather than
+ *    braking dead — a beaten defender can still get run through for a beat.
+ *  - Reversing direction costs something for free: the ramp has to cross
+ *    zero on the way to the new target, so a hard cut the other way is
+ *    measurably slower to complete than starting from a stand-still. That is
+ *    the whole mechanism that makes a hard cut able to beat a defender who
+ *    committed the wrong way — nothing else has to model it separately.
+ *
+ * TURBO does not just raise the speed ceiling — `MOVE_ACCEL_TURBO` raises the
+ * accel too, so it reads as a burst off the mark and not merely "everything
+ * is faster now". It is deliberately a bigger multiplier than `TURBO_MULT`
+ * (2.4 against 1.52): matching them would mean turbo reached its higher top
+ * speed in the same time walking reached its lower one, which is a number
+ * going up rather than an explosion off the mark.
+ *
+ * The friction number is the one that decides whether any of this is felt at
+ * all. At 780 px/s^2 a walking stop slid 3px — a fifth of a body width, on a
+ * 284px court. Technically momentum, invisible in play. At 300 a walking stop
+ * slides about two-thirds of a body and a turbo stop slides a body and a
+ * half, which is enough that you plan the stop instead of discovering it.
+ *
+ * Slower stopping is a cost, and the turbo burst is what pays for it: with
+ * the skid lengthened and turbo left alone, the harness bot drops from 48%
+ * to 35% and the game gets worse. With both, it holds 48% quiet / 42% busy
+ * / 18% clumsy — better than the snappier build on two of the three — and
+ * dunks per game go up, because a burst that actually bursts gets people to
+ * the rim. The pair is the change; neither half is it on its own.
+ */
+const MOVE_ACCEL = 560;          // px/s^2 ramping toward the target velocity
+const MOVE_ACCEL_TURBO = 2.4;    // turbo explodes off the line
+const MOVE_FRICTION = 300;       // px/s^2 coasting to a stop once input lets go
+
+const stepToward = (cur: number, target: number, maxDelta: number) =>
+    cur < target ? Math.min(cur + maxDelta, target) : Math.max(cur - maxDelta, target);
+
+const applyMove = (p: Player, dx: number, dz: number, speed: number, dt: number, turbo = false) => {
     // dz is in z-units; convert to the same scale as x so diagonal movement
-    // isn't faster than straight movement.
+    // isn't faster than straight movement, and so accel/friction — both
+    // flat px/s^2 numbers — apply evenly in both directions.
     const len = Math.hypot(dx, dz * Z_PX);
-    if (len < 0.001) { p.vx = 0; p.vz = 0; return; }
-    const nx = dx / len;
-    const nz = (dz * Z_PX) / len;
-    p.vx = nx * speed;
-    p.vz = (nz * speed) / Z_PX;
+    let tvx = 0, tvzScaled = 0;
+    if (len > 0.001) {
+        const nx = dx / len;
+        const nzScaled = (dz * Z_PX) / len;
+        tvx = nx * speed;
+        tvzScaled = nzScaled * speed;
+        if (Math.abs(nx) > 0.25) p.facing = nx > 0 ? 1 : -1;
+    }
+    // No input (or already on target) coasts down under friction instead of
+    // ramping toward zero at the accel rate — letting go should feel like
+    // letting go, not like braking as hard as you were just sprinting.
+    const rate = (len > 0.001 ? MOVE_ACCEL * (turbo ? MOVE_ACCEL_TURBO : 1) : MOVE_FRICTION) * dt;
+    const vzScaled = p.vz * Z_PX;
+    p.vx = stepToward(p.vx, tvx, rate);
+    p.vz = stepToward(vzScaled, tvzScaled, rate) / Z_PX;
     p.x += p.vx * dt;
     p.z += p.vz * dt;
-    p.stride += (speed * dt) / 11;
-    if (Math.abs(nx) > 0.25) p.facing = nx > 0 ? 1 : -1;
+    // Stride tracks the body's actual speed now, not the speed it is merely
+    // headed toward — a player still ramping up visibly still looks like it.
+    const speedNow = Math.hypot(p.vx, p.vz * Z_PX);
+    p.stride += (speedNow * dt) / 11;
 };
 
 const clampToCourt = (p: Player) => {
     p.x = clamp(p.x, COURT_L, COURT_R);
     p.z = clamp(p.z, Z_MIN, Z_MAX);
+};
+
+/**
+ * A defender who has actually cut off the driving lane — not merely
+ * "somewhere nearby", but sitting between the ball handler and the rim they
+ * want — slows the drive down. `contestFactor` already punishes the shot at
+ * the *end* of a drive; without this, standing in the lane on the way there
+ * did nothing at all, which is exactly the gap that makes defence feel like
+ * a thing you do while waiting for the ball back rather than a way to win.
+ * Only ever applies to the ball handler — everyone else's speed is
+ * untouched — and only to defenders standing between them and their own
+ * hoop, not a body trailing the play from behind.
+ */
+const laneBlockFactor = (w: World, p: Player): number => {
+    if (w.possession !== p.id) return 1;
+    const hoop = HOOPS[attackHoop(p.team)];
+    let worst = 1;
+    for (const o of w.players) {
+        if (o.team === p.team || o.stumbleT > 0) continue;
+        const d = dist2d(p.x, p.z, o.x, o.z);
+        if (d >= 22) continue;
+        const towardHoop = (hoop.x - p.x) * (o.x - p.x) > 0;
+        if (!towardHoop) continue;
+        worst = Math.min(worst, 0.6 + 0.4 * (d / 22));
+    }
+    return worst;
 };
 
 /* ------------------------------------------------------------------ */
@@ -1124,7 +1415,10 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // below — the jump only hangs for a fraction of a second, and
             // waiting for the next 0.18s tick would miss it more often than not.
             if (mate.y > 6 && mate.dunkT === 0 && hoopDist(mate, hoop) < ALLEY_HOOP_R) {
-                launchPass(w, p, mate);
+                // Always a lob — this is the deliberate alley-oop feed, and
+                // only a lob finishes as one (see the arrival check in
+                // stepBall). A bullet thrown at a jumping man is just a catch.
+                launchPass(w, p, mate, { lob: true });
             } else if (d < range && open > 10) {
                 startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
             } else if (p.aiTimer <= 0) {
@@ -1157,16 +1451,28 @@ const aiThink = (w: World, p: Player, dt: number) => {
     } else if (w.possession !== null && w.players[w.possession].team === p.team) {
         /* --- off the ball on offence ----------------------------------- */
         const handler = w.players[w.possession];
-        // Spot up on the opposite depth lane, a comfortable jumper away from
-        // the rim, and slide away from whoever is guarding you.
-        const side = handler.z > 0.5 ? 0.24 : 0.76;
-        tz = side;
-        tx = hoop.x + hoop.inward * (58 + Math.sin(w.t * 0.7 + p.id) * 26);
         const guard = opponentsOf(w, p).sort(
             (a, c) => dist2d(a.x, a.z, p.x, p.z) - dist2d(c.x, c.z, p.x, p.z),
         )[0];
-        if (dist2d(guard.x, guard.z, p.x, p.z) < 22) tx += (p.x - guard.x) * 1.4;
-        turbo = p.turbo > 0.4 && dist2d(p.x, p.z, tx, tz) > 70;
+        if (p.cutT > 0) {
+            // Give-and-go: you just gave the ball up (see the cutT note on
+            // launchPass) — cut hard to the rim looking for the return pass
+            // instead of spacing up like any other off-ball moment. A
+            // teammate who only ever floats to a spot is not really playing
+            // with you; one who cuts after every pass is worth guarding.
+            tx = hoop.x + hoop.inward * 22;
+            tz = handler.z > 0.5 ? 0.3 : 0.7;
+            turbo = p.turbo > 0.35;
+        } else {
+            // Spot up on the opposite depth lane, a comfortable jumper away
+            // from the rim, and slide away from whoever is guarding you.
+            const side = handler.z > 0.5 ? 0.24 : 0.76;
+            tz = side;
+            tx = hoop.x + hoop.inward * (58 + Math.sin(w.t * 0.7 + p.id) * 26);
+            if (dist2d(guard.x, guard.z, p.x, p.z) < 22) tx += (p.x - guard.x) * 1.4;
+
+            turbo = p.turbo > 0.4 && dist2d(p.x, p.z, tx, tz) > 70;
+        }
 
         // Alley-oop cut: slip backdoor and go up for the lob when the rim is
         // close, nobody's tight on you, and the handler still has time to see
@@ -1176,7 +1482,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
         const guardClose = dist2d(guard.x, guard.z, p.x, p.z) < 14;
         if (
             p.y === 0 && p.aiTimer <= 0 && !guardClose && handler.cool <= 0
-            && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.038
+            && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.05
         ) {
             p.vy = JUMP_V;
             p.alleyCall = ALLEY_CALL_TIME;
@@ -1236,11 +1542,30 @@ const aiThink = (w: World, p: Player, dt: number) => {
                 }
             }
         } else {
-            // Off the ball: deny the other man, shading toward the rim.
+            // Off the ball: normally deny the other man, shading toward the
+            // rim. But if your own partner has actually been beaten off the
+            // dribble — not just "not the closest", genuinely lost the
+            // handler — staying glued to a man who is not the one hurting
+            // you is a way to lose cleanly. Rotate over to help contain the
+            // drive instead; a teammate who denies the pass but never covers
+            // for a beaten partner is a defence in name only.
             const mark = opponentsOf(w, p).find(o => o.id !== handler.id)!;
-            tx = mark.x + (ownHoop.x > mark.x ? 14 : -14);
-            tz = mark.z + (mark.z > 0.5 ? -0.08 : 0.08);
-            turbo = p.turbo > 0.5 && dist2d(p.x, p.z, tx, tz) > 60;
+            // Genuinely beaten, not just "not glued to him": real separation,
+            // AND the handler is actually somewhere the separation matters —
+            // a defender thirty feet from the ball near midcourt is not a
+            // crisis, and treating it as one had the second man abandoning
+            // his own mark constantly, which just traded one open man for
+            // another instead of actually shoring up the defence.
+            const beaten = dist2d(mate.x, mate.z, handler.x, handler.z) > 40 && hoopDist(handler, ownHoop) < 140;
+            if (beaten) {
+                tx = ownHoop.x + ownHoop.inward * 24;
+                tz = handler.z;
+                turbo = p.turbo > 0.3 && dist2d(p.x, p.z, tx, tz) > 30;
+            } else {
+                tx = mark.x + (ownHoop.x > mark.x ? 14 : -14);
+                tz = mark.z + (mark.z > 0.5 ? -0.08 : 0.08);
+                turbo = p.turbo > 0.5 && dist2d(p.x, p.z, tx, tz) > 60;
+            }
         }
     } else {
         /* --- loose ball: everybody crashes ------------------------------ */
@@ -1262,12 +1587,40 @@ const aiThink = (w: World, p: Player, dt: number) => {
             turbo = true;
         }
         turbo = turbo || p.turbo > 0.15;
+
+        // Goaltending: a shot already in flight, well into its back half and
+        // closing on the rim, is legal to swat — see the check in stepBall.
+        // Without this, no defender ever gets there in time to try: the AI
+        // otherwise only jumps to contest a shot before it leaves the hand.
+        // Gated on already being right on top of the ball's actual current
+        // spot (the same radius the resolution check itself uses), not just
+        // "somewhere near the rim" — a defender who has not actually beaten
+        // the shot back to the hoop should not get a free swing at it just
+        // because the rim is nearby.
+        if (
+            b.mode === 'flight' && b.kind === 'shot' && p.team !== w.players[b.shooter].team
+            && p.y === 0 && p.aiTimer <= 0 && b.t > GOALTEND_MIN_T - 0.08
+            && dist2d(p.x, p.z, b.x, b.z) < BLOCK_R + 4 && rng(w) < 0.05
+        ) {
+            p.vy = JUMP_V;
+            p.aiTimer = 0.4;
+        }
+
+        // Crash the boards: a real rebound (not a block/steal/shove) coming
+        // down nearby is worth jumping for, not just walking under — height
+        // is what wins the contest in the pickup weighting in stepBall.
+        if (
+            b.rebound && b.mode === 'loose' && p.y === 0 && p.aiTimer <= 0
+            && dist2d(p.x, p.z, b.x, b.z) < 24 && b.y > 8 && b.y < 60
+        ) {
+            const willing = p.team === b.missTeam ? 0.16 : 0.1;   // offence crashes harder
+            if (rng(w) < willing) { p.vy = JUMP_V; p.aiTimer = 0.4; }
+        }
     }
 
-    const dx = tx - p.x;
-    const dz = tz - p.z;
-    if (Math.hypot(dx, dz * Z_PX) > 3) applyMove(p, dx, dz, speedOf(p, turbo), dt);
-    else { p.vx = 0; p.vz = 0; }
+    const atTarget = Math.hypot(tx - p.x, (tz - p.z) * Z_PX) <= 3;
+    const speed = speedOf(p, turbo) * laneBlockFactor(w, p);
+    applyMove(p, atTarget ? 0 : tx - p.x, atTarget ? 0 : tz - p.z, speed, dt, turbo);
 
     if (turbo && !p.onFire) p.turbo = clamp(p.turbo - TURBO_DRAIN * dt, 0, 1);
 };
@@ -1300,8 +1653,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
 
     const dx = (cmd.right ? 1 : 0) - (cmd.left ? 1 : 0);
     const dz = (cmd.down ? 1 : 0) - (cmd.up ? 1 : 0);
-    if (dx || dz) applyMove(p, dx, dz * 0.35, speedOf(p, wantTurbo), dt);
-    else { p.vx = 0; p.vz = 0; }
+    applyMove(p, dx, dz * 0.35, speedOf(p, wantTurbo) * laneBlockFactor(w, p), dt, wantTurbo);
 
     if (p.dunkT > 0) return;   // the dunk animation owns the body
 
@@ -1325,7 +1677,21 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         // PASS always passes — no openness gate. A lazy one across the whole
         // court is exactly the pass that gets read and picked off; a sharp
         // one to a teammate who broke open is how you actually use this.
-        if (cmd.bPress && p.cool <= 0) launchPass(w, p, mate);
+        //
+        // Tap it and it is gone the instant you let go: a bullet. Hold it
+        // and — once PASS_HOLD_TIME has passed — it becomes a lob instead,
+        // released on the eventual let-go (or on PASS_MAX_HOLD, so a stuck
+        // button cannot hold the ball forever). Mirrors the shot-charge meter
+        // just above it: `cmd.b` read as a level, not the edge, is what lets
+        // this tell a tap from a hold at all.
+        if (cmd.bPress && p.cool <= 0 && p.passChargeT < 0) p.passChargeT = 0;
+        if (p.passChargeT >= 0) {
+            p.passChargeT += dt;
+            if (!cmd.b || p.passChargeT > PASS_MAX_HOLD) {
+                launchPass(w, p, mate, { lob: p.passChargeT >= PASS_HOLD_TIME });
+                p.passChargeT = -1;
+            }
+        }
     } else if (teamHasBall) {
         const hoop = HOOPS[attackHoop(p.team)];
         const nearHoop = hoopDist(p, hoop) < ALLEY_HOOP_R;
@@ -1404,12 +1770,15 @@ const stepBall = (w: World, dt: number) => {
         b.z = b.sz + (b.tz - b.sz) * t;
         b.y = b.sy + (b.ty - b.sy) * t + b.arc * 4 * t * (1 - t);
 
-        // A pass can be jumped — but only once it has left the neighbourhood.
-        // Checking from t=0 meant the passer's own defender, who is standing
-        // 8px away by definition, intercepted every pass out of pressure. A
-        // lazy cross-court pass spends a lot longer in this window than a
-        // sharp one, which is exactly the punishment the brief asked for.
-        if (b.kind === 'pass' && b.t > 0.4) {
+        // A bullet can be jumped — but only once it has left the
+        // neighbourhood. Checking from t=0 meant the passer's own defender,
+        // who is standing 8px away by definition, intercepted every pass out
+        // of pressure. A lazy cross-court pass spends a lot longer in this
+        // window than a sharp one, which is exactly the punishment the brief
+        // asked for. None of this applies to a lob — it flies high enough to
+        // clear a defender standing anywhere in between; see the camp check
+        // just below instead.
+        if (b.kind === 'pass' && !b.lob && b.t > 0.4) {
             const from = w.players[b.shooter];
             const to = w.players[b.target];
             for (const o of w.players) {
@@ -1424,6 +1793,7 @@ const stepBall = (w: World, dt: number) => {
                 if (defenderToBall >= dist2d(to.x, to.z, b.x, b.z)) continue;
                 if (b.y < 26 && defenderToBall < 5.5) {
                     w.stats.interceptions++;
+                    w.stats.bulletPicks++;
                     shout(w, 'PICKED OFF!', PAL.accent2, 0.9);
                     say(w, pick(w, SAY.intercept));
                     sfx('intercept');
@@ -1433,17 +1803,85 @@ const stepBall = (w: World, dt: number) => {
             }
         }
 
+        // A lob is telegraphed (see the wind-up pip in drawPlayer) and sails
+        // clean over anyone it passes above, so it is never picked mid-air
+        // the way a bullet is. Its risk is entirely about the landing spot:
+        // a defender who reads the wind-up and gets there EARLY — sampled
+        // here, mid-flight, well before the ball itself arrives — has jumped
+        // the route. Whether that read actually pays off is settled once,
+        // at the catch, below; this just records who qualified.
+        if (b.kind === 'pass' && b.lob && b.camper === null && b.t > 0.3 && b.t < 0.75) {
+            const from = w.players[b.shooter];
+            for (const o of w.players) {
+                if (o.team === from.team || o.stumbleT > 0) continue;
+                if (dist2d(o.x, o.z, b.tx, b.tz) < LOB_CAMP_R) { b.camper = o.id; break; }
+            }
+        }
+
+        // Goaltending: legal here, the way it is in Jam — a shot already in
+        // flight, on its way down toward the rim, can be swatted clean out of
+        // the air. This is deliberately separate from the pre-release block
+        // in `launchShot` (a defender already up as the ball leaves the
+        // shooter's hand): this one is for a defender who recovers, gets back
+        // under the rim, and rejects it late. Gated to the back half of the
+        // flight and close to the hoop so it reads as a save at the rim, not
+        // a swat from half the court away.
+        if (b.kind === 'shot' && t > GOALTEND_MIN_T) {
+            const shooterP = w.players[b.shooter];
+            const h = HOOPS[attackHoop(shooterP.team)];
+            if (dist2d(b.x, b.z, h.x, h.z) < GOALTEND_R) {
+                for (const o of w.players) {
+                    if (o.team === shooterP.team || o.stumbleT > 0) continue;
+                    if (o.y > 10 && dist2d(o.x, o.z, b.x, b.z) < BLOCK_R && rng(w) < 0.5) {
+                        w.stats.goaltends++;
+                        w.stats.blocks++;
+                        shout(w, 'GOALTENDING!', PAL.bad, 1.1);
+                        say(w, pick(w, SAY.goaltend));
+                        w.shake = Math.max(w.shake, 6);
+                        w.hitstop = Math.max(w.hitstop, 0.08);
+                        sfx('block');
+                        looseBall(
+                            w, b.x + o.facing * 8, b.z, h.h - 4,
+                            o.facing * 75 + (rng(w) - 0.5) * 20, -45, (rng(w) - 0.5) * 0.4,
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
         if (b.t >= 1) {
             if (b.kind === 'pass') {
                 const to = w.players[b.target];
-                // Alley-oop: the pass arrives while the receiver is already in
+                // A lob's landing-spot risk resolves right here: if someone
+                // camped it (see the mid-flight check above) and is still
+                // there at the catch, the read pays off more often than not —
+                // but getting under the spot early is no guarantee, since the
+                // offence can still see it coming too and crowd back in.
+                if (b.lob && b.camper !== null) {
+                    const camper = w.players[b.camper];
+                    if (
+                        camper.stumbleT <= 0
+                        && dist2d(camper.x, camper.z, b.tx, b.tz) < LOB_CAMP_R * 1.4
+                        && rng(w) < 0.65
+                    ) {
+                        w.stats.interceptions++;
+                        w.stats.lobPicks++;
+                        shout(w, 'READ THE LOB!', PAL.accent2, 0.9);
+                        say(w, pick(w, SAY.intercept));
+                        sfx('intercept');
+                        giveBall(w, camper.id);
+                        return;
+                    }
+                }
+                // Alley-oop: a LOB arrives while the receiver is already in
                 // the air near their own rim — instead of catching it, they
-                // finish it. This is the single mechanic most worth getting
-                // right: no separate button, just a pass that lands on a man
-                // already up over the hoop.
+                // finish it. Gated to a lob and not a bullet: this is the
+                // mechanic you call for on purpose by holding the button, not
+                // something that just happens to land on a jumping teammate.
                 const hoop = HOOPS[attackHoop(to.team)];
                 giveBall(w, to.id);
-                if (to.y > 6 && to.dunkT === 0 && hoopDist(to, hoop) < ALLEY_HOOP_R) {
+                if (b.lob && to.y > 6 && to.dunkT === 0 && hoopDist(to, hoop) < ALLEY_HOOP_R) {
                     startDunk(w, to, { kind: 'alley' });
                 }
             } else if (b.made) {
@@ -1460,6 +1898,10 @@ const stepBall = (w: World, dt: number) => {
                 sfx('brick');
                 looseBall(w, b.x, b.z, b.y, 0, -30, 0);
                 w.ball.brick = true;
+                // A rebound battle, same as the clean miss below — see the
+                // pickup logic further down for the jump contest and tip-ins.
+                w.ball.rebound = true;
+                w.ball.missTeam = w.players[b.shooter].team;
             } else {
                 // Clank. Live rebound off the iron, tipped back into the court.
                 const h = HOOPS[attackHoop(w.players[b.shooter].team)];
@@ -1470,6 +1912,8 @@ const stepBall = (w: World, dt: number) => {
                     h.inward * (28 + rng(w) * 42), -70 - rng(w) * 40,
                     (rng(w) - 0.5) * 0.5,
                 );
+                w.ball.rebound = true;
+                w.ball.missTeam = w.players[b.shooter].team;
             }
             return;
         }
@@ -1518,12 +1962,21 @@ const stepBall = (w: World, dt: number) => {
         // coin flip rather than a deterministic tie so a contested loose ball
         // is actually winnable by either side, not just whichever array index
         // happens to be first.
+        //
+        // A genuine rebound (see `Ball.rebound`) gets an extra factor on top
+        // of plain proximity: how high you got matters, not just how close
+        // you were standing — this is the actual "contested jump" the board
+        // is fought over. Anything else that goes loose (a block, a shove, a
+        // steal) stays the plain distance scramble it always was.
         const candidates: { p: Player; w: number }[] = [];
         for (const p of w.players) {
             if (p.dunkT > 0 || p.stumbleT > 0) continue;
             const d = dist2d(p.x, p.z, b.x, b.z);
             const reach = 12 + (p.y > 4 ? 22 : 16);
-            if (d < 13 && b.y < reach + p.y) candidates.push({ p, w: 1 / (d + 1.5) });
+            if (d < 13 && b.y < reach + p.y) {
+                const jump = b.rebound ? 1 + clamp(p.y / 26, 0, 1) * 1.5 : 1;
+                candidates.push({ p, w: jump / (d + 1.5) });
+            }
         }
         let best: Player | null = null;
         if (candidates.length === 1) {
@@ -1535,8 +1988,25 @@ const stepBall = (w: World, dt: number) => {
             best ??= candidates[candidates.length - 1].p;
         }
         if (best) {
+            const wasRebound = b.rebound;
+            if (wasRebound) {
+                w.stats.rebounds++;
+                if (best.team === b.missTeam) w.stats.offRebounds++;
+            }
             giveBall(w, best.id);
-            if (b.looseT > 0.4) say(w, `${best.name} comes up with it.`);
+            // Tip-in: an offensive board claimed IN THE AIR, near the rim,
+            // finishes immediately instead of making the player land first —
+            // the board and the put-back are the same motion, not two. Only
+            // the team that missed gets this; a defensive rebounder up near
+            // the wrong hoop is just boxing out, not finishing anything.
+            const hoop = HOOPS[attackHoop(best.team)];
+            if (wasRebound && best.team === b.missTeam && best.y > 8 && hoopDist(best, hoop) < ALLEY_HOOP_R) {
+                sfx('tipin');
+                startDunk(w, best, { kind: 'tip' });
+            } else if (b.looseT > 0.4) {
+                say(w, `${best.name} comes up with it.`);
+                if (wasRebound) sfx('rebound');
+            }
         } else if (b.looseT > 3.5) {
             // Anti-stall: nobody has scooped it, hand it to the nearest body.
             let near = w.players[0];
@@ -1737,6 +2207,7 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         p.cool = Math.max(0, p.cool - dt);
         p.swapCool = Math.max(0, p.swapCool - dt);
         p.alleyCall = Math.max(0, p.alleyCall - dt);
+        p.cutT = Math.max(0, p.cutT - dt);
         p.touchT = w.possession === p.id ? p.touchT + dt : 0;
         if (!p.onFire) p.fireT = 0;
         else {
@@ -1766,6 +2237,19 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
 
         if (p.human) humanControl(w, p, cmd, simDt);
         else aiThink(w, p, simDt);
+
+        // A burst worth spending TURBO on should be readable on screen, not
+        // just a faster number under the hood — a kicked-up dust puff at the
+        // feet while genuinely sprinting (the same speed band `isPoweringIn`
+        // already calls "powering in" for a dunk) reads as a burst without
+        // needing a dedicated "turbo on" flag threaded down here.
+        if (p.y === 0 && isPoweringIn(p) && rng(w) < 0.3) {
+            w.parts.push({
+                x: p.x - p.facing * 4, z: p.z, y: 1,
+                vx: -p.facing * 26 + (rng(w) - 0.5) * 10, vy: 12 + rng(w) * 10,
+                life: 0.25, max: 0.25, kind: 'dust',
+            });
+        }
 
         // Vertical: a single arcade jump arc, no air control, no double jump.
         if (p.y > 0 || p.vy !== 0) {
@@ -2012,6 +2496,21 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
         ctx.ellipse(x, floorY(p.z), rr, rr * 0.36, 0, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
+
+        // Behind the arc, made visible: this is the one number a real
+        // shot-selection decision hinges on (see `threeModifier`), so it
+        // does not stay a hidden distance check — a plain "3" over your own
+        // head the moment you cross the line, brighter once you're actually
+        // open enough for it to be the good look rather than the bad one.
+        if (hoopDist(p, hoop) > THREE_DIST) {
+            const openLook = openness(w, p) >= THREE_OPEN_R;
+            ctx.save();
+            ctx.globalAlpha = openLook ? 1 : 0.55;
+            text(ctx, '3', x, floorY(p.z) - h - 30, {
+                size: 7, color: openLook ? PAL.ok : PAL.accent2, align: 'center', bold: true,
+            });
+            ctx.restore();
+        }
     }
 
     if (p.onFire) {
@@ -2071,6 +2570,22 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
         const zs = ((SHOT_SWEET - SHOT_WINDOW * 0.45) / SHOT_COOK) * 24;
         const ze = ((SHOT_SWEET + SHOT_WINDOW * 0.45) / SHOT_COOK) * 24;
         rect(ctx, mx + zs, my - 2, ze - zs, 1.5, PAL.ok);
+    }
+
+    // Pass wind-up tell: the whole reason a lob is a fair trade for a bullet
+    // is that it is telegraphed — this pip is that tell. It fills at the same
+    // rate PASS is being held and flips colour the instant it crosses
+    // PASS_HOLD_TIME, which is exactly the moment the defence should start
+    // reacting to a lob instead of a bullet.
+    if (p.passChargeT >= 0) {
+        const willLob = p.passChargeT >= PASS_HOLD_TIME;
+        const mx = x - 9;
+        const my = feet - h - 15;
+        bar(
+            ctx, mx, my, 18, 2.5,
+            Math.min(1, p.passChargeT / PASS_HOLD_TIME),
+            willLob ? PAL.legend : PAL.accent2, PAL.panel,
+        );
     }
 };
 
@@ -2154,11 +2669,14 @@ const statLine = (w: World): string => {
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
     const bits = [
         `${s.makes}-for-${s.shots} shooting (${pct}%)`,
+        s.threes > 0 ? `${plural(s.threes, 'three')}` : null,
         s.dunks > 0 ? `${plural(s.dunks, 'dunk')}${s.turboDunks > 0 ? ` (${s.turboDunks} turbo)` : ''}` : null,
         s.alleyOops > 0 ? `${plural(s.alleyOops, 'alley-oop')}` : null,
+        s.tipIns > 0 ? `${plural(s.tipIns, 'tip-in')}` : null,
+        s.rebounds > 0 ? `${plural(s.rebounds, 'rebound')}${s.offRebounds > 0 ? ` (${s.offRebounds} offensive)` : ''}` : null,
         s.bricks > 0 ? `${plural(s.bricks, 'brick')}` : null,
         s.steals > 0 ? `${plural(s.steals, 'steal')}` : null,
-        s.blocks > 0 ? `${plural(s.blocks, 'block')}` : null,
+        s.blocks > 0 ? `${plural(s.blocks, 'block')}${s.goaltends > 0 ? ` (${s.goaltends} goaltended)` : ''}` : null,
         s.shovesLanded > 0 ? `${plural(s.shovesLanded, 'shove')} landed` : null,
         s.fires > 0 ? `caught fire ${s.fires}x` : null,
     ].filter((b): b is string => b !== null);
@@ -2290,9 +2808,19 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     // Turbo bar for the human, bottom-left, with a fire label when lit.
     // Whichever of your two guys you're currently driving — PASS-to-swap can
     // move this off player 0, so the HUD has to follow, not assume.
+    // Running dry used to be a silent stat change you'd only notice once you
+    // were already caught — a bar reading a number is not a warning. Below
+    // GASSED_T it visibly flashes instead, the same beat the shot-clock digit
+    // already uses when it turns urgent, so "you are about to be slow" is
+    // something you see coming, not something you find out.
     const you = w.players.find(p => p.human) ?? w.players[0];
-    bar(ctx, 6, VH - 10, 48, 4, you.onFire ? 1 : you.turbo, you.onFire ? PAL.warn : PAL.accent, PAL.panel);
-    text(ctx, you.onFire ? 'ON FIRE' : 'TURBO', 58, VH - 11, { size: 6, color: you.onFire ? PAL.warn : PAL.faint });
+    const gassed = !you.onFire && you.turbo < 0.15;
+    const turboColor = you.onFire ? PAL.warn : gassed ? PAL.bad : PAL.accent;
+    const turboFlash = gassed && Math.sin(w.t * 14) > 0;
+    bar(ctx, 6, VH - 10, 48, 4, you.onFire ? 1 : you.turbo, turboFlash ? PAL.bad : turboColor, PAL.panel);
+    text(ctx, you.onFire ? 'ON FIRE' : gassed ? 'GASSED' : 'TURBO', 58, VH - 11, {
+        size: 6, color: you.onFire ? PAL.warn : gassed ? PAL.bad : PAL.faint,
+    });
 
     // Commentator ticker. Shrinks (or, failing that, truncates) so a long
     // SAY line never runs past the edges of a 352px canvas — see fitTickerText.
@@ -2464,7 +2992,7 @@ const HoopsGame: React.FC<{
                 )
             }
             help={
-                '◀ ▶ run the court, ▲ ▼ slide in and out. With the ball: SHOOT charges a jumper (release in the green) or dunks if you\'re in range — hold TURBO while you drive and that range stretches way out. PASS throws it to your teammate; lead him or a defender will read it. Without the ball on offence: SHOOT cuts to the rim and calls for a lob — catch it in the air near the hoop for an alley-oop — PASS swaps which guy you\'re running. On defence: SHOOT jumps to block or goaltend, PASS pokes for a steal, and TURBO+PASS up close is the shove — no fouls, ball comes loose. Three straight buckets and you\'re ON FIRE until they score, and a fire dunk cracks the backboard.'
+                '◀ ▶ run the court, ▲ ▼ slide in and out. With the ball: SHOOT charges a jumper (release in the green — behind the arc, a "3" over your head, and it only pays off if you\'re actually open) or dunks if you\'re in range — hold TURBO while you drive and that range stretches way out. Tap PASS for a fast, flat bullet; hold it a beat for a lob that clears anyone standing in the way — and it\'s the only throw that finishes an alley-oop. Without the ball on offence: SHOOT cuts to the rim and calls for a lob — catch it in the air near the hoop for an alley-oop — PASS swaps which guy you\'re running. On defence: SHOOT jumps to block, goaltend a shot on its way down, or crash the boards for a rebound — grab an offensive one in the air near the rim and it tips straight back in — PASS pokes for a steal, and TURBO+PASS up close is the shove — no fouls, ball comes loose. Three straight buckets and you\'re ON FIRE until they score, and a fire dunk cracks the backboard.'
             }
         />
     );

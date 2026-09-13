@@ -23,7 +23,8 @@
 import assert from 'node:assert/strict';
 import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
-    COURT_L, COURT_R,
+    TURBO_MULT, SAY, BANNER,
+    COURT_L, COURT_R, BASE_SPEED,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
 
@@ -196,6 +197,12 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
         w.clock = GAME_SECONDS;
         w.buzzerLive = false;
         w.endHoldT = 0;
+        // A big enough hit (a block, a goaltend, a made dunk) leaves a handful
+        // of frozen hitstop frames behind, and stepWorld reads no input at all
+        // while it drains. Left over from the previous scripted attempt, that
+        // silently eats the very first frame(s) of this one — including the
+        // scripted aPress — with nothing else about the attempt looking wrong.
+        w.hitstop = 0;
         // We hand the ball over directly rather than through the real
         // (unexported) giveBall(), which is what normally resets this — left
         // stale and ticking every live-play frame, it goes negative within a
@@ -210,6 +217,12 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
         const defender = w.players[2];
         const other = w.players[3];
         defender.stumbleT = 0; other.stumbleT = 0;
+        // Movement carries momentum now (see MOVE_ACCEL / MOVE_FRICTION on
+        // applyMove) — leftover velocity from wherever a defender's own
+        // aiThink last left them, still ramping toward some earlier target,
+        // otherwise bleeds into this attempt's few scripted frames and makes
+        // "contested" a coin flip instead of a guarantee.
+        defender.vx = 0; defender.vz = 0; other.vx = 0; other.vz = 0;
         const parkedFar = farX < 176 ? COURT_R - 4 : COURT_L + 4;
         // Park BOTH opposing players every attempt — otherwise, over the
         // hundreds of simulated frames this test runs, the one defender we
@@ -333,6 +346,162 @@ t('a shot in the air when the clock hits zero finishes, made or missed, before t
 
     assert.ok(sawMake, 'never saw a buzzer-beater that went in, across 300 seeds');
     assert.ok(sawMiss, 'never saw a buzzer-beater that missed, across 300 seeds');
+});
+
+/**
+ * Movement physics: a body, not a cursor. `applyMove` used to assign
+ * velocity directly — a snap to full speed the instant a direction was held,
+ * a snap to zero the instant it was released. These checks drive the real
+ * `stepWorld` with a stationary, unopposed player (every other body parked
+ * far away, so nothing about contest, lanes or steals can interfere) and
+ * read `w.players[0].vx` off the world exactly the way the game itself does,
+ * not some exported physics internal.
+ */
+function freshMovementWorld(): World {
+    const w = createWorld(4242, 'Practice Dummy');
+    for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
+    w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS;
+    w.hitstop = 0; w.shake = 0;
+    const me = w.players[0];
+    me.x = 176; me.z = 0.5; me.vx = 0; me.vz = 0; me.charge = -1; me.dunkT = 0;
+    me.stumbleT = 0; me.onFire = false; me.turbo = 1;
+    w.possession = 0;
+    w.ball.mode = 'held';
+    // Park everyone else miles away so no contest, lane-block or steal logic
+    // can touch player 0's velocity — this is purely about the accel curve.
+    w.players[1].x = 300; w.players[1].z = 0.05;
+    w.players[2].x = 305; w.players[2].z = 0.95;
+    w.players[3].x = 310; w.players[3].z = 0.5;
+    for (const p of w.players) { p.vx = 0; p.vz = 0; }
+    return w;
+}
+
+/** Roughly how wide a player reads on screen. The unit a skid is judged in. */
+const BODY_W = 14;
+
+const holdRight = (): Cmd => { const c = blankCmd(); c.right = true; return c; };
+
+t('a standing start ramps up to top speed rather than snapping to it', () => {
+    const w = freshMovementWorld();
+    const me = w.players[0];
+    stepWorld(w, DT, holdRight());
+    const v1 = me.vx;
+    assert.ok(v1 > 0, 'no speed at all on the very first frame of holding a direction');
+    assert.ok(v1 < BASE_SPEED - 1, `hit full speed (${v1.toFixed(1)}) on frame one — that is a snap, not a ramp`);
+
+    let prev = v1;
+    let monotonic = true;
+    for (let i = 0; i < 30; i++) {
+        stepWorld(w, DT, holdRight());
+        if (me.vx < prev - 0.01) monotonic = false;
+        prev = me.vx;
+    }
+    assert.ok(monotonic, 'speed did not climb smoothly toward top speed while holding one direction');
+    assert.ok(Math.abs(prev - BASE_SPEED) < 2, `speed settled at ${prev.toFixed(1)}, not the ${BASE_SPEED} top speed`);
+});
+
+t('letting go coasts to a stop over real time, not an instant halt', () => {
+    const w = freshMovementWorld();
+    const me = w.players[0];
+    for (let i = 0; i < 30; i++) stepWorld(w, DT, holdRight());
+    assert.ok(me.vx > BASE_SPEED * 0.9, 'did not actually reach top speed before releasing — test setup is wrong');
+
+    stepWorld(w, DT, blankCmd());
+    assert.ok(me.vx > 1, 'velocity hit zero on the very first frame after letting go — that is a snap stop');
+
+    // Distance, not frames. The first build of this shipped a momentum system
+    // that passed a frame-count check and slid three pixels — a fifth of a body
+    // width on a 284px court, which is momentum you can prove and cannot see.
+    // What has to hold is that the skid is big enough to plan around, so the
+    // assertion is in body widths.
+    let frames = 0;
+    let slid = 0;
+    const startX = me.x;
+    while (me.vx > 0.5 && frames < 90) { stepWorld(w, DT, blankCmd()); frames++; }
+    slid = me.x - startX;
+    assert.ok(frames > 1, 'stopped in a single frame — no coast at all');
+    assert.ok(
+        slid > BODY_W * 0.45,
+        `a walking stop slid ${slid.toFixed(1)}px (${(slid / BODY_W).toFixed(2)} body widths) — `
+        + 'that is momentum on paper and nothing on screen',
+    );
+    assert.ok(
+        slid < BODY_W * 1.6,
+        `a walking stop slid ${slid.toFixed(1)}px (${(slid / BODY_W).toFixed(2)} body widths) — that reads as ice`,
+    );
+});
+
+t('turbo is a burst off the mark, not just a bigger number', () => {
+    // TURBO_MULT raises the ceiling; MOVE_ACCEL_TURBO has to raise the climb by
+    // more, or turbo reaches its higher top speed in the same time walking
+    // reaches its lower one and the burst is not a burst.
+    const walk = freshMovementWorld();
+    let walkFrames = 0;
+    while (walk.players[0].vx < BASE_SPEED * 0.9 && walkFrames < 90) {
+        stepWorld(walk, DT, holdRight()); walkFrames++;
+    }
+
+    const burst = freshMovementWorld();
+    const turboRight = (): Cmd => { const c = blankCmd(); c.right = true; c.c = true; return c; };
+    let burstFrames = 0;
+    const top = BASE_SPEED * TURBO_MULT;
+    while (burst.players[0].vx < top * 0.9 && burstFrames < 90) {
+        stepWorld(burst, DT, turboRight()); burstFrames++;
+    }
+
+    assert.ok(burstFrames < 90, 'turbo never reached its own top speed');
+    assert.ok(
+        burstFrames < walkFrames,
+        `turbo took ${burstFrames} frames to reach 90% of ${top.toFixed(0)} while walking took `
+        + `${walkFrames} to reach 90% of ${BASE_SPEED} — that is a faster top speed, not an explosion`,
+    );
+});
+
+t('reversing direction at speed costs real time — a hard cut is not free', () => {
+    const fromStandstill = freshMovementWorld();
+    const meA = fromStandstill.players[0];
+    let framesFromRest = 0;
+    while (meA.vx < BASE_SPEED * 0.95 && framesFromRest < 60) {
+        stepWorld(fromStandstill, DT, holdRight());
+        framesFromRest++;
+    }
+
+    const reversing = freshMovementWorld();
+    const meB = reversing.players[0];
+    for (let i = 0; i < 30; i++) stepWorld(reversing, DT, holdRight());
+    assert.ok(meB.vx > BASE_SPEED * 0.9, 'did not reach top speed before the reversal — test setup is wrong');
+    const holdLeft = (): Cmd => { const c = blankCmd(); c.left = true; return c; };
+    let framesToReverse = 0;
+    while (meB.vx > -BASE_SPEED * 0.95 && framesToReverse < 90) {
+        stepWorld(reversing, DT, holdLeft());
+        framesToReverse++;
+    }
+
+    assert.ok(framesToReverse < 90, 'never actually completed the reversal within a reasonable window');
+    assert.ok(
+        framesToReverse > framesFromRest * 1.3,
+        `reversing at speed took ${framesToReverse} frames vs ${framesFromRest} from a standstill — `
+        + 'a hard cut the other way should cost noticeably more than starting from rest',
+    );
+});
+
+
+t('a basket never prints the same words twice in two sizes', () => {
+    // The banner over the top and the commentary line underneath used to be
+    // drawn from one pool, so a dunk fired two jokes at once and sometimes the
+    // very same sentence in two different sizes on one screen. Found by
+    // playing it; this is what stops it coming back.
+    for (const [pool, banner] of Object.entries(BANNER)) {
+        const lines = (SAY as Record<string, string[]>)[pool];
+        assert.ok(Array.isArray(lines) && lines.length > 0, `SAY.${pool} is missing or empty`);
+        for (const line of lines) {
+            assert.notEqual(
+                line.toUpperCase().replace(/[.!]+$/, ''),
+                banner.toUpperCase().replace(/[.!]+$/, ''),
+                `SAY.${pool} can say "${line}" while the banner over it says "${banner}"`,
+            );
+        }
+    }
 });
 
 console.log(`\n${pass} hoops checks passed.`);
