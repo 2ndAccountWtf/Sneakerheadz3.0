@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { MiniGameResult } from './MiniGameShell';
+import { profileFor, type HoopsProfile } from '../../systems/hoops/roster';
 import {
     ArcadeShell,
     useInput,
@@ -447,7 +448,7 @@ const KITS: Record<'you' | 'mate' | 'foe' | 'cousin', Kit> = {
     },
 };
 
-export const createWorld = (seed: number, opponent: string): World => {
+export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = profileFor(undefined, 0.5)): World => {
     const foeName = (opponent || 'HIM').toUpperCase().slice(0, 12);
     const w: World = {
         seed,
@@ -1824,19 +1825,22 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
 const HoopsGame: React.FC<{
     opponent?: string;
     onFinish: (won: boolean, note: string) => void;
+    /** 0..1 rating from `systems/opponents.ts`. Drives the opponent's profile. */
+    skill?: number;
+    /** Which named NPC this is, so their attribute profile can be looked up. */
+    opponentNpcId?: string;
     onQuit: () => void;
-}> = ({ opponent = 'Guy In Jeans', onFinish, onQuit }) => {
+}> = ({ opponent = 'Guy In Jeans', skill, opponentNpcId, onFinish, onQuit }) => {
     const [done, setDone] = useState<null | boolean>(null);
     const { input, set, consume } = useInput(done === null);
 
     // The whole simulation lives here. React never sees it.
     const worldRef = useRef<World | null>(null);
     if (!worldRef.current) {
-        // `__HOOPS_SEED__` is a debug-only escape hatch for the headless/Playwright
-        // verification harness to get a reproducible game — real play never sets
-        // it, so this is always Date.now()-based in the shipped app.
-        const debugSeed = typeof window !== 'undefined' ? (window as unknown as { __HOOPS_SEED__?: number }).__HOOPS_SEED__ : undefined;
-        worldRef.current = createWorld(debugSeed ?? ((Date.now() ^ 0x9e3779b9) | 0), opponent);
+        // Tests call `createWorld` directly with a fixed seed, so the shipped
+        // component needs no escape hatch for them — a `window.__HOOPS_SEED__`
+        // hook lived here and was removed.
+        worldRef.current = createWorld((Date.now() ^ 0x9e3779b9) | 0, opponent, profileFor(opponentNpcId, skill ?? 0.5));
     }
 
     // HUD mirror: written only when a *displayed* value actually changes, so

@@ -70,7 +70,15 @@ const MiniGameHost: React.FC = () => {
         case 'street-brawl':
             return <StreetFighter opponent={req.config?.opponent ?? 'Some Guy'} onFinish={finish} onQuit={quit} />;
         case 'street-ball':
-            return <HoopsGame opponent={req.config?.opponent} onFinish={finish} onQuit={quit} />;
+            return (
+                <HoopsGame
+                    opponent={req.config?.opponent}
+                    skill={req.config?.skill}
+                    opponentNpcId={req.config?.opponentNpcId}
+                    onFinish={finish}
+                    onQuit={quit}
+                />
+            );
         case 'sneaker-chase':
             return <SneakerChase thief={req.config?.thief} onFinish={finish} onQuit={quit} />;
         case 'cart-race':
