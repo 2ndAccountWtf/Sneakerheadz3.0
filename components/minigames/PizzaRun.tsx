@@ -431,6 +431,8 @@ export interface RunState {
     charge: number;
     charging: boolean;
     prevHold: boolean;
+    /** Set when a wind-up auto-fires, so one hold cannot machine-gun the rack. */
+    throwLock: boolean;
     armT: number;
     facing: 1 | -1;
 
@@ -509,17 +511,34 @@ export const flightTime = (vz: number, z0: number) => (vz + Math.sqrt(vz * vz + 
  * Where a box thrown right now would come down, and how high it would be as it
  * crossed a wall at `wall`. The renderer uses this for the aim reticle; the
  * verification script uses it to solve for the charge that hits a given target.
+ *
+ * `sx` / `sxWall` need the `scroll` speed, and the reason is the whole reason
+ * aiming is a skill. On screen the box only creeps forward at BOX_LEAD, but the
+ * street is sliding backwards underneath it at `scroll`, so in STREET terms the
+ * box travels (BOX_LEAD + scroll) * t before it lands. The marker has to be
+ * drawn where it will hit the street as the street is drawn right now — which is
+ * a long way ahead of the rider — or the player would be aiming at a lie.
  */
-export function predictThrow(cy0: number, z0: number, side: 1 | -1, power: number, wall?: number) {
+export function predictThrow(cy0: number, z0: number, side: 1 | -1, power: number, wall?: number, scroll = 0) {
     const { vCross, vz } = throwVel(power);
     const tLand = flightTime(vz, z0);
     const cross = cy0 + side * vCross * tLand;
+    const lead = BOX_LEAD + scroll;
     let wallZ: number | null = null;
+    let sxWall: number | null = null;
     if (wall !== undefined) {
         const tWall = (wall - cy0) / (side * vCross);
-        if (tWall > 0 && tWall < tLand) wallZ = z0 + vz * tWall - (G * tWall * tWall) / 2;
+        if (tWall > 0 && tWall < tLand) {
+            wallZ = z0 + vz * tWall - (G * tWall * tWall) / 2;
+            sxWall = RIDER_X + 6 + lead * tWall;
+        }
     }
-    return { vCross, vz, tLand, cross, dist: vCross * tLand, sx: RIDER_X + 6 + BOX_LEAD * tLand, wallZ };
+    return {
+        vCross, vz, tLand, cross,
+        dist: vCross * tLand,
+        sx: RIDER_X + 6 + lead * tLand,
+        sxWall, wallZ,
+    };
 }
 
 /**
@@ -665,7 +684,7 @@ export function createRunState(opts: {
         lives: START_LIVES, ammo: START_AMMO, score: 0, streak: 0, mult: 1,
         bestStreak: 0, dryT: 0,
 
-        charge: 0, charging: false, prevHold: false, armT: 0, facing: -1,
+        charge: 0, charging: false, prevHold: false, throwLock: false, armT: 0, facing: -1,
 
         houses: [], nextHouseX: 210, sideFlip: -1, houseId: 0,
         obs: [], nextObsX: 300, obsId: 0,
@@ -842,10 +861,39 @@ function throwBox(s: RunState, power: number) {
         s.flashT = 1;
         return;
     }
+    const side = s.facing;
+
+    // --- point blank ------------------------------------------------------
+    // Riding the pavement (board only) puts you ON the path, where there is no
+    // cross-distance left to throw across: the shortest possible lob would sail
+    // straight over the mat and into the brickwork. So at point blank you don't
+    // throw, you hand it over. That is the whole payoff for ollieing the kerb —
+    // and the reason planters and sprinklers live up here.
+    if (s.onWalk !== 0 && side === s.onWalk) {
+        const sideName: 'far' | 'near' = side < 0 ? 'far' : 'near';
+        const h = s.houses.find(hh =>
+            hh.side === sideName && Math.abs(sxOf(s, hh.x + hh.doorOff) - (RIDER_X + 6)) <= s.matHalf + 6);
+        if (h) {
+            s.ammo--;
+            s.thrown++;
+            s.armT = 0.26;
+            if (h.done) { addPop(s, RIDER_X, laneY(s.laneF) - 14, 'they already have one', PAL.faint); breakStreak(s); }
+            else if (h.cust) { deliver(s, h, false); s.flash = 'hand delivered'; s.flashT = 0.8; }
+            else wrongHouse(s, h, false);
+            return;
+        }
+        // No doorstep under you: the box goes down on somebody's path.
+        s.ammo--;
+        s.thrown++;
+        s.armT = 0.26;
+        breakStreak(s);
+        addPop(s, RIDER_X, laneY(s.laneF) - 14, pick(s, HEDGE_LINES), PAL.faint);
+        return;
+    }
+
     s.ammo--;
     s.thrown++;
     s.armT = 0.26;
-    const side = s.facing;
     const { vCross, vz } = throwVel(power);
     s.boxes.push({
         id: s.boxId++,
@@ -1098,7 +1146,7 @@ export function stepRun(s: RunState, inp: RunInput, dt: number): void {
     // direction as you let go. That is the two-sided decision, made with the
     // same thumb that steers.
     s.facing = inp.up ? -1 : inp.down ? 1 : (s.laneF < (LANES - 1) / 2 ? -1 : 1);
-    if (inp.hold && s.wipeT <= 0) {
+    if (inp.hold && !s.throwLock && s.wipeT <= 0) {
         s.charging = true;
         s.charge = Math.min(CHARGE_MAX, s.charge + dt);
     }
@@ -1108,8 +1156,11 @@ export function stepRun(s: RunState, inp: RunInput, dt: number): void {
         throwBox(s, clamp(s.charge / CHARGE_TIME, 0, 1));
         s.charging = false;
         s.charge = 0;
+        // An auto-fired wind-up locks the button until the thumb comes off, so a
+        // resting finger lobs one box rather than the whole rack.
+        if (overCharged) s.throwLock = true;
     }
-    if (!inp.hold) { s.charging = false; s.charge = 0; }
+    if (!inp.hold) { s.charging = false; s.charge = 0; s.throwLock = false; }
     s.prevHold = inp.hold;
 
     // --- the street -------------------------------------------------------
@@ -1459,6 +1510,14 @@ export function drawRun(ctx: Ctx, s: RunState) {
             hurt: s.invT > 0.9,
         });
         ctx.restore();
+
+        // Facing chevron. Which verge a throw would go to is the single most
+        // important thing on screen, so it is drawn on the rider at all times
+        // rather than only while winding up.
+        const fy = ry + s.facing * 13;
+        const fc = s.charging ? PAL.legend : PAL.accent;
+        line(ctx, RIDER_X + 9, fy, RIDER_X + 13, fy + s.facing * 4, fc);
+        line(ctx, RIDER_X + 17, fy, RIDER_X + 13, fy + s.facing * 4, fc);
     };
 
     for (const o of acts) {
@@ -1501,10 +1560,13 @@ export function drawRun(ctx: Ctx, s: RunState) {
         const cy0 = laneY(s.laneF);
         const z0 = HAND_Z + s.airZ;
         const side = s.facing;
-        const p = predictThrow(cy0, z0, side, power, side < 0 ? FAR_WALL : NEAR_WALL);
+        const wall = side < 0 ? FAR_WALL : NEAR_WALL;
+        const p = predictThrow(cy0, z0, side, power, wall, s.speed);
+        // The guide is drawn in street space (see predictThrow): it shows the
+        // point of pavement the box will hit, not the pixel it will occupy.
         for (let i = 1; i <= 9; i++) {
             const tt = (i / 9) * p.tLand;
-            const px = RIDER_X + 6 + BOX_LEAD * tt;
+            const px = RIDER_X + 6 + (BOX_LEAD + s.speed) * tt;
             const pz = z0 + p.vz * tt - (G * tt * tt) / 2;
             rect(ctx, px, cy0 + side * p.vCross * tt - pz, 1.4, 1.4, 'rgba(230,237,243,0.45)');
         }
@@ -1518,6 +1580,19 @@ export function drawRun(ctx: Ctx, s: RunState) {
         outline(ctx, p.sx - 5, p.cross - 3, 10, 6, col);
         line(ctx, p.sx - 7, p.cross, p.sx - 5, p.cross, col);
         line(ctx, p.sx + 5, p.cross, p.sx + 7, p.cross, col);
+
+        // If this arc would clear the doorstep and cross the facade inside an
+        // open window, ring the window. It is the only way anybody would ever
+        // work out that overthrowing on purpose is the highest-scoring shot.
+        if (p.wallZ !== null && p.sxWall !== null && p.wallZ >= WIN_Z0 && p.wallZ <= WIN_Z1) {
+            const wx = p.sxWall;
+            const hit = s.houses.find(h => h.side === side2 && Math.abs(wx - sxOf(s, h.x + h.winOff)) <= WIN_HALF);
+            if (hit) {
+                const wy = Math.min(hit.base + hit.dir * WIN_Z0, hit.base + hit.dir * WIN_Z1);
+                outline(ctx, sxOf(s, hit.x + hit.winOff) - WIN_HALF - 2, wy - 2, WIN_HALF * 2 + 4, WIN_Z1 - WIN_Z0 + 4,
+                    hit.openWin ? PAL.legend : PAL.bad, 1);
+            }
+        }
         // Power bar, stuck to the rider.
         bar(ctx, RIDER_X - 12, laneY(s.laneF) - 26, 24, 3, power, power > 0.85 ? PAL.legend : PAL.accent);
     }
@@ -1797,7 +1872,7 @@ const PizzaRun: React.FC<{
                 + `HOLD THROW to wind up and release: the dotted arc shows where the box lands. Green reticle = they ordered, red = they did not. `
                 + `Overthrow slightly and the arc passes through an open upstairs window — that is a trick shot and pays two and a half times. Hit a shut one and you are paying for glass. `
                 + (hasBoard
-                    ? `OLLIE clears roadworks, trolleys and planters, and pressing ▲ or ▼ at the top of one pops you over the kerb onto the pavement, where the doorsteps are point blank. `
+                    ? `OLLIE clears roadworks, trolleys and planters, and pressing ▲ or ▼ at the top of one pops you over the kerb onto the pavement — up there THROW hands the box straight over, but so do the sprinklers and the planters. `
                     : `BUNNY HOP clears bins, dogs and hydrants. It does not clear roadworks, and the shop bike does not do kerbs. `)
                 + `Ride over AM/PM crates to restock. Run out of boxes and the shift gets called off.`
             }

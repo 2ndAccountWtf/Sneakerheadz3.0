@@ -87,17 +87,26 @@ const DARTS_PER_TURN = 3;
 const MAX_DARTS = 24;
 const MAX_DRUNK = 5;
 
-/** Reticle sway, sober, in logical pixels. */
-const BASE_AMP = 6.4;
-/** Extra sway per drink. Five drinks is ~5.3x the wobble. */
-const AMP_PER_DRUNK = 0.86;
+/**
+ * Reticle sway, sober, in logical pixels. The treble ring is 5px wide, so a
+ * sober hand still has to time the swing to sit in it — this is deliberately
+ * wider than "guaranteed treble twenty".
+ */
+const BASE_AMP = 8.5;
+/** Extra sway per drink. Five drinks is ~4.6x the wobble. */
+const AMP_PER_DRUNK = 0.72;
 /** Radians/sec of the primary sway sine, sober. */
 const BASE_FREQ = 2.15;
 /** Extra drift speed per drink. */
 const FREQ_PER_DRUNK = 0.3;
 /** Seconds of input lag added per drink — the killer. */
 const LAG_PER_DRUNK = 0.042;
-/** Release tremor per drink, in pixels of gaussian scatter at the moment of throw. */
+/**
+ * Release tremor: gaussian scatter applied at the moment the dart leaves the
+ * hand, after you have already committed. Everyone has a little of this; each
+ * drink adds a lot.
+ */
+const TREMOR_BASE = 1.1;
 const TREMOR_PER_DRUNK = 1.9;
 /** Aim-nudge speed, px/sec, and how much of it each drink takes away. */
 const NUDGE_SPEED = 48;
@@ -105,11 +114,15 @@ const NUDGE_LOSS_PER_DRUNK = 0.11;
 /** Focus buys back a little steadiness. Coffee versus lager, stated in the HUD. */
 const FOCUS_STEADY = 0.22;
 
-/** How wide he throws. He is stone cold sober and still not very good. */
-const FOE_SIGMA = 11;
+/**
+ * How wide he throws, in px of gaussian scatter. He is stone cold sober and
+ * genuinely decent: at 9px he averages ~22 points a dart and checks out in
+ * about 14, which is the pace a sober player has to match. Drunk, you will not.
+ */
+const FOE_SIGMA = 9;
 
-const AIM_X_TIME = 9;      // he starts shouting if you stand there forever
-const AIM_Y_TIME = 9;
+const AIM_X_TIME = 6;      // he starts shouting if you stand there forever
+const AIM_Y_TIME = 6;
 const FLY_TIME = 0.3;
 const LAND_TIME = 0.95;
 const FOE_AIM_TIME = 0.6;
@@ -137,7 +150,8 @@ export const swayFreq = (drunk: number): number =>
 export const inputLag = (drunk: number): number => clamp(drunk, 0, MAX_DRUNK) * LAG_PER_DRUNK;
 
 /** Gaussian scatter added at the moment of release, in px. */
-export const tremor = (drunk: number): number => clamp(drunk, 0, MAX_DRUNK) * TREMOR_PER_DRUNK;
+export const tremor = (drunk: number): number =>
+    TREMOR_BASE + clamp(drunk, 0, MAX_DRUNK) * TREMOR_PER_DRUNK;
 
 /** Speed of the d-pad aim nudge, px/sec. */
 export const nudgeSpeed = (drunk: number): number =>
@@ -479,7 +493,9 @@ const applyHit = (w: DartsWorld, who: 0 | 1, hit: Hit): boolean => {
     }
     side.score = next;
     if (who === 0) w.shown = next;
-    return side.thisTurn >= DARTS_PER_TURN;
+    // A bust can end a turn after one or two darts, so the running total is not
+    // always a multiple of three — the cap has to be checked per dart, not per turn.
+    return side.thisTurn >= DARTS_PER_TURN || side.darts >= MAX_DARTS;
 };
 
 /** Hands the arrows over, or ends the match if everybody is out of darts. */
@@ -547,30 +563,30 @@ const throwPlayerDart = (w: DartsWorld) => {
     w.stats.aimErrN += 1;
     w.stats.throws += 1;
 
-    w.fly = { sx: 232, sy: 96, tx, ty, who: 0 };
+    w.fly = { sx: 258, sy: 136, tx, ty, who: 0 };   // out of your own raised hand
     w.phase = 'fly';
     w.phaseT = 0;
 };
 
 /**
- * His aim. Deliberately naive: he goes at treble twenty until he is under 61,
- * then at the biggest single he can use. He does not set up a finish, which is
- * why a sober player beats him and a drunk one does not.
+ * The obvious place to aim with this score on the board: treble twenty until
+ * you are under 61, then the single or double that checks you out. Deliberately
+ * naive — it never sets up a finish two darts ahead — and it is what the
+ * opponent uses, which is why a sober player beats him and a drunk one does not.
  */
-const foeTarget = (w: DartsWorld): [number, number] => {
-    const s = w.foe.score;
-    if (s > 60) return wedgePoint(20, (R_TRIPLE_IN + R_TRIPLE_OUT) / 2);
-    if (s === 50) return [0, 0];
-    if (s <= 20) return wedgePoint(s, (R_TRIPLE_OUT + R_DOUBLE_IN) / 2);
-    if (s % 2 === 0 && s / 2 <= 20) return wedgePoint(s / 2, (R_DOUBLE_IN + R_SCORE) / 2);
+export const aimTargetFor = (score: number): [number, number] => {
+    if (score > 60) return wedgePoint(20, (R_TRIPLE_IN + R_TRIPLE_OUT) / 2);
+    if (score === 50) return [0, 0];
+    if (score <= 20) return wedgePoint(score, (R_TRIPLE_OUT + R_DOUBLE_IN) / 2);
+    if (score % 2 === 0 && score / 2 <= 20) return wedgePoint(score / 2, (R_DOUBLE_IN + R_SCORE) / 2);
     return wedgePoint(20, (R_TRIPLE_OUT + R_DOUBLE_IN) / 2);
 };
 
 const throwFoeDart = (w: DartsWorld) => {
-    const [ax, ay] = foeTarget(w);
+    const [ax, ay] = aimTargetFor(w.foe.score);
     const tx = ax + gauss(w) * FOE_SIGMA;
     const ty = ay + gauss(w) * FOE_SIGMA;
-    w.fly = { sx: 232, sy: 96, tx, ty, who: 1 };
+    w.fly = { sx: 196, sy: 118, tx, ty, who: 1 };   // out of his
     w.phase = 'foeFly';
     w.phaseT = 0;
 };
@@ -886,9 +902,9 @@ const drawBar = (ctx: CanvasRenderingContext2D, w: DartsWorld) => {
     const tx = 206;
     rect(ctx, tx, 148, 74, 4, '#2a2229');
     rect(ctx, tx + 30, 152, 8, 26, '#201a20');
-    for (let i = 0; i < Math.min(w.empties, 14); i++) {
-        const ex = tx + 5 + (i % 7) * 10;
-        const ey = 148 - Math.floor(i / 7) * 0;
+    for (let i = 0; i < Math.min(w.empties, 12); i++) {
+        const ex = tx + 5 + (i % 6) * 9;
+        const ey = 148 - Math.floor(i / 6) * 0;
         const tall = i % 3 !== 0;
         // Bottles and cans, leaning slightly, because the table is not level.
         rect(ctx, ex, ey - (tall ? 13 : 9), 5, tall ? 13 : 9, i % 2 ? '#3f6b3a' : '#6b4a2a');
@@ -959,7 +975,8 @@ export const drawDarts = (ctx: CanvasRenderingContext2D, w: DartsWorld) => {
         }
 
         /* --- your arm, bottom right --- */
-        figure(ctx, 244, 178, 54, {
+        // You, at the oche, far right so the empties stay visible beside you.
+        figure(ctx, 266, 176, 50, {
             kit: KIT.player,
             facing: -1,
             armUp: w.phase === 'aimY' || w.phase === 'fly' ? 0.95 : 0.35,

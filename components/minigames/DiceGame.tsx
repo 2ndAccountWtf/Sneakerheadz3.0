@@ -917,7 +917,7 @@ export const drawDice = (ctx: CanvasRenderingContext2D, w: DiceWorld) => {
 
     drawAsphalt(ctx, w);
     drawCast(ctx, w);
-    drawPot(ctx, 196, 150, w.pot, w.ante);
+    drawPot(ctx, 196, 145, w.pot, w.ante);   // clear of the prompt strip
 
     /* --- dice --- */
     for (let i = 0; i < 2; i++) {
@@ -937,7 +937,9 @@ export const drawDice = (ctx: CanvasRenderingContext2D, w: DiceWorld) => {
     }
 
     if ((w.phase === 'settle' || w.phase === 'decide' || w.phase === 'save') && w.total > 0) {
-        text(ctx, String(w.total), RING_X, 92, { size: 11, color: PAL.ink, align: 'center', bold: true });
+        text(ctx, String(w.total), RING_X, 92, {
+            size: 11, color: w.doomed ? PAL.bad : PAL.ink, align: 'center', bold: true,
+        });
     }
 
     /* --- top strip: the only numbers that matter --- */

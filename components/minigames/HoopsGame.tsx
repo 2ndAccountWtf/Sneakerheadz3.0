@@ -326,8 +326,18 @@ const mkBall = (): Ball => ({
     looseT: 0, pickCool: 0,
 });
 
-/** Your teammate is the only person on this court who is on your side. */
-const MATE_KIT: Kit = { main: '#2bd07a', trim: '#06170f', skin: PAL.skinDark };
+/**
+ * Four kits, split cool (your team) against warm (theirs) so a glance at the
+ * pile tells you whose ball it is. The trims are deliberately brighter than the
+ * shared KIT defaults: `figure()` draws legs in the trim colour and near-black
+ * shorts simply vanish against a night-time blacktop.
+ */
+const KITS: Record<'you' | 'mate' | 'foe' | 'cousin', Kit> = {
+    you: { main: KIT.player.main, trim: '#0c6d5e', skin: PAL.skin },
+    mate: { main: '#2bd07a', trim: '#1b6b45', skin: PAL.skinDark },
+    foe: { main: KIT.rival.main, trim: '#8d1a4c', skin: PAL.skinDark },
+    cousin: { main: '#ff8c3a', trim: '#8a4413', skin: PAL.skin },
+};
 
 export const createWorld = (seed: number, opponent: string): World => {
     const foeName = (opponent || 'HIM').toUpperCase().slice(0, 12);
@@ -339,10 +349,10 @@ export const createWorld = (seed: number, opponent: string): World => {
         clock: GAME_SECONDS,
         score: [0, 0],
         players: [
-            mkPlayer(0, 0, true, 'YOU', KIT.player, 150, 0.62),
-            mkPlayer(1, 0, false, 'BIG MIKE', MATE_KIT, 120, 0.3),
-            mkPlayer(2, 1, false, foeName, KIT.rival, 205, 0.4),
-            mkPlayer(3, 1, false, 'HIS COUSIN', KIT.thug, 235, 0.75),
+            mkPlayer(0, 0, true, 'YOU', KITS.you, 150, 0.62),
+            mkPlayer(1, 0, false, 'BIG MIKE', KITS.mate, 120, 0.3),
+            mkPlayer(2, 1, false, foeName, KITS.foe, 205, 0.4),
+            mkPlayer(3, 1, false, 'HIS COUSIN', KITS.cousin, 235, 0.75),
         ],
         ball: mkBall(),
         possession: 0,
@@ -488,7 +498,9 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
         b.tz += (rng(w) - 0.5) * 0.16;
         b.ty += 2;
     }
-    b.arc = 30 + d * 0.16;
+    // Arc high enough to read as a jumper, capped so a full-court heave does
+    // not disappear off the top of a 198px canvas.
+    b.arc = Math.min(74, 24 + d * 0.13);
     w.possession = null;
 };
 
@@ -1262,7 +1274,7 @@ const drawHoop = (ctx: CanvasRenderingContext2D, w: World, idx: 0 | 1) => {
 const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     const x = screenX(p.x, p.z);
     const feet = floorY(p.z) - p.y * sc(p.z);
-    const h = 29 * sc(p.z);
+    const h = 32 * sc(p.z);
     const isShooting = p.charge >= 0 || p.dunkT > 0;
     const armUp = p.dunkT > 0 ? 1.35 : p.charge >= 0 ? clamp(p.charge, 0, 1) : p.y > 6 ? 1 : 0;
 
@@ -1284,9 +1296,11 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
 
     if (p.onFire) glyph(ctx, '🔥', x - p.facing * 7, feet - h - 4, 9 + Math.sin(w.t * 14) * 1.5);
     if (p.human) {
-        // The "that's you" arrow, because four block men look alike.
+        // The "that's you" arrow, because four block men look alike in a pile.
+        // glyph() paints with the current fillStyle, so set one explicitly.
         const bob = Math.sin(w.t * 6) * 1.2;
-        glyph(ctx, '▼', x, feet - h - 9 + bob, 6, 0, 0.9);
+        ctx.fillStyle = p.onFire ? PAL.warn : PAL.accent;
+        glyph(ctx, '▼', x, feet - h - 7 + bob, 9);
     }
     if (isShooting && p.charge >= 0) {
         // Release meter above the shooter: green band is the sweet spot.
