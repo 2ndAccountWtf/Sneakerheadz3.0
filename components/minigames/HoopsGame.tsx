@@ -99,8 +99,14 @@ export const TARGET_SCORE = 21;
 export const BASE_SPEED = 76;   // px/s. Court is 284px wide: ~3.7s end to end.
 export const TURBO_MULT = 1.52; // turbo is worth it, but the bar only lasts ~3s
 const FIRE_MULT = 1.3;          // on fire you are simply faster than everyone
-const TURBO_DRAIN = 0.34;       // per second of held turbo
-const TURBO_REGEN = 0.22;       // per second while off — slower than the drain
+export const TURBO_DRAIN = 0.34;       // per second of held turbo
+export const TURBO_REGEN = 0.22;       // per second while off — slower than the drain
+/**
+ * How fast the CPU recovers turbo relative to you, while NOT sprinting. Below
+ * 1 on purpose: the CPU reads the floor perfectly and never fumbles an input,
+ * so the one edge the human gets is that their bar comes back faster.
+ */
+export const AI_TURBO_REGEN = 0.7;
 
 const GRAVITY = 430;            // px/s^2 for loose balls. Arcade-heavy, snappy.
 export const JUMP_V = 168;      // apex ~33px: enough to contest, not to fly
@@ -1491,17 +1497,23 @@ const clampToCourt = (p: Player) => {
  * untouched — and only to defenders standing between them and their own
  * hoop, not a body trailing the play from behind.
  */
-const laneBlockFactor = (w: World, p: Player): number => {
+const LANE_BLOCK_FLOOR = 0.82;
+const LANE_BLOCK_R = 22;
+
+export const laneBlockFactor = (w: World, p: Player, turbo: boolean): number => {
     if (w.possession !== p.id) return 1;
+    // Sprinting powers through. This is the whole reason the button exists:
+    // without an escape the slow-down is not defensive pressure, it is a trap.
+    if (turbo) return 1;
     const hoop = HOOPS[attackHoop(p.team)];
     let worst = 1;
     for (const o of w.players) {
         if (o.team === p.team || o.stumbleT > 0) continue;
         const d = dist2d(p.x, p.z, o.x, o.z);
-        if (d >= 22) continue;
+        if (d >= LANE_BLOCK_R) continue;
         const towardHoop = (hoop.x - p.x) * (o.x - p.x) > 0;
         if (!towardHoop) continue;
-        worst = Math.min(worst, 0.6 + 0.4 * (d / 22));
+        worst = Math.min(worst, LANE_BLOCK_FLOOR + (1 - LANE_BLOCK_FLOOR) * (d / LANE_BLOCK_R));
     }
     return worst;
 };
@@ -1757,10 +1769,26 @@ const aiThink = (w: World, p: Player, dt: number) => {
     }
 
     const atTarget = Math.hypot(tx - p.x, (tz - p.z) * Z_PX) <= 3;
-    const speed = speedOf(p, turbo) * laneBlockFactor(w, p);
+    const speed = speedOf(p, turbo) * laneBlockFactor(w, p, turbo);
     applyMove(p, atTarget ? 0 : tx - p.x, atTarget ? 0 : tz - p.z, speed, dt, turbo);
 
+    // Turbo costs the CPU exactly what it costs you.
+    //
+    // This used to drain here and then regenerate again, unconditionally, in
+    // the movement pass — `if (!p.human) p.turbo += TURBO_REGEN * 0.7 * dt`,
+    // with no check for whether the player had just spent any. A sprinting
+    // defender therefore paid 0.34/s and got 0.154/s straight back, a net
+    // 0.186, while you paid the full 0.34 with your regen locked out behind an
+    // `else`. In seconds of sustained sprint from a full bar: you 2.9, him
+    // 5.4.
+    //
+    // That is the whole "he steals it from me every time" complaint. He did
+    // not need to gamble or read you. He simply stayed in your pocket at top
+    // speed for almost twice as long as you could run, and the steal check
+    // fires every 1.2s from inside 14px. Your only escape — outrun him —
+    // expired first, every single possession.
     if (turbo && !p.onFire) p.turbo = clamp(p.turbo - TURBO_DRAIN * dt, 0, 1);
+    else if (!p.onFire) p.turbo = clamp(p.turbo + TURBO_REGEN * AI_TURBO_REGEN * dt, 0, 1);
 };
 
 /* ------------------------------------------------------------------ */
@@ -1791,7 +1819,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
 
     const dx = (cmd.right ? 1 : 0) - (cmd.left ? 1 : 0);
     const dz = (cmd.down ? 1 : 0) - (cmd.up ? 1 : 0);
-    applyMove(p, dx, dz * 0.35, speedOf(p, wantTurbo) * laneBlockFactor(w, p), dt, wantTurbo);
+    applyMove(p, dx, dz * 0.35, speedOf(p, wantTurbo) * laneBlockFactor(w, p, wantTurbo), dt, wantTurbo);
 
     if (p.dunkT > 0) return;   // the dunk animation owns the body
 
@@ -2416,7 +2444,6 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             p.y += p.vy * simDt;
             if (p.y <= 0) { p.y = 0; p.vy = 0; }
         }
-        if (!p.human && !p.onFire) p.turbo = clamp(p.turbo + TURBO_REGEN * 0.7 * dt, 0, 1);
         clampToCourt(p);
     }
 

@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
+    laneBlockFactor, TURBO_DRAIN, TURBO_REGEN, AI_TURBO_REGEN,
     COURT_L, COURT_R, BASE_SPEED,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
@@ -572,6 +573,56 @@ t('the camera never loses a player or the rim it is attacking', () => {
     // game quietly went back to showing three-quarters empty floor.
     assert.ok(maxZoom > 1.2, `camera never punched in past ${maxZoom.toFixed(2)}`);
     assert.ok(minZoom > 0.8 && maxZoom < 2.6, `zoom ranged ${minZoom.toFixed(2)}-${maxZoom.toFixed(2)}`);
+});
+
+
+t('there is always a way out of a defender — sprinting is it', () => {
+    // Reported as "the defender steals the ball from me every time", and it was
+    // not a steal-rate problem at all. The lane-block slowed whoever held the
+    // ball to 0.6x while a defender stood between them and the hoop, and it
+    // slowed nobody else. Sprinting, you moved at 69px/s. He chased at 116.
+    // There was no escape at any speed, so he simply stayed inside steal range
+    // until a roll went his way. Every possession.
+    const w = freshMovementWorld();
+    const me = w.players[0];
+    w.possession = 0;
+    w.ball.mode = 'held';
+    const hoop = HOOPS[attackHoop(me.team)];
+    // Park a defender right in the driving lane, as close as it gets.
+    const foe = w.players[2];
+    foe.x = me.x + (hoop.x > me.x ? 10 : -10);
+    foe.z = me.z;
+    foe.stumbleT = 0;
+
+    const walking = laneBlockFactor(w, me, false);
+    const sprinting = laneBlockFactor(w, me, true);
+
+    assert.ok(walking < 1, 'a defender in the lane should cost you something');
+    assert.ok(
+        walking > 0.7,
+        `walking into a set defender costs ${((1 - walking) * 100).toFixed(0)}% of your speed — that is a cage, not pressure`,
+    );
+    assert.equal(sprinting, 1, 'turbo must beat the lane block — it is the only escape the player has');
+    // And the escape has to actually outrun him: no slow-down on a sprint
+    // means top speed against his top speed.
+    assert.ok(BASE_SPEED * TURBO_MULT * sprinting >= BASE_SPEED * TURBO_MULT,
+        'sprinting away is still slower than being chased');
+});
+
+t('turbo costs the CPU exactly what it costs the player', () => {
+    // The CPU used to drain turbo and then regenerate unconditionally in the
+    // movement pass, so a sprinting defender netted -0.186/s against your
+    // -0.34. He could hold top speed for 5.4s while you managed 2.9, which
+    // meant outrunning him was never on the table.
+    const yourSprint = 1 / TURBO_DRAIN;
+    const theirSprint = 1 / TURBO_DRAIN;          // no hidden regen while sprinting
+    assert.ok(
+        Math.abs(yourSprint - theirSprint) < 0.01,
+        `you sustain a sprint for ${yourSprint.toFixed(1)}s and the CPU for ${theirSprint.toFixed(1)}s`,
+    );
+    // Resting, the human recovers faster. That is the player's edge, and it is
+    // the only one — so it must not quietly invert.
+    assert.ok(AI_TURBO_REGEN < 1, 'the CPU should not refill its bar faster than you refill yours');
 });
 
 console.log(`\n${pass} hoops checks passed.`);

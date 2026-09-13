@@ -20,8 +20,14 @@ const Pad: React.FC<{
     className?: string;
     primary?: boolean;
 }> = ({ btn, label, onDown, className = '', primary }) => {
-    // pointer events cover mouse, touch and pen in one path; pointer capture
-    // keeps a held button held if the finger drifts off it mid-press.
+    // Pointer events cover mouse, touch and pen in one path, and pointer
+    // capture keeps a held button held when the finger drifts off it.
+    //
+    // `onPointerLeave` used to also release, which defeated the capture it was
+    // meant to complement: `setPointerCapture` is optional-chained, so on any
+    // browser that does not honour it a thumb sliding a pixel off ▶ dropped the
+    // direction mid-drive. Thumbs slide constantly. Releasing now happens on
+    // pointerup, on cancel, and on losing capture — never on merely moving.
     const press = (e: React.PointerEvent) => {
         e.preventDefault();
         (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -39,7 +45,7 @@ const Pad: React.FC<{
             onPointerDown={press}
             onPointerUp={release}
             onPointerCancel={release}
-            onPointerLeave={release}
+            onLostPointerCapture={release}
             onContextMenu={e => e.preventDefault()}
             className={`select-none no-tap-highlight flex items-center justify-center font-mono uppercase
                         border active:brightness-150 touch-none
