@@ -18,6 +18,7 @@ import { INITIAL_PLAYER, ROBBERY_CASH_FLOOR } from '../constants.ts';
 import type { Player } from '../types.ts';
 import { robberyExposure, muggingLoss, cardUsable, blockCard, accrueInterest, deposit } from '../systems/banking.ts';
 import { rollStreetRobbery } from '../systems/events/streetRobbery.ts';
+import { pay, priceFor, paymentBlocked } from '../systems/payment.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -173,6 +174,94 @@ t('no debt means no interest and no noise', () => {
 t('an unlucky roll is possible but nothing is forced when the dice say no', () => {
     assert.equal(rollStreetRobbery(P({ cash: 100000 }), 5, 'night', never), null);
     assert.ok(muggingLoss(P({ cash: 0 })) === 0, 'mugged a player with no cash');
+});
+
+/* ---------------- paying for things ---------------- */
+
+t('cash is cheaper than card at any price worth the distinction', () => {
+    for (const sticker of [20, 120, 2500, 68000]) {
+        const cash = priceFor(sticker, 'cash');
+        const card = priceFor(sticker, 'card');
+        assert.ok(cash < card, `at $${sticker}: cash $${cash} vs card $${card}`);
+        assert.ok(cash <= sticker && card >= sticker, `the discount and surcharge are the wrong way round at $${sticker}`);
+    }
+});
+
+t('a one-dollar item costs a dollar either way', () => {
+    // Both methods floor at $1, so the cheapest things in the AM/PM collapse to
+    // the same price. That is correct — a 8% discount on a dollar is not a
+    // thing — and it is asserted so nobody "fixes" it into a free item.
+    assert.equal(priceFor(1, 'cash'), 1);
+    assert.equal(priceFor(1, 'card'), 1);
+});
+
+t('cash you do not have is refused, and costs nothing', () => {
+    const broke = P({ cash: 50 });
+    const out = pay(broke, 'cash', 500, 1);
+    assert.equal(out.ok, false);
+    assert.equal(out.paid, 0);
+    assert.equal(out.player, broke, 'a refused payment still changed the player');
+    assert.ok(out.log.length > 0, 'refused silently');
+});
+
+t('a card with no credit line is refused', () => {
+    const p = P({ wallet: { ...INITIAL_PLAYER.wallet, hasCard: true, hasCredit: false } });
+    assert.ok(paymentBlocked(p, 'card', 100, 1), 'a card with no line was accepted');
+    assert.equal(pay(p, 'card', 100, 1).ok, false);
+});
+
+t('a card purchase becomes debt rather than spending cash', () => {
+    const p = P({ cash: 5000, wallet: { ...INITIAL_PLAYER.wallet, hasCard: true, hasCredit: true, creditLimit: 2500, creditOwed: 0 } });
+    const out = pay(p, 'card', 900, 1);
+    assert.equal(out.ok, true);
+    assert.equal(out.player.cash, 5000, 'a card purchase took cash as well');
+    assert.equal(out.player.wallet.creditOwed, 900);
+});
+
+t('the limit is a real wall', () => {
+    const p = P({ wallet: { ...INITIAL_PLAYER.wallet, hasCard: true, hasCredit: true, creditLimit: 1000, creditOwed: 900 } });
+    assert.ok(paymentBlocked(p, 'card', 200, 1), 'spent past the limit');
+    assert.equal(pay(p, 'card', 200, 1).player.wallet.creditOwed, 900, 'a refused charge still moved the balance');
+    assert.equal(pay(p, 'card', 100, 1).ok, true, 'a charge exactly to the limit was refused');
+});
+
+t('a blocked card cannot buy anything, and says why', () => {
+    const p = blockCard(
+        P({ wallet: { ...INITIAL_PLAYER.wallet, hasCard: true, hasCredit: true, creditLimit: 5000 } }),
+        3, 'You left it in a bathroom in Tel Aviv.', 2,
+    );
+    const why = paymentBlocked(p, 'card', 100, 3);
+    assert.ok(why, 'a blocked card was accepted');
+    assert.match(why!, /bathroom/i, `the reason given was "${why}" — it should be the actual reason`);
+    // And cash still works, which is the whole point of carrying some.
+    assert.equal(paymentBlocked(P({ cash: 500 }), 'cash', 100, 3), null);
+});
+
+t('paymentBlocked and pay never disagree', () => {
+    // The screen greys out a button using `paymentBlocked` and the reducer
+    // charges using `pay`. If those two ever disagree the player either sees a
+    // decline they could not predict, or walks out with free shoes.
+    const wallets = [
+        { hasCard: false, hasCredit: false, creditOwed: 0, creditLimit: 0 },
+        { hasCard: true, hasCredit: false, creditOwed: 0, creditLimit: 0 },
+        { hasCard: true, hasCredit: true, creditOwed: 0, creditLimit: 2500 },
+        { hasCard: true, hasCredit: true, creditOwed: 2400, creditLimit: 2500 },
+    ];
+    for (const wallet of wallets) {
+        for (const cash of [0, 100, 9000]) {
+            for (const total of [1, 99, 2400, 100000]) {
+                for (const method of ['cash', 'card'] as const) {
+                    const p = P({ cash, wallet });
+                    const blocked = paymentBlocked(p, method, total, 1);
+                    const result = pay(p, method, total, 1);
+                    assert.equal(
+                        result.ok, blocked === null,
+                        `disagreement: method=${method} cash=${cash} total=${total} wallet=${JSON.stringify(wallet)}`,
+                    );
+                }
+            }
+        }
+    }
 });
 
 console.log(`\n${pass} money checks passed.`);

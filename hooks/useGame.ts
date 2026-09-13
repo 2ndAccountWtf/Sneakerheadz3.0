@@ -29,6 +29,7 @@ import { bathroomsIn } from '../data/bathrooms';
 import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
+import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { reputationSpread } from '../systems/npc/reactions';
 import { seedWorld, advanceWorld, applyTradePressure, snapshotMarket } from '../systems/market/simulate';
 import { banksIn } from '../data/banks';
@@ -41,10 +42,10 @@ import { MAX_SOFT_STAT } from '../constants';
 // Game Actions
 type Action =
     | { type: 'TRAVEL'; payload: { cityId: string; } }
-    | { type: 'BUY_SNEAKER'; payload: { sneakerId: string; price: number; quantity: number; isFake?: boolean } }
+    | { type: 'BUY_SNEAKER'; payload: { sneakerId: string; price: number; quantity: number; isFake?: boolean; payment?: PaymentMethod } }
     | { type: 'SELL_SNEAKER'; payload: { instanceId: string; price: number; securityLevel: number } }
     | { type: 'USE_STORAGE_ITEM'; payload: { itemId: string } }
-    | { type: 'BUY_STORAGE_ITEM'; payload: { itemId: string; price: number } }
+    | { type: 'BUY_STORAGE_ITEM'; payload: { itemId: string; price: number; payment?: PaymentMethod } }
     | { type: 'CHANGE_SCREEN'; payload: Screen }
     | { type: 'SELECT_STORE'; payload: { storeId: string } }
     | { type: 'VIEW_MARKET_ANALYSIS'; payload: { sneakerId: string } }
@@ -89,10 +90,10 @@ interface GameContextType {
     gameState: GameState;
     dispatch: React.Dispatch<Action>;
     changeScreen: (screen: Screen) => void;
-    buySneaker: (sneakerId: string, price: number, quantity: number, isFake?: boolean) => void;
+    buySneaker: (sneakerId: string, price: number, quantity: number, isFake?: boolean, payment?: PaymentMethod) => void;
     sellSneaker: (instanceId: string, price: number) => void;
     useStorageItem: (itemId: string) => void;
-    buyStorageItem: (itemId: string, price: number) => void;
+    buyStorageItem: (itemId: string, price: number, payment?: PaymentMethod) => void;
     travel: (cityId: string) => void;
     selectStore: (storeId: string) => void;
     viewMarketAnalysis: (sneakerId: string) => void;
@@ -325,11 +326,12 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
         case 'BUY_SNEAKER': {
             const { sneakerId, price, quantity, isFake } = action.payload;
-            const totalPrice = price * quantity;
+            // Cash is cheaper than card, at every till in the game. Defaulting
+            // to cash keeps every existing call site behaving the way it always
+            // did, only slightly cheaper.
+            const payment: PaymentMethod = action.payload.payment ?? 'cash';
+            const totalPrice = priceFor(price, payment) * quantity;
 
-            if (state.player.cash < totalPrice) {
-                return { ...state, notification: { message: "Not enough cash!", type: 'error' } };
-            }
             if (state.player.inventory.length + quantity > MAX_INVENTORY_SIZE) {
                 return { ...state, notification: { message: "Inventory is full!", type: 'error' } };
             }
@@ -344,10 +346,23 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             }
             const sneakerInMarket = currentMarket.sneakers[sneakerIndex];
 
+            // Stock is checked before the money so a refused card never eats a
+            // pair off the shelf.
+            const paid = pay(state.player, payment, totalPrice, state.day);
+            if (!paid.ok) {
+                return {
+                    ...state,
+                    outcomeLog: paid.log,
+                    notification: { message: paid.log[0]?.text ?? 'Declined.', type: 'error' },
+                };
+            }
+
             const newItems: InventoryItem[] = Array.from({ length: quantity }, (_, i) => ({
                 instanceId: `item-${Date.now()}-${Math.random()}-${i}`,
                 sneakerId,
-                purchasePrice: price,
+                // The recorded cost is what was actually handed over, so profit
+                // is honest about the discount or the surcharge.
+                purchasePrice: priceFor(price, payment),
                 isFake: isFake || false,
             }));
 
@@ -355,10 +370,9 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const heatGain = isFake ? 8 : 0;
 
             const newPlayer: Player = {
-                ...state.player,
-                cash: state.player.cash - totalPrice,
-                inventory: [...state.player.inventory, ...newItems],
-                heat: Math.min(100, state.player.heat + heatGain * quantity),
+                ...paid.player,
+                inventory: [...paid.player.inventory, ...newItems],
+                heat: Math.min(100, paid.player.heat + heatGain * quantity),
             };
 
             const updatedSneakers = [...currentMarket.sneakers];
@@ -381,8 +395,9 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                     ...state.markets,
                     [state.currentCityId]: pressured,
                 },
+                outcomeLog: paid.log,
                 notification: {
-                    message: quantity > 1 ? `Purchased ${quantity}x ${sneakerName}!` : `Purchased ${sneakerName}!`,
+                    message: `${quantity > 1 ? `${quantity}x ` : ''}${sneakerName} — $${totalPrice.toLocaleString()}${payment === 'card' ? ' on the card' : ' cash'}.`,
                     type: 'success',
                 },
             };
@@ -599,9 +614,8 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
         case 'BUY_STORAGE_ITEM': {
             const { itemId, price } = action.payload;
-            if (state.player.cash < price) {
-                return { ...state, notification: { message: "Not enough cash!", type: 'error' } };
-            }
+            const itemPayment: PaymentMethod = action.payload.payment ?? 'cash';
+            const itemTotal = priceFor(price, itemPayment);
 
             const itemMaster = storageMock.find(i => i.id === itemId);
             if (!itemMaster) {
@@ -623,17 +637,31 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 newStorage.push({ ...itemMaster, qty: 1, addedAgo: 'Just now' });
             }
 
-            if (itemId === 'itm-burekas') newStats.moneyWastedOnBurekas += price;
+            if (itemId === 'itm-burekas') newStats.moneyWastedOnBurekas += itemTotal;
+
+            // Paid last, after every "you cannot have this" branch above, so a
+            // refused purchase never costs anything.
+            const itemPaid = pay(state.player, itemPayment, itemTotal, state.day);
+            if (!itemPaid.ok) {
+                return {
+                    ...state,
+                    outcomeLog: itemPaid.log,
+                    notification: { message: itemPaid.log[0]?.text ?? 'Declined.', type: 'error' },
+                };
+            }
 
             return {
                 ...state,
                 player: {
-                    ...state.player,
-                    cash: state.player.cash - price,
+                    ...itemPaid.player,
                     storage: newStorage,
                     stats: newStats,
                 },
-                notification: { message: `Bought ${itemMaster.name}.`, type: 'success' },
+                outcomeLog: itemPaid.log,
+                notification: {
+                    message: `${itemMaster.name} — $${itemTotal.toLocaleString()}${itemPayment === 'card' ? ' on the card' : ' cash'}.`,
+                    type: 'success',
+                },
             };
         }
 
@@ -1081,8 +1109,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'CHANGE_SCREEN', payload: screen });
     }, []);
 
-    const buySneaker = useCallback((sneakerId: string, price: number, quantity: number, isFake?: boolean) => {
-        dispatch({ type: 'BUY_SNEAKER', payload: { sneakerId, price, quantity, isFake } });
+    const buySneaker = useCallback((sneakerId: string, price: number, quantity: number, isFake?: boolean, payment?: PaymentMethod) => {
+        dispatch({ type: 'BUY_SNEAKER', payload: { sneakerId, price, quantity, isFake, payment } });
     }, []);
 
     const sellSneaker = useCallback((instanceId: string, price: number) => {
@@ -1098,8 +1126,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'USE_STORAGE_ITEM', payload: { itemId } });
     }, []);
 
-    const buyStorageItem = useCallback((itemId: string, price: number) => {
-        dispatch({ type: 'BUY_STORAGE_ITEM', payload: { itemId, price } });
+    const buyStorageItem = useCallback((itemId: string, price: number, payment?: PaymentMethod) => {
+        dispatch({ type: 'BUY_STORAGE_ITEM', payload: { itemId, price, payment } });
     }, []);
 
     const travel = useCallback((cityId: string) => {

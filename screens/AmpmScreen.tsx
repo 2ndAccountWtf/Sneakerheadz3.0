@@ -7,6 +7,9 @@ import Img from '../components/Img';
 import { useAmpmWorker } from '../hooks/useAmpmWorker';
 import { ampmGreeting, ampmChatter, ampmWeaponsTalk, ampmAfterPurchase } from '../data/ampm/dialogue';
 import { isPartyMode, rollAmpmEvent, AMPM_EVENT_CHANCE, AMPM_PARTY_EVENT_CHANCE } from '../systems/events/ampmEvents';
+import { priceFor, paymentBlocked, type PaymentMethod } from '../systems/payment';
+import { cardUsable } from '../systems/banking';
+import { CASH_DISCOUNT, CARD_SURCHARGE } from '../constants';
 
 const CATEGORY_ICON: Record<string, string> = {
     'Food & Drinks': '🍔',
@@ -30,6 +33,7 @@ const AmpmScreen: React.FC = () => {
 
     const [line, setLine] = useState(() => ampmGreeting(currentCityId, partyMode));
     const [event, setEvent] = useState<null | { text: string; tone: 'good' | 'bad' | 'neutral' }>(null);
+    const [method, setMethod] = useState<PaymentMethod>('cash');
     const enteredRef = useRef('');
 
     // Greeting + possible event on entry, once per city-day visit.
@@ -71,11 +75,14 @@ const AmpmScreen: React.FC = () => {
         return acc;
     }, {} as Record<string, AmpmItem[]>), [availableItems]);
 
+    // One toggle for the whole shop rather than one per shelf item: a corner
+    // shop is a single till, and forty little cash/card pairs would bury the
+    // actual products.
     const categories = Object.keys(groupedItems);
     const activeCategory = categories.includes(selectedCategory) ? selectedCategory : categories[0];
 
     const handleBuy = (item: AmpmItem) => {
-        buyStorageItem(item.id, item.price);
+        buyStorageItem(item.id, item.price, method);
         setLine(item.category === 'Tools & Gear' ? ampmWeaponsTalk() : ampmAfterPurchase(partyMode));
 
         if (Math.random() < (partyMode ? AMPM_PARTY_EVENT_CHANCE : AMPM_EVENT_CHANCE) * 0.6) {
@@ -131,6 +138,27 @@ const AmpmScreen: React.FC = () => {
                     </div>
                 )}
 
+                {/* One till for the whole shop. Forty little cash/card pairs
+                    would bury the products; a corner shop has one counter. */}
+                <div className="panel p-3 mb-3 flex items-center gap-2">
+                    <span className="label flex-shrink-0">Paying with</span>
+                    <div className="flex items-center gap-1 flex-1">
+                        <button
+                            className={`btn btn-sm flex-1 ${method === 'cash' ? 'btn-accent' : 'btn-ghost'}`}
+                            onClick={() => setMethod('cash')}
+                        >
+                            Cash −{Math.round((1 - CASH_DISCOUNT) * 100)}%
+                        </button>
+                        <button
+                            className={`btn btn-sm flex-1 ${method === 'card' ? 'btn-accent' : 'btn-ghost'}`}
+                            onClick={() => setMethod('card')}
+                            disabled={!cardUsable(player, gameState.day)}
+                        >
+                            {cardUsable(player, gameState.day) ? `Card +${Math.round((CARD_SURCHARGE - 1) * 100)}%` : 'Card blocked'}
+                        </button>
+                    </div>
+                </div>
+
                 {/* Ambient event */}
                 {event && (
                     <div
@@ -161,8 +189,9 @@ const AmpmScreen: React.FC = () => {
                 {/* Items */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {(groupedItems[activeCategory] ?? []).map(item => {
-                        const price = partyMode ? Math.max(1, Math.round(item.price * 0.75)) : item.price;
-                        const afford = player.cash >= price;
+                        const sticker = partyMode ? Math.max(1, Math.round(item.price * 0.75)) : item.price;
+                        const price = priceFor(sticker, method);
+                        const afford = !paymentBlocked(player, method, price, gameState.day);
                         return (
                             <div key={item.id} className="panel p-3 flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -175,7 +204,7 @@ const AmpmScreen: React.FC = () => {
                                         {partyMode && <div className="text-[10px] line-through text-[var(--ink-faint)] numeric">${item.price}</div>}
                                         <div className="numeric text-lg text-[var(--ok)]">${price}</div>
                                     </div>
-                                    <button className="btn btn-primary btn-sm" disabled={!afford} onClick={() => handleBuy(item)}>
+                                    <button className="btn btn-primary btn-sm" disabled={!afford} onClick={() => handleBuy({ ...item, price: sticker })}>
                                         Buy
                                     </button>
                                 </div>

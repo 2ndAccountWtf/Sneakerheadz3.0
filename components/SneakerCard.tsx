@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Sneaker, InventoryItem } from '../types';
 import { useGame } from '../hooks/useGame';
+import { priceFor, paymentBlocked, type PaymentMethod } from '../systems/payment';
 import Img from './Img';
 import { MAX_INVENTORY_SIZE } from '../constants';
 import { getSellPrice } from '../systems/pricing';
@@ -22,12 +23,20 @@ export const StoreSneakerCard: React.FC<{
 }> = ({ sneaker, price, quantity, isFake, onAnalyse }) => {
     const { gameState, buySneaker } = useGame();
     const [amount, setAmount] = useState(1);
+    const [method, setMethod] = useState<PaymentMethod>('cash');
 
     const soldOut = quantity !== undefined && quantity <= 0;
     const owned = gameState.player.inventory.filter(i => i.sneakerId === sneaker.id);
     const room = MAX_INVENTORY_SIZE - gameState.player.inventory.length;
     const maxBuy = Math.max(0, Math.min(quantity ?? 0, room));
-    const canBuy = !!price && !soldOut && maxBuy > 0 && price * amount <= gameState.player.cash && amount <= maxBuy;
+
+    // Cash is a few percent under the sticker and card a few percent over, so
+    // the number on the button has to be the number that leaves your pocket —
+    // otherwise the till and the bank screen tell the player different stories.
+    const unit = price ? priceFor(price, method) : 0;
+    const total = unit * amount;
+    const blocked = price ? paymentBlocked(gameState.player, method, total, gameState.day) : 'No price.';
+    const canBuy = !!price && !soldOut && maxBuy > 0 && amount <= maxBuy && !blocked;
 
     return (
         <div className={`panel ${RARITY_CLASS[sneaker.rarity]} flex flex-col h-full group`}>
@@ -70,6 +79,27 @@ export const StoreSneakerCard: React.FC<{
                 </div>
 
                 <div className="mt-auto space-y-2">
+                    {!soldOut && price !== undefined && (
+                        <>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    className={`btn btn-sm flex-1 ${method === 'cash' ? 'btn-accent' : 'btn-ghost'}`}
+                                    onClick={() => setMethod('cash')}
+                                >
+                                    Cash ${priceFor(price, 'cash').toLocaleString()}
+                                </button>
+                                <button
+                                    className={`btn btn-sm flex-1 ${method === 'card' ? 'btn-accent' : 'btn-ghost'}`}
+                                    onClick={() => setMethod('card')}
+                                >
+                                    Card ${priceFor(price, 'card').toLocaleString()}
+                                </button>
+                            </div>
+                            {/* Say why before the press, not after. A decline the
+                                player could have predicted is a bug in the screen. */}
+                            {blocked && <p className="label !text-[var(--bad)] leading-snug">{blocked}</p>}
+                        </>
+                    )}
                     {!soldOut && (
                         <div className="flex items-stretch gap-1.5">
                             <div className="flex items-center border border-[var(--line)] bg-[var(--bg-sunken)]">
@@ -85,8 +115,12 @@ export const StoreSneakerCard: React.FC<{
                                     aria-label="More"
                                 >+</button>
                             </div>
-                            <button className="btn btn-primary btn-sm flex-1" disabled={!canBuy} onClick={() => { buySneaker(sneaker.id, price!, amount, isFake); setAmount(1); }}>
-                                {room <= 0 ? 'Bag Full' : 'Buy'}
+                            <button
+                                className="btn btn-primary btn-sm flex-1"
+                                disabled={!canBuy}
+                                onClick={() => { buySneaker(sneaker.id, price!, amount, isFake, method); setAmount(1); }}
+                            >
+                                {room <= 0 ? 'Bag Full' : `Buy $${total.toLocaleString()}`}
                             </button>
                         </div>
                     )}
