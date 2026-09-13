@@ -20,6 +20,7 @@ import {
     seedWorld, advanceWorld, stepIndex, seedIndex, fairValue, relativeValue,
     applyTradePressure, trendFor, localValue, bestAsk,
     snapshotMarket, intelConfidence,
+    scarcityFor, localStock, referenceAsk, addLocalStock,
 } from '../systems/market/simulate.ts';
 import { tagsFor } from '../systems/market/taxonomy.ts';
 import { CITY_PROFILES, profileFor } from '../systems/market/cityProfiles.ts';
@@ -412,6 +413,223 @@ t('a city with nothing on the shelf still knows what a shoe is worth', () => {
         }
     }
     assert.ok(citiesWithGaps > 0, 'every city stocked every model — the test proves nothing');
+});
+
+/* ---------------- scarcity ---------------- */
+
+/**
+ * The sell-side price, as `systems/pricing.ts#getCityMarketPrice` computes it:
+ * index, times the scarcity multiplier, capped just under the posted shelf
+ * price. Duplicated here rather than imported because `pricing.ts` takes a
+ * whole GameState and these checks only have a market.
+ */
+const BID_ASK = 0.9;
+const sellValue = (market: ReturnType<typeof seedWorld>[string], sneakerId: string): number => {
+    const raw = localValue(market, sneakerId)! * scarcityFor(market, sneakerId).multiplier * BID_ASK;
+    const posted = referenceAsk(market, sneakerId);
+    return Math.max(1, Math.round(posted === undefined ? raw : Math.min(raw, posted * BID_ASK)));
+};
+
+t('an empty shelf pays a premium only where the city wants the thing', () => {
+    // Supply and demand, both halves. A city with none in stock *because nobody
+    // there wants any* is not scarce, it is uninterested — paying a bonus there
+    // would reward carrying junk to the one city least interested in it.
+    const world = seedWorld(rng(31));
+    let unwantedAndEmpty = 0;
+
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const scarcity = scarcityFor(world[c.id], s.id);
+            if (localStock(world[c.id], s.id) !== 0) continue;
+            if (relativeValue(s, c.id) >= 1) continue;
+            unwantedAndEmpty++;
+            assert.ok(
+                scarcity.multiplier <= 1.001,
+                `${c.id} pays ${scarcity.multiplier.toFixed(2)}x for a ${s.id} it has none of and does not want`,
+            );
+        }
+    }
+    assert.ok(unwantedAndEmpty > 10, `only ${unwantedAndEmpty} empty-and-unwanted cases — the check proves little`);
+});
+
+t('scarcity is bounded and does pay where it is real', () => {
+    const world = seedWorld(rng(32));
+    let premium = 0;
+    let best = 1;
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const m = scarcityFor(world[c.id], s.id).multiplier;
+            assert.ok(m > 0.7 && m < 1.45, `${c.id}/${s.id}: scarcity multiplier ${m}`);
+            if (m > 1.02) premium++;
+            best = Math.max(best, m);
+        }
+    }
+    assert.ok(premium > 20, `only ${premium} models anywhere command a scarcity premium`);
+    assert.ok(best > 1.15, `the best scarcity premium is only ${best.toFixed(2)}x — not worth a flight`);
+});
+
+t('no price effect goes unexplained on screen', () => {
+    // A premium the player cannot see is not a mechanic, it is a number that
+    // moves for no visible reason. The first cut only spoke up above an 8%
+    // effect, which left 53 of 270 model/city pairs quietly paying over with
+    // nothing on screen and put a note on 7% of the models actually in stock —
+    // which is to say, almost none of the ones anybody ever looks at.
+    const world = seedWorld(rng(1));
+    let silent = 0;
+    let stocked = 0;
+    let stockedWithNote = 0;
+
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const sc = scarcityFor(world[c.id], s.id);
+            if (!sc.note && Math.abs(sc.multiplier - 1) > 0.02) silent++;
+            if (localStock(world[c.id], s.id) > 0) {
+                stocked++;
+                if (sc.note) stockedWithNote++;
+            }
+        }
+    }
+
+    assert.equal(silent, 0, `${silent} model/city pairs move the price with nothing said about it`);
+    assert.ok(
+        stockedWithNote / stocked > 0.25,
+        `only ${(100 * stockedWithNote / stocked).toFixed(0)}% of in-stock models say anything about supply`,
+    );
+});
+
+t('you cannot buy the last pair and sell it straight back for a profit', () => {
+    // The exploit scarcity creates if nothing guards it: clear the last pairs
+    // out of a city, the empty shelf pays a premium, sell one back to the city
+    // you just bought it from. Measured before the bid-ask cap existed, 29 of
+    // 32 such round trips turned a profit and the best of them was 66%.
+    const world = seedWorld(rng(31));
+    let tested = 0;
+    let profitable = 0;
+    let best = -Infinity;
+
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const ask = bestAsk(world[c.id], s.id);
+            if (ask === undefined) continue;
+            const stock = localStock(world[c.id], s.id);
+            if (stock > 2) continue;
+
+            tested++;
+            let cleared = applyTradePressure(world[c.id], s.id, stock, 1);
+            cleared = {
+                ...cleared,
+                sneakers: cleared.sneakers.map(l =>
+                    l.sneakerId === s.id && !l.isFake ? { ...l, quantity: 0 } : l),
+            };
+
+            const edge = (sellValue(cleared, s.id) - ask) / ask;
+            if (edge > 0) profitable++;
+            best = Math.max(best, edge);
+        }
+    }
+
+    assert.ok(tested > 10, `only ${tested} clearable models — the check proves little`);
+    assert.equal(profitable, 0, `${profitable} of ${tested} buy-out round trips turned a profit`);
+    assert.ok(best < 0, `the best round trip made ${(best * 100).toFixed(1)}%`);
+});
+
+t('nothing can be flipped in the same city on the same day', () => {
+    // The general form of the rule: a buyer never pays more than the shop down
+    // the road is charging, so buy-and-immediately-sell always loses the spread.
+    const world = seedWorld(rng(33));
+    let tested = 0;
+    let profitable = 0;
+
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const ask = bestAsk(world[c.id], s.id);
+            if (ask === undefined) continue;
+            tested++;
+            if (sellValue(world[c.id], s.id) > ask) profitable++;
+        }
+    }
+
+    assert.ok(tested > 50, `only ${tested} buyable models`);
+    assert.equal(profitable, 0, `${profitable} of ${tested} models could be flipped on the spot`);
+});
+
+t('the trade that pays is still the flight, not the shelf', () => {
+    // Scarcity must not overtake geography. Cross-city arbitrage is the game;
+    // scarcity is a reason to prefer one destination over another.
+    const world = seedWorld(rng(34));
+    let opportunities = 0;
+    let best = 0;
+
+    for (const s of SNEAKERS) {
+        for (const from of CITIES) {
+            const ask = bestAsk(world[from.id], s.id);
+            if (ask === undefined) continue;
+            for (const to of CITIES) {
+                if (to.id === from.id) continue;
+                const margin = (sellValue(world[to.id], s.id) - ask) / ask;
+                if (margin > 0.2) opportunities++;
+                best = Math.max(best, margin);
+            }
+        }
+    }
+
+    assert.ok(opportunities >= 20, `only ${opportunities} flights beat a 20% margin`);
+    assert.ok(best < 2.6, `the best flight on the board pays ${(best * 100).toFixed(0)}% — that is a bug, not a deal`);
+});
+
+t('working the best trade thins it out', () => {
+    // The number above is a *first pair* margin, and on its own it would be
+    // alarming. What keeps it honest is that it decays as the bag empties: each
+    // sale walks the index down and puts a pair on the local shelf, which is
+    // what collapses the shortage premium. Before selling registered as stock,
+    // a dry city stayed dry for ever and paid the shortage premium on the tenth
+    // pair as happily as the first — ten pairs realised 219%, barely under the
+    // 269% first pair.
+    const world = seedWorld(rng(34));
+
+    let bestMargin = -Infinity;
+    let pick: { id: string; from: string; to: string; ask: number } | null = null;
+    for (const s of SNEAKERS) {
+        for (const from of CITIES) {
+            const ask = bestAsk(world[from.id], s.id);
+            if (ask === undefined) continue;
+            for (const to of CITIES) {
+                if (to.id === from.id) continue;
+                const margin = (sellValue(world[to.id], s.id) - ask) / ask;
+                if (margin > bestMargin) { bestMargin = margin; pick = { id: s.id, from: from.id, to: to.id, ask }; }
+            }
+        }
+    }
+    assert.ok(pick, 'no tradeable model found at all');
+
+    const realised = (qty: number): number => {
+        let dst = world[pick!.to];
+        let revenue = 0;
+        for (let i = 0; i < qty; i++) {
+            revenue += sellValue(dst, pick!.id);
+            dst = addLocalStock(applyTradePressure(dst, pick!.id, 1, -1), pick!.id);
+        }
+        return (revenue - pick!.ask * qty) / (pick!.ask * qty);
+    };
+
+    const one = realised(1);
+    const ten = realised(10);
+    assert.ok(ten < one * 0.7, `ten pairs realised ${(ten * 100).toFixed(0)}% against ${(one * 100).toFixed(0)}% for one — barely any decay`);
+    assert.ok(ten < 1.6, `a full bag through the best trade on the board realised ${(ten * 100).toFixed(0)}%`);
+    assert.ok(ten > 0.1, `a full bag realised only ${(ten * 100).toFixed(0)}% — the decay has eaten the whole trade`);
+});
+
+t('a pair sold into a city is on a shelf in that city afterwards', () => {
+    const world = seedWorld(rng(35));
+    const dry = SNEAKERS.find(s => localStock(world['paris'], s.id) === 0);
+    assert.ok(dry, 'Paris stocks every model, so there is nothing to check');
+
+    const after = addLocalStock(world['paris'], dry!.id);
+    assert.equal(localStock(after, dry!.id), 1, 'selling a pair into a dry city left it dry');
+    assert.ok(
+        scarcityFor(after, dry!.id).multiplier <= scarcityFor(world['paris'], dry!.id).multiplier,
+        'the shortage premium did not soften after the shortage was eased',
+    );
 });
 
 /* ---------------- a full run ---------------- */

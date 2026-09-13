@@ -3,7 +3,7 @@ import { useGame } from '../hooks/useGame';
 import { Screen, PriceHistoryData } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
 import { CITIES } from '../data/cities';
-import { trendFor, localValue, bestAsk, relativeValue, intelConfidence } from '../systems/market/simulate';
+import { trendFor, localValue, bestAsk, relativeValue, intelConfidence, scarcityFor } from '../systems/market/simulate';
 import { SNEAKERS } from '../data/sneakers';
 import { useSneakerHistory } from '../hooks/useSneakerHistory';
 import { calculateRSI } from '../utils/technicalAnalysis';
@@ -167,6 +167,7 @@ const WhereToSell: React.FC<{ sneakerId: string; here: number | undefined }> = (
             // blanked out, and is the only hint a player gets about an unvisited
             // city.
             taste: sneaker ? relativeValue(sneaker, city.id) : 1,
+            scarcity: isHere ? scarcityFor(markets[city.id], sneakerId) : undefined,
         };
     }).sort((a, b) => (b.price ?? -1) - (a.price ?? -1)), [markets, marketIntel, currentCityId, day, sneakerId, here]);
 
@@ -195,6 +196,17 @@ const WhereToSell: React.FC<{ sneakerId: string; here: number | undefined }> = (
                                 {' · '}
                                 {tasteLabel(r.taste)}
                             </div>
+                            {/* Only for the city underfoot: stock is something you
+                                can see on a shelf, not something you remember from
+                                a trip nine days ago. */}
+                            {r.isHere && r.scarcity?.note && (
+                                <div
+                                    className="label mt-0.5"
+                                    style={{ color: r.scarcity.multiplier > 1.02 ? UP : 'var(--ink-faint)' }}
+                                >
+                                    {r.scarcity.note}
+                                </div>
+                            )}
                         </div>
 
                         <div className="text-right flex-shrink-0">

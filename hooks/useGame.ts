@@ -28,10 +28,13 @@ import { rollGasIncident, settleGas } from '../systems/digestion/gas';
 import { bathroomsIn } from '../data/bathrooms';
 import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
+import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { reputationSpread } from '../systems/npc/reactions';
-import { seedWorld, advanceWorld, applyTradePressure, snapshotMarket } from '../systems/market/simulate';
+import {
+    seedWorld, advanceWorld, applyTradePressure, snapshotMarket, addLocalStock,
+} from '../systems/market/simulate';
 import { banksIn } from '../data/banks';
 import {
     deposit, withdraw, repayCredit, openCreditLine, accrueInterest,
@@ -452,11 +455,21 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // Big flips build a name for you.
             const credGain = profit > 500 ? 3 : profit > 150 ? 1 : 0;
 
-            // You are the supply now. Dumping into one city walks its price
-            // down, so a fat margin thins as you work it.
+            // You are the supply now, in both senses. Dumping into one city
+            // walks its price down — and the pair you just sold is on a shelf in
+            // that city, which is what makes its scarcity premium collapse as
+            // you work the trade. Without this second half a dry city stayed dry
+            // for ever and kept paying a shortage premium on the tenth pair you
+            // sold it.
             const sellMarket = state.markets[state.currentCityId];
             const pressuredMarkets = sellMarket
-                ? { ...state.markets, [state.currentCityId]: applyTradePressure(sellMarket, itemToSell.sneakerId, 1, -1) }
+                ? {
+                    ...state.markets,
+                    [state.currentCityId]: addLocalStock(
+                        applyTradePressure(sellMarket, itemToSell.sneakerId, 1, -1),
+                        itemToSell.sneakerId,
+                    ),
+                }
                 : state.markets;
 
             return {
@@ -963,6 +976,11 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         }
 
         case 'RESET_GAME':
+            // The hype calendar is seeded once per page load, so a new run in
+            // the same tab would otherwise inherit the old run's schedule — and
+            // replaying a thirty-day game against a calendar you have already
+            // memorised is not a new game.
+            reseedHypeCalendar();
             // Fresh markets too — otherwise the new run inherits the old
             // world's prices and the first day is not a fresh read.
             return {

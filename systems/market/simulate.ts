@@ -502,6 +502,24 @@ export function trendFor(market: CityMarket | undefined, sneakerId: string): Tre
     };
 }
 
+/**
+ * The posted shelf price for a model in a city, whether or not any are left.
+ *
+ * `bestAsk` only counts listings with stock, because you cannot buy what is not
+ * there. This is the other question: what is the shop *asking*, as a reference
+ * price? A sold-out shop still has a price on the wall, and that price is what
+ * stops "buy the last pair, sell it straight back" from being the whole game —
+ * nobody pays you more for a pair than the shop down the road charges for one.
+ *
+ * Undefined only when the city has no listing for the model at all, which also
+ * means there was no way to buy one there, so there is no round trip to break.
+ */
+export function referenceAsk(market: CityMarket | undefined, sneakerId: string): number | undefined {
+    const posted = market?.sneakers.filter((l) => l.sneakerId === sneakerId && !l.isFake);
+    if (!posted?.length) return undefined;
+    return Math.min(...posted.map((l) => l.price));
+}
+
 /** Cheapest live listing for a model in a city, ignoring fakes. */
 export function bestAsk(market: CityMarket | undefined, sneakerId: string): number | undefined {
     const live = market?.sneakers.filter((s) => s.sneakerId === sneakerId && !s.isFake && s.quantity > 0);
@@ -543,4 +561,131 @@ export function localValue(market: CityMarket | undefined, sneakerId: string): n
     const sneaker = SNEAKER_BY_ID.get(sneakerId);
     if (!idx || !sneaker) return undefined;
     return Math.max(1, Math.round(sneaker.basePrice * idx.value));
+}
+
+/* ------------------------------------------------------------------ *
+ * Scarcity
+ * ------------------------------------------------------------------ */
+
+/** The most an empty shelf can add to what a city will pay you. */
+const MAX_SCARCITY_PREMIUM = 0.32;
+/** The most a glutted shelf can take off it. */
+const MAX_GLUT_DISCOUNT = 0.16;
+/** How far above or below neutral taste has to sit to reach full effect. */
+const TASTE_SPAN = 0.12;
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+
+/** How many real pairs of this model are sitting on shelves in this city. */
+export function localStock(market: CityMarket | undefined, sneakerId: string): number {
+    if (!market) return 0;
+    return market.sneakers
+        .filter((l) => l.sneakerId === sneakerId && !l.isFake)
+        .reduce((total, l) => total + Math.max(0, l.quantity), 0);
+}
+
+/**
+ * Puts a pair the player just sold onto a shelf in this city.
+ *
+ * A sale is not only a price signal, it is an actual pair of shoes arriving
+ * somewhere. Without this the city's stock never moves, so a city that started
+ * dry keeps paying a shortage premium on the tenth pair you sell it — which is
+ * the difference between scarcity being a mechanic and being a money printer.
+ *
+ * Goes onto an existing listing where one exists so it sits at that shop's
+ * price; otherwise it opens a small resale listing, which is exactly what has
+ * happened in the fiction.
+ */
+export function addLocalStock(market: CityMarket, sneakerId: string, qty = 1): CityMarket {
+    const idx = market.sneakers.findIndex((l) => l.sneakerId === sneakerId && !l.isFake);
+    if (idx >= 0) {
+        const sneakers = [...market.sneakers];
+        sneakers[idx] = { ...sneakers[idx], quantity: sneakers[idx].quantity + qty };
+        return { ...market, sneakers };
+    }
+
+    const priced = localValue(market, sneakerId);
+    if (priced === undefined) return market;
+    return {
+        ...market,
+        sneakers: [...market.sneakers, {
+            sneakerId,
+            price: priced,
+            quantity: qty,
+            group: 'resale',
+        }],
+    };
+}
+
+export interface Scarcity {
+    stock: number;
+    /** Multiplier on what a buyer here will pay you. 1.0 = no effect. */
+    multiplier: number;
+    /** Short reason, for the UI. Empty when nothing notable is happening. */
+    note: string;
+}
+
+/**
+ * What an empty shelf is worth to a seller.
+ *
+ * Supply and demand, and specifically *both* of them: an empty shelf only
+ * commands a premium where the city actually wants the thing. Tokyo having no
+ * Jordans left is scarcity, and you can name your price. Paris having no work
+ * boots is not scarcity — nobody in Paris was going to buy work boots, and the
+ * shelf is empty because the shop never bothered stocking any. Treating those
+ * two as the same thing would pay the player a bonus for carrying junk into the
+ * one city least interested in it, which is precisely backwards.
+ *
+ * So the premium is the product of two terms: how dry the shelf is, and how
+ * much this city wants the thing at all. Taste comes from `relativeValue`,
+ * which already divides the city's general price level out of its preferences.
+ * Below neutral taste the premium is zero, and a *glutted* shelf for something
+ * unwanted goes the other way — dumping boots into a Paris that has plenty and
+ * wants none should hurt.
+ *
+ * Deliberately capped at about a third. It has to be worth crossing a map for
+ * and it must never beat what the shops are asking, or "buy the last pair and
+ * sell it straight back" becomes the whole game. `tests/market.test.mts`
+ * asserts that round trip loses money.
+ */
+export function scarcityFor(market: CityMarket | undefined, sneakerId: string): Scarcity {
+    const sneaker = SNEAKER_BY_ID.get(sneakerId);
+    if (!market || !sneaker) return { stock: 0, multiplier: 1, note: '' };
+
+    const stock = localStock(market, sneakerId);
+    const taste = relativeValue(sneaker, market.cityId);
+
+    const wants = clamp01((taste - 1) / TASTE_SPAN);
+    const indifferent = clamp01((1 - taste) / TASTE_SPAN);
+
+    // Dryness falls away fast: the difference between none and one is the whole
+    // story, and by half a dozen pairs nobody is paying over the odds.
+    const dryness = 1 / (1 + stock);
+    // A glut needs to be a real pile before it counts against you.
+    const glut = clamp01((stock - 6) / 12);
+
+    const premium = MAX_SCARCITY_PREMIUM * dryness * wants;
+    const discount = MAX_GLUT_DISCOUNT * glut * indifferent;
+    const multiplier = 1 + premium - discount;
+
+    // The threshold for *saying* something is far lower than the threshold for
+    // it mattering a lot, because a premium the player cannot see is not a
+    // mechanic. A first pass only spoke up above 8%, which left 53 of 270
+    // model/city pairs quietly paying over with nothing on screen, and put a
+    // note on just 7% of the models actually sitting on a shelf — which is to
+    // say, on almost none of the ones a player ever looks at.
+    let note = '';
+    if (premium > 0.02) {
+        note = stock === 0
+            ? 'None left in the city, and they want them.'
+            : stock <= 3
+                ? `Only ${stock} left in the city, and they want them.`
+                : 'Stock is getting thin here.';
+    } else if (discount > 0.02) {
+        note = 'Piles of them here, and nobody asking.';
+    } else if (stock === 0 && wants <= 0) {
+        note = 'None in stock — because nobody here wants one.';
+    }
+
+    return { stock, multiplier, note };
 }

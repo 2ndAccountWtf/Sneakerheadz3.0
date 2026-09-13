@@ -8,6 +8,7 @@ import { getBagValue } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
 import { venuesIn, isVenueOpen } from '../data/venues';
 import { collectorsIn } from '../systems/collectors';
+import HypeCalendar from '../components/HypeCalendar';
 import { getRunClock } from '../data/ranks';
 import Img from '../components/Img';
 
@@ -221,6 +222,11 @@ const DashboardScreen: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* WHAT IS ON, AND WHERE. Sits above the action tiles because a
+                three-day-old plan to be in Long Beach on day 14 should shape
+                what you do today, not be discovered on arrival. */}
+            <HypeCalendar day={day} cityId={currentCityId} className="mb-4" />
 
             {/* STREET INTEL TICKER */}
             {headline && (

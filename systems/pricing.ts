@@ -7,7 +7,14 @@ import type { Player, InventoryItem, Sneaker, GameState } from '../types';
 import type { MarketSignal } from '../types/news';
 import { SNEAKERS } from '../data/sneakers';
 import { buffMultiplier } from './outcomes/outcomeEngine';
-import { localValue } from './market/simulate';
+import { localValue, scarcityFor, referenceAsk } from './market/simulate';
+
+/**
+ * How far under the posted shelf price the best available bid sits. The spread
+ * a shop lives on, and the reason you cannot trade a pair back and forth for
+ * free.
+ */
+const BID_ASK = 0.9;
 
 /** Does this signal apply to this sneaker? */
 export function signalMatches(signal: MarketSignal, sneaker: Sneaker): boolean {
