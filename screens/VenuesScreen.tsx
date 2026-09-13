@@ -5,6 +5,8 @@ import ScreenHeader from '../components/ScreenHeader';
 import { venuesIn, isVenueOpen, timeOfDayFor, type Venue } from '../data/venues';
 import { getOpponent, effectiveSkill, challengeLine, rivalryWith, type Opponent } from '../systems/opponents';
 import { CITIES } from '../data/cities';
+import { whereIs } from '../systems/npc/schedule';
+import { coPresenceEvent, refusesYou } from '../systems/npc/reactions';
 import type { MiniGameId, MiniGameRequest } from '../types/game';
 import type { ScenarioOutcome } from '../types/interactions';
 
@@ -75,15 +77,56 @@ const VenuesScreen: React.FC = () => {
     const cityName = CITIES.find(c => c.id === currentCityId)?.name ?? 'here';
     const [expanded, setExpanded] = useState<string | null>(venues[0]?.id ?? null);
 
+    /**
+     * The day's one co-presence scene, if there is one.
+     *
+     * Scans today's actual placements for a venue holding two NPCs who have
+     * authored history, and keeps the first. Deliberately at most one a day:
+     * six simultaneous feuds across six venues reads as noise, while one
+     * argument happening in a bar you were not going to visit reads as a world
+     * that is running whether or not you turn up.
+     */
+    const scene = useMemo(() => {
+        for (const venue of venues) {
+            if (!isVenueOpen(venue, day)) continue;
+            const present = venue.regulars.filter(id => whereIs(id, currentCityId, day).venueId === venue.id);
+            for (let i = 0; i < present.length; i++) {
+                for (let j = i + 1; j < present.length; j++) {
+                    const event = coPresenceEvent(present[i], present[j], day);
+                    if (event) return { venueId: venue.id, event };
+                }
+            }
+        }
+        return null;
+    }, [venues, currentCityId, day]);
+
     const start = (venue: Venue, game: MiniGameId) => {
         // Pick a regular who actually plays this game; fall back to any regular.
         const candidates = venue.regulars
             .map(getOpponent)
             .filter((o): o is Opponent => !!o);
-        const willing = candidates.filter(o => o.games.includes(game));
+        // Somebody who will not deal with you will not play you either. Their
+        // memory of what you did has to cost something concrete, or "they
+        // remember" is just a line of dialogue.
+        const speaking = candidates.filter(o => !refusesYou(player, o.npcId).refuses);
+        const willing = speaking.filter(o => o.games.includes(game));
         const opponent = willing[Math.floor(Math.random() * willing.length)]
-            ?? candidates[Math.floor(Math.random() * candidates.length)]
+            ?? speaking[Math.floor(Math.random() * speaking.length)]
             ?? null;
+
+        if (!opponent && candidates.length > 0) {
+            // Everyone here has a reason not to. Say whose, and what it is.
+            const snubbed = candidates[0];
+            dispatch({
+                type: 'SET_NOTIFICATION',
+                payload: {
+                    message: refusesYou(player, snubbed.npcId).reason
+                        ?? `${snubbed.name} will not play you.`,
+                    type: 'error',
+                },
+            });
+            return;
+        }
 
         const skill = opponent ? effectiveSkill(opponent, player) : 0.5;
 
@@ -155,17 +198,44 @@ const VenuesScreen: React.FC = () => {
 
                                         {regulars.length > 0 && (
                                             <div className="mb-3">
-                                                <div className="label mb-1.5">Usually here</div>
+                                                <div className="label mb-1.5">{open ? 'Who is here' : 'Regulars'}</div>
                                                 <div className="flex flex-wrap gap-1.5">
                                                     {regulars.map(o => {
                                                         const met = rivalryWith(player, o.npcId);
+                                                        // A roster that always reads the same is a cast
+                                                        // list, not a place. `whereIs` puts each regular
+                                                        // somewhere specific today, so "usually here"
+                                                        // becomes "here, probably" or "not today".
+                                                        const placed = whereIs(o.npcId, currentCityId, day);
+                                                        const hereNow = placed.venueId === venue.id;
+                                                        const likely = hereNow && placed.likelihood >= 0.55;
+                                                        // On a shut venue, "elsewhere" is not information —
+                                                        // of course they are elsewhere, the door is locked.
+                                                        // So a closed card goes back to a plain roster.
+                                                        const where = !open
+                                                            ? ''
+                                                            : hereNow ? (likely ? ' · here' : ' · maybe') : ' · elsewhere';
                                                         return (
-                                                            <span key={o.npcId} className={`chip ${met > 0 ? 'chip-accent' : ''}`} title={challengeLine(o)}>
-                                                                {o.name}{met > 0 ? ` · ${met}×` : ''}
+                                                            <span
+                                                                key={o.npcId}
+                                                                className={`chip ${!open ? '' : hereNow ? (likely ? 'chip-accent' : '') : '!opacity-45'}`}
+                                                                title={open && !hereNow ? placed.place : challengeLine(o)}
+                                                            >
+                                                                {o.name}{where}{met > 0 ? ` · ${met}×` : ''}
                                                             </span>
                                                         );
                                                     })}
                                                 </div>
+                                            </div>
+                                        )}
+
+                                        {/* Two people who have history, in one room. The scene is
+                                            between them — the player is a bystander, which is what
+                                            makes the world feel like it exists without you. */}
+                                        {scene && scene.venueId === venue.id && (
+                                            <div className="panel-raised p-3 mb-3 animate-rise" style={{ borderColor: 'var(--accent-2)' }}>
+                                                <div className="label mb-1" style={{ color: 'var(--accent-2)' }}>{scene.event.headline}</div>
+                                                <p className="text-sm text-[var(--ink-dim)] leading-snug">{scene.event.body}</p>
                                             </div>
                                         )}
 

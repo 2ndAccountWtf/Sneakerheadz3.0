@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx tests/engine.test.mts && tsx tests/world.test.mts && tsx tests/digestion.test.mts && tsx tests/market.test.mts && tsx tests/money.test.mts"
+    "test": "tsx tests/engine.test.mts && tsx tests/world.test.mts && tsx tests/digestion.test.mts && tsx tests/market.test.mts && tsx tests/money.test.mts && tsx tests/npc.test.mts"
   },
   "dependencies": {
     "phaser": "^4.2.1",
