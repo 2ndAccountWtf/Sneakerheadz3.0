@@ -746,8 +746,8 @@ const aiThink = (w: World, p: Player, dt: number) => {
             } else if (dd < STEAL_R && p.cool <= 0 && p.aiTimer <= 0 && w.ball.pickCool <= 0) {
                 // Steals are the easiest thing to over-tune: at a 30% gamble
                 // every half second the ball never settles and neither team
-                // gets to run anything. 14% on a one-second lockout keeps the
-                // threat real without turning it into hot potato.
+                // gets to run anything. 10% behind a 1.2s lockout keeps the
+                // threat real without turning the game into hot potato.
                 p.aiTimer = 0.8;
                 p.cool = 1.2;
                 // Standing still with the ball is how you get robbed. This also
