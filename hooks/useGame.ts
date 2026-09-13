@@ -1014,13 +1014,18 @@ const gameReducer = (state: GameState, action: Action): GameState => {
          */
         case 'RESOLVE_STREET_SALE':
         case 'RESOLVE_COLLECTOR_DEAL':
+            // No `notification` here, deliberately. Both screens that dispatch
+            // these render `outcomeLog` inline, so also firing the global toast
+            // put the same sentence on screen twice at once — once in the log
+            // panel above the spot, once in the toast at the bottom. The inline
+            // panel is the better of the two anyway: it shows every entry, and
+            // a street sale routinely produces several (the sale, the heat it
+            // cost you, whoever was watching), where the toast only ever showed
+            // the first one.
             return {
                 ...state,
                 player: action.payload.player,
                 outcomeLog: action.payload.log,
-                notification: action.payload.log[0]
-                    ? { message: action.payload.log[0].text, type: action.payload.log[0].tone === 'bad' ? 'error' : 'success' }
-                    : state.notification,
             };
 
         case 'BANK_DEPOSIT':
