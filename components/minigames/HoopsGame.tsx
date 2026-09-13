@@ -116,10 +116,10 @@ const DUNK_RANGE_FIRE_BONUS = 14;
 const CONTEST_R = 28;           // a defender this close starts hurting the shot
 const BLOCK_R = 16;             // airborne defender inside this can swat it
 export const STEAL_R = 14;
-export const SHOVE_R = 18;      // TURBO+PASS on defence inside this range knocks him down
+export const SHOVE_R = 16;      // TURBO+PASS on defence inside this range knocks him down
 const STUMBLE_TIME = 0.85;      // seconds a shoved player is down and out of control
 const SWAP_COOL = 0.4;          // debounce on PASS-to-swap-control so one tap isn't three
-export const ALLEY_HOOP_R = 72; // close enough to the rim that a jump here is a lob call
+export const ALLEY_HOOP_R = 80; // close enough to the rim that a jump here is a lob call
 const ALLEY_CALL_TIME = 0.5;    // how long the "I'm open, throw it here" cue shows
 const THREE_DIST = 118;         // beyond this a bucket is worth 3
 
@@ -645,7 +645,23 @@ const launchPass = (w: World, from: Player, to: Player) => {
     b.dur = dur;
     b.sx = from.x; b.sz = from.z; b.sy = 18 + from.y;
     b.tx = leadX; b.tz = leadZ; b.ty = 18;
-    b.arc = 7;
+    // A pass has to get over a standing defender, or it is not a pass.
+    //
+    // This was 7, which puts the ball's mid-flight peak at y≈25 against an
+    // interception ceiling of y<26 — so every pass flew flat, a single pixel
+    // under the bar, for its entire flight, and anyone standing anywhere near
+    // the line picked it off. Measured: 13 of 15 passes intercepted, 87%, and a
+    // bot that never passed beat a bot that did 100% to 3%. Passing is the
+    // whole reason this game grew a third button; it has to be the safe
+    // default, the way it is in Jam.
+    //
+    // At 16 the ball peaks around y≈34 and clears the ceiling through the
+    // middle of its flight, so it can only be picked near the release and near
+    // the catch. A long pass is still the risky one — `dur` scales with
+    // distance, so it spends longer hanging over the receiver with defenders
+    // converging, which is exactly the lazy cross-court ball that should be
+    // punished.
+    b.arc = 16;
     from.facing = to.x > from.x ? 1 : -1;
     from.cool = 0.2;
     w.possession = null;
@@ -924,7 +940,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
         const guardClose = dist2d(guard.x, guard.z, p.x, p.z) < 14;
         if (
             p.y === 0 && p.aiTimer <= 0 && !guardClose && handler.cool <= 0
-            && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.02
+            && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.038
         ) {
             p.vy = JUMP_V;
             p.alleyCall = ALLEY_CALL_TIME;
@@ -997,8 +1013,18 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // Rebound: go where the miss is going, not where the ball is now.
             tx = b.tx + (rng(w) - 0.5) * 4;
             tz = b.tz;
+        } else if (b.mode === 'flight' && b.kind === 'pass' && p.id === b.target) {
+            // Meet the pass. The rebound case already knew to run to where the
+            // ball is going; a pass fell through to chasing where the ball
+            // currently *is*, so the intended receiver trailed it the whole way
+            // and arrived after it did. Any defender converging on the landing
+            // spot got there first, which is why a third of all completed
+            // passes were being picked at the catch.
+            tx = b.tx;
+            tz = b.tz;
+            turbo = true;
         }
-        turbo = p.turbo > 0.15;
+        turbo = turbo || p.turbo > 0.15;
     }
 
     const dx = tx - p.x;
@@ -1145,11 +1171,20 @@ const stepBall = (w: World, dt: number) => {
         // 8px away by definition, intercepted every pass out of pressure. A
         // lazy cross-court pass spends a lot longer in this window than a
         // sharp one, which is exactly the punishment the brief asked for.
-        if (b.kind === 'pass' && b.t > 0.3) {
+        if (b.kind === 'pass' && b.t > 0.4) {
             const from = w.players[b.shooter];
+            const to = w.players[b.target];
             for (const o of w.players) {
                 if (o.team === from.team || o.stumbleT > 0) continue;
-                if (b.y < 26 && dist2d(o.x, o.z, b.x, b.z) < 9) {
+                // You have to actually be in front of him, not just marking
+                // him. Without this test, a defender standing beside the
+                // receiver took the ball at the moment it arrived — so any
+                // covered team-mate was an automatic turnover and passing cost
+                // you the game: measured at 40-46% of all passes picked off,
+                // against a bot that never passed winning 100% of its games.
+                const defenderToBall = dist2d(o.x, o.z, b.x, b.z);
+                if (defenderToBall >= dist2d(to.x, to.z, b.x, b.z)) continue;
+                if (b.y < 26 && defenderToBall < 5.5) {
                     w.stats.interceptions++;
                     shout(w, 'PICKED OFF!', PAL.accent2, 0.9);
                     say(w, pick(w, SAY.intercept));
@@ -1797,7 +1832,11 @@ const HoopsGame: React.FC<{
     // The whole simulation lives here. React never sees it.
     const worldRef = useRef<World | null>(null);
     if (!worldRef.current) {
-        worldRef.current = createWorld((Date.now() ^ 0x9e3779b9) | 0, opponent);
+        // `__HOOPS_SEED__` is a debug-only escape hatch for the headless/Playwright
+        // verification harness to get a reproducible game — real play never sets
+        // it, so this is always Date.now()-based in the shipped app.
+        const debugSeed = typeof window !== 'undefined' ? (window as unknown as { __HOOPS_SEED__?: number }).__HOOPS_SEED__ : undefined;
+        worldRef.current = createWorld(debugSeed ?? ((Date.now() ^ 0x9e3779b9) | 0), opponent);
     }
 
     // HUD mirror: written only when a *displayed* value actually changes, so

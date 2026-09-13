@@ -205,7 +205,7 @@ const StreetSellScreen: React.FC = () => {
                                     <span className="chip">{Math.round(spot.buyerMix.local * 100)}% locals</span>
                                     <span className="chip">{Math.round(spot.buyerMix.international * 100)}% tourists</span>
                                     {spot.buyerMix.celebrity >= 0.15 && <span className="chip chip-accent">chance of ⭐ somebody famous</span>}
-                                    <RiskChip label="Heat" value={spot.heatRate / 6} lowIsGood={true} />
+                                    <RiskChip label="Heat" value={spot.heatRate / 6} lowIsGood={false} />
                                     {spot.minCred !== undefined && (
                                         <span className={`chip ${credOk ? '' : 'chip-bad'}`}>needs {spot.minCred} cred</span>
                                     )}

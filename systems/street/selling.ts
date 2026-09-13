@@ -234,11 +234,19 @@ export function shutdownChance(spot: SellingSpot, player: Player, hype: HypeEven
     return clamp(base * spotFactor * hypeFactor, 0.01, 0.65);
 }
 
-/** Heat picked up from one clean, completed sale — busier spot, bigger bag, more of it. */
+/**
+ * Heat picked up from one clean, completed sale. `heatRate` is the spot's own
+ * eyes-on-you baseline and is weighted heavily on purpose — it's what keeps a
+ * quiet, expensive spot (Nakano Broadway, `heatRate` 1) actually quieter than
+ * a subway exit (`heatRate` 6) even when the quiet spot's sale happens to be
+ * huge; `visibility` only adds a smaller premium for a genuinely large payday
+ * on top of that, rather than being allowed to swamp it the way it would at
+ * an even weight.
+ */
 function heatFromSale(spot: SellingSpot, price: number, hype: HypeEvent | null): number {
     const visibility = Math.sqrt(price / 500);
     const hypeFactor = hype?.heatMultiplier ?? 1;
-    return Math.max(1, Math.round((spot.heatRate * 0.5 + visibility) * hypeFactor));
+    return Math.max(1, Math.round((spot.heatRate * 1.1 + visibility * 0.6) * hypeFactor));
 }
 
 export type StreetSaleResultKind =
