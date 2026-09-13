@@ -101,5 +101,211 @@ export const total = (a: Attributes): number =>
 /**
  * The named roster. Filled in against the real NPC ids in
  * `systems/opponents.ts` — every key here must be one of them.
+ *
+ * Two extra keys, `player` and `big-mike`, are not opponents — they are the
+ * human and their AI teammate — but they get the same treatment for the same
+ * reason: a 2-on-2 game has four bodies on the floor, and only two of them
+ * come from `opponents.ts`.
+ *
+ * Every total below is checked against a budget that scales with `skill`
+ * (`1.75 + skill * 3.5` — the same line `spread()` traces, just spent
+ * unevenly instead of flatly): a 0.80 skill NPC gets roughly 4.3-4.6 to work
+ * with, a 0.30 skill NPC gets roughly 2.6-2.9. Nobody spends it evenly.
  */
-export const ROSTER: Record<string, HoopsProfile> = {};
+export const ROSTER: Record<string, HoopsProfile> = {
+    /**
+     * Grandma Laces — skill 0.80, the best player on any blacktop, and she
+     * proves it without leaving the ground. Two hands, underhand, from
+     * between the knees — the Rick Barry granny shot — and it goes in from
+     * anywhere. `jump` and `dunk` are as low as they get on this roster: she
+     * is not a lob threat and never will be. `handles` and `defense` are
+     * just as extreme the other way — decades of reading exactly this game
+     * mean the ball does not come loose against her and neither does yours.
+     */
+    'grandma-laces': {
+        npcId: 'grandma-laces',
+        name: 'Grandma Laces',
+        attributes: {
+            speed: 0.40, jump: 0.10, dunk: 0.03, range: 0.97,
+            handles: 0.95, defense: 0.95, stamina: 0.90,
+        },
+        style: 'Never runs, never jumps, never comes off the floor — reads your feet before you move them and buries it anyway.',
+        signature: 'The Granny Shot',
+    },
+
+    /**
+     * Scalper Sid — skill 0.70. A con artist's game: he never plays it
+     * straight, so `defense` is close to absent, but `range` and `handles`
+     * are both near the top of the roster — the deep bomb is "making it
+     * interesting" and the crossover is the same misdirection he sells maps
+     * with.
+     */
+    'scalper-sid': {
+        npcId: 'scalper-sid',
+        name: 'Scalper Sid',
+        attributes: {
+            speed: 0.65, jump: 0.45, dunk: 0.20, range: 0.95,
+            handles: 0.95, defense: 0.25, stamina: 0.65,
+        },
+        style: 'Talks a slow game and shoots a fast one — the deep ball is the only honest thing about him.',
+        signature: 'The Long Con',
+    },
+
+    /**
+     * Gutter Gabe — skill 0.62. The shakedown artist: he takes the ball off
+     * you the same way he takes your shoes, and `defense` shows it. `range`
+     * is the worst on the roster after the two who genuinely cannot shoot —
+     * he has never once needed a jumper to take your money.
+     */
+    'gutter-gabe': {
+        npcId: 'gutter-gabe',
+        name: 'Gutter Gabe',
+        attributes: {
+            speed: 0.45, jump: 0.55, dunk: 0.75, range: 0.15,
+            handles: 0.40, defense: 0.85, stamina: 0.70,
+        },
+        style: 'Boxes you out with his whole personality, then takes the rim like it owes him money.',
+        signature: 'The Shakedown',
+    },
+
+    /**
+     * Bro Jogan — skill 0.55. All hype, all highlight: elite `jump` and
+     * `dunk` for the clip, and almost nothing on `defense` or `stamina` once
+     * the cameras have their footage. He is a two-minute burst of a player.
+     */
+    'bro-jogan': {
+        npcId: 'bro-jogan',
+        name: 'Bro Jogan',
+        attributes: {
+            speed: 0.55, jump: 0.80, dunk: 0.85, range: 0.35,
+            handles: 0.55, defense: 0.15, stamina: 0.35,
+        },
+        style: 'All the hang time in the world for the first two minutes, then the ice bath talk turns out to have been a lie.',
+        signature: 'The Elk Effect',
+    },
+
+    /**
+     * ADC — skill 0.50. Cannot jump, cannot dunk, cannot shoot — `jump` and
+     * `dunk` are the two lowest numbers she owns and `range` is not far
+     * above them. What she has is `defense` and `stamina` near the top of
+     * the entire roster: she gets in your face and she does not stop, ever,
+     * for the whole game, the same way she does not stop outside the store.
+     */
+    adc: {
+        npcId: 'adc',
+        name: 'ADC',
+        attributes: {
+            speed: 0.45, jump: 0.15, dunk: 0.05, range: 0.25,
+            handles: 0.60, defense: 0.90, stamina: 0.95,
+        },
+        style: "Can't jump, can't shoot, will not stop getting in your face for a single second of the game.",
+        signature: 'The Clipboard Press',
+    },
+
+    /**
+     * The Game — skill 0.45. Decent `speed` and `handles` get him all the
+     * way to the rim; `range` is one of the worst on the roster, on purpose
+     * — this is a player who can flat-out get there and flat-out cannot
+     * shoot from anywhere else, and the brick mechanic should make sure
+     * everyone watching knows it.
+     */
+    'the-game': {
+        npcId: 'the-game',
+        name: 'The Game',
+        attributes: {
+            speed: 0.65, jump: 0.50, dunk: 0.55, range: 0.12,
+            handles: 0.65, defense: 0.20, stamina: 0.45,
+        },
+        style: 'Full speed to the rim every single time, because the jumper clangs off the iron more often than it goes anywhere near it.',
+        signature: 'The Brick',
+    },
+
+    /**
+     * The AM/PM Clerk — skill 0.45. Plays like his shift is ending in five
+     * minutes, because to him it always is: quick `speed`, quick `handles`
+     * off the register, no patience for a slow possession, and `defense`
+     * that treats every play like a store rule nobody is allowed to break.
+     */
+    'clerk-israeli-af': {
+        npcId: 'clerk-israeli-af',
+        name: 'The AM/PM Clerk',
+        attributes: {
+            speed: 0.65, jump: 0.25, dunk: 0.15, range: 0.35,
+            handles: 0.55, defense: 0.70, stamina: 0.75,
+        },
+        style: "Plays like his shift ends in five minutes — quick hands, quicker feet, zero patience for a slow game.",
+        signature: 'Yalla, Fast Break',
+    },
+
+    /**
+     * Wiz K — skill 0.38. Barely moves, barely defends — `defense` and
+     * `stamina` are both near the bottom — and then from a standstill the
+     * deep ball drops and even he looks surprised. `range` is the one
+     * number on him that has no business being that high.
+     */
+    'wiz-k': {
+        npcId: 'wiz-k',
+        name: 'Wiz K',
+        attributes: {
+            speed: 0.35, jump: 0.65, dunk: 0.20, range: 0.85,
+            handles: 0.40, defense: 0.15, stamina: 0.40,
+        },
+        style: 'Barely moves, barely defends, and then from nowhere the deep ball goes in and even he looks surprised.',
+        signature: 'Somehow Wet',
+    },
+
+    /**
+     * Yasser Abbasfat — skill 0.30. Chaos who cannot shoot: `range` is the
+     * single worst number on the entire roster. Everything else runs hot —
+     * `speed`, `dunk`, `stamina` — a player who is everywhere, finishes
+     * recklessly when the chance appears, and turns the ball over doing it,
+     * because `handles` is almost as bad as `range`.
+     */
+    'yasser-abbasfat': {
+        npcId: 'yasser-abbasfat',
+        name: 'Yasser Abbasfat',
+        attributes: {
+            speed: 0.60, jump: 0.50, dunk: 0.55, range: 0.05,
+            handles: 0.15, defense: 0.45, stamina: 0.55,
+        },
+        style: 'Full go in every direction all game — he will dunk on you, foul you and lose the ball doing it, often in the same possession.',
+        signature: 'Controlled Detonation',
+    },
+
+    /**
+     * The human. Not an NPC, so not in `opponents.ts` — but a 2-on-2 game
+     * has four bodies on the floor and this is one of them. A sneakerhead,
+     * not an athlete: `handles` is the best thing about them (the ball does
+     * not get taken any more easily than the shoebox does), `range` backs it
+     * up, and `dunk` is the trade-off — they are not walking a lob home.
+     */
+    player: {
+        npcId: 'player',
+        name: 'You',
+        attributes: {
+            speed: 0.55, jump: 0.50, dunk: 0.25, range: 0.70,
+            handles: 0.80, defense: 0.45, stamina: 0.55,
+        },
+        style: 'Treats the ball like a pair of grails — nobody is getting it back once it is yours.',
+        signature: 'Iron Grip',
+    },
+
+    /**
+     * Big Mike — your teammate, specified elsewhere as big, heavy, sets
+     * screens, and does not run back on defense. Every one of those is a
+     * number here: `dunk` is the highest on the entire roster because
+     * finishing from three feet out is the whole job; `speed` is the
+     * lowest, `range` is next to nothing, and `defense` is poor on purpose
+     * — he is not the one getting back down the floor.
+     */
+    'big-mike': {
+        npcId: 'big-mike',
+        name: 'Big Mike',
+        attributes: {
+            speed: 0.12, jump: 0.48, dunk: 0.95, range: 0.05,
+            handles: 0.28, defense: 0.30, stamina: 0.45,
+        },
+        style: 'Sets the pick, throws it down from three feet away, and ambles back on defense whenever he feels like it.',
+        signature: 'Human Backboard',
+    },
+};

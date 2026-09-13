@@ -17,6 +17,7 @@ import { bathroomsIn } from '../data/bathrooms.ts';
 import { getStoreSkin } from '../data/storeSkins.ts';
 import { VENUES, venuesIn, isVenueOpen } from '../data/venues.ts';
 import { OPPONENTS, getOpponent, effectiveSkill } from '../systems/opponents.ts';
+import { ROSTER } from '../systems/hoops/roster.ts';
 import { INITIAL_PLAYER } from '../constants.ts';
 
 let pass = 0;
@@ -174,6 +175,37 @@ t('rivalry raises an opponent skill but never past the cap', () => {
     assert.ok(b > a, 'a repeat opponent should be harder');
     assert.ok(b <= 0.92, `skill ran away to ${b}`);
     console.log(`      (${o.name}: ${a.toFixed(2)} fresh -> ${b.toFixed(2)} after many meetings)`);
+});
+
+t('every hoops profile belongs to somebody you can actually play', () => {
+    // Nine characters were written for the basketball game — Grandma Laces and
+    // her granny shot, Big Mike who dunks from three feet and cannot run — and
+    // seven of them had no `street-ball` in their games list, so they could
+    // never be challenged to one. Authored characters nobody can reach are the
+    // same dead content as a regional item its own city does not stock.
+    const playable = new Set(
+        OPPONENTS.filter(o => o.games.includes('street-ball')).map(o => o.npcId),
+    );
+    // 'player' and 'big-mike' are the two seats on your own team, not opponents.
+    const seats = new Set(['player', 'big-mike', 'generic']);
+
+    for (const npcId of Object.keys(ROSTER)) {
+        if (seats.has(npcId)) continue;
+        assert.ok(
+            playable.has(npcId),
+            `${npcId} has a hoops profile but cannot be challenged to a game of hoops`,
+        );
+    }
+});
+
+t('every hoops opponent has a profile, so nobody falls back to a nobody', () => {
+    for (const o of OPPONENTS) {
+        if (!o.games.includes('street-ball')) continue;
+        assert.ok(
+            ROSTER[o.npcId],
+            `${o.npcId} plays street-ball but has no profile — they would play as a generic nobody`,
+        );
+    }
 });
 
 console.log(`\n${pass} world checks passed`);
