@@ -32,7 +32,7 @@
  * dumped market takes several days to heal. That gives the map a shape — cities
  * you have strip-mined and cities you have not touched yet.
  */
-import type { CityMarket, MarketSneaker, PriceIndex, Sneaker } from '../../types';
+import type { CityMarket, MarketIntel, MarketSneaker, PriceIndex, Sneaker } from '../../types';
 import { SNEAKERS } from '../../data/sneakers';
 import { STORES_BY_CITY } from '../../data/stores';
 import { STORE_CONFIGS } from '../../data/storeConfigs';
@@ -46,6 +46,12 @@ const REVERSION = 0.18;
 const MOMENTUM_DECAY = 0.62;
 /** Base overnight noise, before per-model volatility and per-city churn. */
 const NOISE = 0.09;
+/** Days of invented past kept in front of day one, so a chart has a shape. */
+const PRE_RUN_DAYS = 24;
+
+/** Never keep more than this many daily closes per model. */
+const HISTORY_CAP = 96;
+
 /**
  * Hard rails on the index, as a fraction of the city's fair value.
  *
@@ -233,10 +239,14 @@ export function applyTradePressure(
     const profile = profileFor(market.cityId);
     const fair = fairValue(sneaker, market.cityId);
 
-    // ~4% per pair in a normal market, damped by depth, and sub-linear in
-    // quantity so selling twenty pairs is punishing without being ruinous.
-    const perPair = 0.04 / Math.max(0.5, profile.supply);
-    const magnitude = perPair * Math.sqrt(quantity) * Math.sqrt(Math.max(1, quantity)) * fair;
+    // Sub-linear in quantity, so selling twenty pairs is punishing without
+    // being four times as punishing as five. Tuned so a full bag dumped into one
+    // city moves it around a tenth and still lands inside the index band —
+    // written first as `sqrt(q) * sqrt(q)`, which is just `q`, and therefore
+    // both linear and strong enough to slam every trade into the floor where no
+    // amount mattered any more.
+    const perPair = 0.027 / Math.max(0.5, profile.supply);
+    const magnitude = perPair * Math.sqrt(quantity) * fair;
 
     const value = clamp(index.value + direction * magnitude, fair * FLOOR, fair * CEILING);
 
@@ -351,10 +361,52 @@ export function seedWorld(rng: () => number = Math.random): Record<string, CityM
             cityId: city.id,
             index,
             sneakers: repriceListings(listings, index),
+            history: backfillHistory(index, city.id, rng),
+            preRunDays: PRE_RUN_DAYS,
         };
     }
 
     return markets;
+}
+
+/**
+ * Invents the weeks before the run started.
+ *
+ * A price chart with one point on it is worse than no chart, and the player
+ * arrives on day one wanting to know whether a shoe has been climbing. These
+ * sneakers existed before the game began, so giving them a past is not a lie —
+ * but it is *invented*, which is why `preRunDays` is stored alongside it and the
+ * UI marks where the real record starts.
+ *
+ * Walked backwards from today's seeded price using the same momentum model as
+ * the live simulation, so the invented past has the same texture as the days
+ * that follow it and the join is not visible.
+ */
+function backfillHistory(
+    index: Record<string, PriceIndex>,
+    cityId: string,
+    rng: () => number,
+): Record<string, number[]> {
+    const history: Record<string, number[]> = {};
+
+    for (const [sneakerId, idx] of Object.entries(index)) {
+        const sneaker = SNEAKER_BY_ID.get(sneakerId);
+        if (!sneaker) continue;
+
+        const back: number[] = [];
+        let walking: PriceIndex = { ...idx, momentum: 0 };
+        for (let i = 0; i < PRE_RUN_DAYS; i++) {
+            walking = stepIndex(walking, sneaker, cityId, rng);
+            back.push(Math.max(1, Math.round(sneaker.basePrice * walking.value)));
+        }
+        // Reversed, then today's actual price appended, so the series ends where
+        // the simulation currently is rather than where the walk wandered to.
+        back.reverse();
+        back.push(Math.max(1, Math.round(sneaker.basePrice * idx.value)));
+        history[sneakerId] = back;
+    }
+
+    return history;
 }
 
 /** Picks `count` distinct models, favouring the ones this city cares about. */
@@ -394,7 +446,28 @@ export function advanceWorld(
 
         const restocked = market.sneakers.map((l) => ({ ...l, quantity: restock(l, profile.supply, rng) }));
 
-        next[cityId] = { ...market, index, sneakers: repriceListings(restocked, index) };
+        const history: Record<string, number[]> = {};
+        let trimmed = 0;
+        for (const [sneakerId, idx] of Object.entries(index)) {
+            const sneaker = SNEAKER_BY_ID.get(sneakerId);
+            if (!sneaker) continue;
+            const series = [...(market.history[sneakerId] ?? []), Math.max(1, Math.round(sneaker.basePrice * idx.value))];
+            if (series.length > HISTORY_CAP) {
+                trimmed = series.length - HISTORY_CAP;
+                series.splice(0, trimmed);
+            }
+            history[sneakerId] = series;
+        }
+
+        next[cityId] = {
+            ...market,
+            index,
+            sneakers: repriceListings(restocked, index),
+            history,
+            // Trimming eats the invented past first, so the marker stays
+            // pointing at the same real day.
+            preRunDays: Math.max(0, market.preRunDays - trimmed),
+        };
     }
 
     return next;
@@ -434,6 +507,34 @@ export function bestAsk(market: CityMarket | undefined, sneakerId: string): numb
     const live = market?.sneakers.filter((s) => s.sneakerId === sneakerId && !s.isFake && s.quantity > 0);
     if (!live?.length) return undefined;
     return Math.min(...live.map((l) => l.price));
+}
+
+/**
+ * A snapshot of everything a city's prices are, right now, for the player to
+ * remember. Taken on departure, so what you carry away is what you actually
+ * saw — not what the city did after you left.
+ */
+export function snapshotMarket(market: CityMarket, day: number): MarketIntel {
+    const prices: Record<string, number> = {};
+    for (const [sneakerId, idx] of Object.entries(market.index)) {
+        const sneaker = SNEAKER_BY_ID.get(sneakerId);
+        if (sneaker) prices[sneakerId] = Math.max(1, Math.round(sneaker.basePrice * idx.value));
+    }
+    return { cityId: market.cityId, day, prices };
+}
+
+/**
+ * How much a remembered price should be trusted, as a 0..1 confidence.
+ *
+ * A number from yesterday is nearly as good as a live one; a number from twelve
+ * days ago is a rumour. This decays on the same timescale the market moves on,
+ * so the UI can tell the player how much of a bet they are making without
+ * needing to explain mean reversion to them.
+ */
+export function intelConfidence(intel: MarketIntel | undefined, day: number): number {
+    if (!intel) return 0;
+    const age = Math.max(0, day - intel.day);
+    return Math.max(0, 1 - age / 10);
 }
 
 /** What a city would pay for a model, before condition and buffs. */

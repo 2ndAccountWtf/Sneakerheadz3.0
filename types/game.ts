@@ -50,7 +50,8 @@ export type MiniGameId =
     | 'cart-race'         // downhill shopping cart chase
     | 'street-dice'       // back-alley dice, in-game currency only
     | 'drunk-darts'       // darts where every drink measurably worsens your aim
-    | 'pizza-run';        // Paperboy-style delivery shift
+    | 'pizza-run'         // Paperboy-style delivery shift
+    | 'rooftop-artillery'; // two rooftops, wind, and a shoe thrown in an arc
 
 /** A request to hand control to a mini-game, plus what to do with the result. */
 export interface MiniGameRequest {

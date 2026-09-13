@@ -252,6 +252,31 @@ export interface CityMarket {
     sneakers: MarketSneaker[];
     /** Per-model price index, keyed by sneaker id. */
     index: Record<string, PriceIndex>;
+    /**
+     * Closing price per day, oldest first, keyed by sneaker id. The first
+     * entries are a synthetic pre-run past so a chart is readable on day one;
+     * everything from index `preRunDays` onward is a day the player lived
+     * through. Capped, so it cannot grow without bound over a long run.
+     */
+    history: Record<string, number[]>;
+    /** How many leading history entries are backfilled rather than played. */
+    preRunDays: number;
+}
+
+/**
+ * What the player remembers about a city they are not in.
+ *
+ * Prices are only knowable by having been somewhere. Without this, a
+ * cross-city price table is a cheat sheet and the game is a spreadsheet; with
+ * it, travel is how you buy information, and a three-day-old number is a bet
+ * rather than a fact.
+ */
+export interface MarketIntel {
+    cityId: string;
+    /** The day this snapshot was taken. */
+    day: number;
+    /** Price per model as of that day. */
+    prices: Record<string, number>;
 }
 
 export interface GameState {
@@ -260,6 +285,8 @@ export interface GameState {
     day: number;
     currentScreen: Screen;
     markets: Record<string, CityMarket>;
+    /** Remembered prices per city, stamped with when they were seen. */
+    marketIntel: Record<string, MarketIntel>;
     notification: { message: string, type: 'success' | 'error' | 'info' } | null;
     currentStoreId: string | null;
     activeInteraction: ActiveInteractionState | null;

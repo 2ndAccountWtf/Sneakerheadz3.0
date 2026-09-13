@@ -19,6 +19,7 @@ import { CITIES } from '../data/cities.ts';
 import {
     seedWorld, advanceWorld, stepIndex, seedIndex, fairValue, relativeValue,
     applyTradePressure, trendFor, localValue, bestAsk,
+    snapshotMarket, intelConfidence,
 } from '../systems/market/simulate.ts';
 import { tagsFor } from '../systems/market/taxonomy.ts';
 import { CITY_PROFILES, profileFor } from '../systems/market/cityProfiles.ts';
@@ -234,15 +235,23 @@ t('buying pushes the local price up and selling pushes it down', () => {
 });
 
 t('pressure is sub-linear — twenty pairs is not four times five pairs', () => {
+    // Started from fair value rather than from a seeded price. A market that
+    // happens to be sitting on its floor cannot be pushed any lower, so seeding
+    // one and hoping it has room is a test that passes or fails by luck.
     const world = seedWorld(rng(56));
     const s = SNEAKERS[6];
-    const base = world['new-york'].index[s.id].value;
+    const fair = fairValue(s, 'new-york');
+    const atFair = {
+        ...world['new-york'],
+        index: { ...world['new-york'].index, [s.id]: { value: fair, momentum: 0, previous: fair } },
+    };
 
-    const five = applyTradePressure(world['new-york'], s.id, 5, -1).index[s.id].value;
-    const twenty = applyTradePressure(world['new-york'], s.id, 20, -1).index[s.id].value;
+    const five = applyTradePressure(atFair, s.id, 5, -1).index[s.id].value;
+    const twenty = applyTradePressure(atFair, s.id, 20, -1).index[s.id].value;
 
-    const dropFive = base - five;
-    const dropTwenty = base - twenty;
+    const dropFive = fair - five;
+    const dropTwenty = fair - twenty;
+    assert.ok(dropFive > 0, 'selling five pairs did not move a market sitting at fair value');
     assert.ok(dropTwenty > dropFive, 'dumping more did not hurt more');
     assert.ok(
         dropTwenty < dropFive * 4,
@@ -294,6 +303,76 @@ t('a dumped market heals over a few days away, but not instantly', () => {
         afterAWeek > dumpedAt + 0.04,
         `after a week the average was ${afterAWeek.toFixed(3)}x fair, barely up from ${dumpedAt.toFixed(3)}x`,
     );
+});
+
+/* ---------------- what the player knows ---------------- */
+
+t('a snapshot records every model at the price it was on that day', () => {
+    const world = seedWorld(rng(101));
+    const intel = snapshotMarket(world['paris'], 7);
+    assert.equal(intel.cityId, 'paris');
+    assert.equal(intel.day, 7);
+    for (const s of SNEAKERS) {
+        assert.equal(intel.prices[s.id], localValue(world['paris'], s.id), `${s.id} snapshotted wrong`);
+    }
+});
+
+t('a snapshot does not move when the city does', () => {
+    // This is the whole point of intel: it is a memory, not a live feed. If the
+    // snapshot aliased the market the cross-city table would silently become a
+    // cheat sheet.
+    const r = rng(102);
+    const world = seedWorld(r);
+    const intel = snapshotMarket(world['tokyo'], 1);
+    const before = { ...intel.prices };
+
+    let moved = world;
+    for (let i = 0; i < 5; i++) moved = advanceWorld(moved, r);
+
+    for (const s of SNEAKERS) {
+        assert.equal(intel.prices[s.id], before[s.id], `${s.id} intel changed under us`);
+    }
+    // And the live market really did move, so the check above means something.
+    const drifted = SNEAKERS.filter(s => localValue(moved['tokyo'], s.id) !== before[s.id]).length;
+    assert.ok(drifted > SNEAKERS.length / 2, `only ${drifted} prices moved in five days`);
+});
+
+t('confidence in a remembered price decays and bottoms out at zero', () => {
+    const world = seedWorld(rng(103));
+    const intel = snapshotMarket(world['chicago'], 10);
+    assert.equal(intel.day, 10);
+    assert.ok(intelConfidence(intel, 10) > 0.99, 'a price seen today is not trusted');
+    assert.ok(intelConfidence(intel, 13) < intelConfidence(intel, 11), 'confidence does not decay');
+    assert.equal(intelConfidence(intel, 40), 0, 'a month-old price is still trusted');
+    assert.equal(intelConfidence(undefined, 5), 0, 'never having been somewhere reads as confidence');
+});
+
+t('a city keeps a readable price history from day one', () => {
+    const world = seedWorld(rng(104));
+    for (const s of SNEAKERS.slice(0, 10)) {
+        const series = world['new-york'].history[s.id];
+        assert.ok(series, `${s.id} has no history`);
+        assert.ok(series.length > 10, `${s.id} has only ${series.length} points — a chart needs a shape`);
+        assert.ok(series.every(v => v > 0 && Number.isFinite(v)), `${s.id} history has a bad value`);
+        // The series must end where the simulation currently is, or the chart
+        // disagrees with the shop.
+        assert.equal(series[series.length - 1], localValue(world['new-york'], s.id), `${s.id} chart ends somewhere else`);
+    }
+    assert.ok(world['new-york'].preRunDays > 0, 'no invented past is marked as invented');
+});
+
+t('history grows by exactly one point a day and stays bounded', () => {
+    const r = rng(105);
+    let world = seedWorld(r);
+    const s = SNEAKERS[3];
+    const start = world['tokyo'].history[s.id].length;
+
+    world = advanceWorld(world, r);
+    assert.equal(world['tokyo'].history[s.id].length, start + 1, 'a day did not add exactly one close');
+
+    for (let i = 0; i < 200; i++) world = advanceWorld(world, r);
+    assert.ok(world['tokyo'].history[s.id].length <= 96, 'history grew without bound');
+    assert.ok(world['tokyo'].preRunDays >= 0, 'the invented-past marker went negative');
 });
 
 /* ---------------- a full run ---------------- */

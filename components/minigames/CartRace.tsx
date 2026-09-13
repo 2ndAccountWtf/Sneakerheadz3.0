@@ -25,14 +25,17 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
-    clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner,
+    clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
+    shakeOffset, banner, actor,
 } from './engine';
 import type { Ctx } from './engine';
 import { MiniGameResult } from './MiniGameShell';
 import { useGame } from '../../hooks/useGame';
 import { armsFor, hasWeapon } from '../../systems/weapons';
 import type { Weapon } from '../../systems/weapons';
+import { bakeSprite, drawSprite, frameAt } from '../../systems/sprites/bake';
+import { SPR_SHOE_BOX } from '../../data/sprites/sneakers';
+import { spriteForItem } from '../../data/sprites/items';
 
 // ---------------------------------------------------------------------------
 // Geometry. 320x180 logical pixels, four lanes of asphalt, a 3/4 side view.
@@ -83,7 +86,42 @@ const THIEF_BASE = 30;
  *               when he crashes or you land something on him.
  *   THIEF_MIN — a floor, so a disastrous run is still recoverable.
  */
-const RUBBER_K = 0.045;
+/**
+ * BALANCE FIX — read this before touching any of these four numbers again.
+ *
+ * The original tune (RUBBER_K 0.045, THIEF_ABS 30.9) was verified against a
+ * scripted autopilot that reads every lane perfectly and never fat-fingers a
+ * throw. That bot still only caught the trolley ~19-20% of the time — and a
+ * real person, on a phone, thumb over the D-pad, plays worse than a script.
+ * Against the old numbers that isn't "hard", it's "no-board is basically a
+ * loss screen with extra steps", which fails the brief's own "hard but fair"
+ * bar.
+ *
+ * The fix is not "make the trolley faster" — THIEF_MAX staying above the
+ * trolley's tuck-top (34) is the entire point: the pure speed race is
+ * supposed to be unwinnable without a board, so every no-board win still
+ * comes from crashes, weapons, drafting or a clean weave, never from just
+ * out-driving him. Three things move together:
+ *   - RUBBER_K down (0.045 -> 0.0435): a touch less panic-acceleration per
+ *     metre of gap closed, so a good stretch of driving isn't immediately
+ *     clawed back the moment you're within range.
+ *   - THIEF_ABS down (30.9 -> 30.65): his stubborn floor pace eases slightly
+ *     toward the trolley's own cruise speed (29) instead of sitting well
+ *     above it.
+ *   - Drafting and near-misses (below) are new, real ways to claw back speed
+ *     that didn't exist in the old tune at all.
+ * These numbers are far more sensitive than they look — an early pass at
+ * RUBBER_K 0.032 / THIEF_ABS 29.2 alone (nothing else changed) took the
+ * trolley from ~19% to ~93%, because once his floor pace drops under what a
+ * clean lap can sustain the gap just monotonically closes. The values above
+ * are the walked-back result of re-running the sweep after every step.
+ * Re-run the cartrace headless harness after touching any of these four
+ * numbers — the longboard's win rate and speed edge must stay basically
+ * untouched (it does: THIEF_MAX still caps him well under the board) while
+ * the trolley's climbs into a real, still-losable fight. See the report for
+ * the full before/after sweep.
+ */
+const RUBBER_K = 0.0435;
 const THIEF_MAX = 38;
 const THIEF_MIN = 17;
 /**
@@ -94,11 +132,39 @@ const THIEF_MIN = 17;
  * comfortable and the trolley a real fight.
  */
 const PACE_W = 0.55;
-const THIEF_ABS = 30.9;
+const THIEF_ABS = 30.65;
 
 const SPAWN_AHEAD = 70;     // metres of street kept populated ahead of you
 /** Thrown-weapon speeds are authored in px/s; scale them into gap-metres/s. */
 const PROJ_SCALE = 0.4;
+
+/**
+ * DRAFTING — the second lever besides the tuck.
+ *
+ * Tuck trades steering for speed; drafting trades safety for speed. Get onto
+ * his back wheel — close behind him, roughly his lane — and his wake pulls
+ * you forward for free, on top of anything the tuck is already doing. It's
+ * the "drafting behind The Game" mechanic from the brief, made literal: the
+ * risk isn't abstract, it's that his lane is exactly where his own thrown
+ * junk lands and where his next stagger-crash catches you too (see the
+ * `panic` multiplier in stepThief). Good drivers ride the wake right up to
+ * the point it gets dangerous; that's the decision.
+ */
+const DRAFT_ACCEL = 1.6;
+/** Metres of gap where the slipstream can be felt at all. */
+const DRAFT_REACH = 22;
+/** Lanes of separation before the wake stops reaching you. */
+const DRAFT_LANES = 1.7;
+
+/**
+ * NEAR-MISS — rewards reading the street tight instead of playing it safe.
+ * A clean pass close enough that a slightly worse read would have hit the
+ * thing is worth a small, real speed bump, and consecutive ones chain into a
+ * combo. This is what turns "avoid the furniture" into "thread the
+ * furniture" — see `nearMiss()` below for the exact window.
+ */
+const NEARMISS_LAT = 0.5;   // lane-widths of clearance that still counts as "close"
+const NEARMISS_WINDOW = 2.6; // seconds a combo stays alive without a fresh near-miss
 
 // ---------------------------------------------------------------------------
 // Rigs — the longboard branch, made of whole numbers you can feel.
@@ -253,6 +319,10 @@ interface Obs {
     /** Cosmetic: knocked-over / opened / cleared. */
     hit: boolean;
     phase: number;
+    /** Closest lateral clearance seen while this obstacle was nearby (see nearMiss). */
+    minLat: number;
+    /** Near-miss has already been scored (or ruled out) for this one. */
+    evaluated: boolean;
 }
 
 interface Shot {
@@ -291,6 +361,15 @@ export interface RaceState {
     wob: number;
     health: number;
     gap: number;
+    /** Current slipstream strength, 0..1 — see DRAFT_ACCEL. Drawn as feedback. */
+    draft: number;
+    /** Frozen-frame timer on a hard impact. See the hitstop check in stepRace. */
+    hitstop: number;
+    /** Total clean dodges this run, for the end-of-run summary. */
+    closeCalls: number;
+    /** Current near-miss streak; resets to 0 on a crash or when comboT lapses. */
+    combo: number;
+    comboT: number;
 
     airT: number;
     airDur: number;
@@ -397,6 +476,7 @@ export function createRaceState(opts: {
         dragTuck: (HILL_ACCEL * TUCK_GAIN) / Math.pow(rig.tuckTop * fitness, 2),
         tucking: false, wob: 0,
         health: 100, gap: START_GAP,
+        draft: 0, hitstop: 0, closeCalls: 0, combo: 0, comboT: 0,
         airT: 0, airDur: 0.5, airH: 0, airBig: false, airFromRamp: false,
         invT: 0, oilT: 0,
         thiefLane: 1.5, thiefSpeed: THIEF_BASE, pace: THIEF_BASE, thiefStun: 0, thiefSlow: 0,
@@ -423,6 +503,7 @@ function spawnObstacle(s: RaceState, def: ObsDef, z: number, lane: number) {
     s.obstacles.push({
         id: s.obsId++, def, z, lane,
         dir: rnd(s) < 0.5 ? -1 : 1, done: false, hit: false, phase: rnd(s) * 6.28,
+        minLat: Infinity, evaluated: false,
     });
 }
 
@@ -465,11 +546,36 @@ function addSpark(s: RaceState, x: number, y: number, ch: string) {
     s.sparks.push({ x, y, vx: -40 - rnd(s) * 70, vy: -30 - rnd(s) * 60, life: 0.5 + rnd(s) * 0.4, ch });
 }
 
+/**
+ * A clean dodge is worth something. Passing an obstacle close enough that a
+ * slightly worse read would have hit it, but with no contact, is what turns
+ * "avoid the furniture" into "thread the furniture" — a small, real speed
+ * reward, plus a combo counter for a run of them, so confident weaving pays
+ * for itself the way it should in a driving game rather than a dodge-'em-up.
+ */
+function nearMiss(s: RaceState, o: Obs) {
+    s.closeCalls++;
+    s.combo = s.comboT > 0 ? s.combo + 1 : 1;
+    s.comboT = NEARMISS_WINDOW;
+    const boost = 1.0 + Math.min(2.2, (s.combo - 1) * 0.4);
+    s.speed += boost;
+    s.flash = s.combo > 1 ? `CLOSE x${s.combo}` : 'CLOSE CALL';
+    s.flashT = 0.7;
+    addSpark(s, PLAYER_X + 9, laneY(s.laneF) - 6, '✨');
+}
+
 function crash(s: RaceState, o: Obs) {
     if (s.invT > 0) return;
     o.hit = true;
     s.invT = 0.75;
     s.hits++;
+    // A hit ends any near-miss streak on the spot, and freezes the world for
+    // a handful of frames — see the hitstop check at the top of stepRace.
+    // Bigger hits buy a longer freeze, which is most of what sells "impact"
+    // without any of it costing the physics being tested elsewhere.
+    s.combo = 0;
+    s.comboT = 0;
+    s.hitstop = Math.min(0.12, 0.05 + o.def.dmg * 0.004);
     // Low street furniture is a plough job for a trolley and a non-event for a
     // board that ollied it; a parked Camry is a wall for both.
     const low = o.def.clear !== 'none';
@@ -664,7 +770,11 @@ function stepThief(s: RaceState, dt: number) {
     }
 
     // And he throws his own garbage back at you, which becomes your problem.
-    s.throwIn -= dt;
+    // He panics when you're on his wheel: drafting closes the gap for free
+    // (see DRAFT_ACCEL), but the cost is that he starts flinging junk back at
+    // you noticeably more often — the risk side of that mechanic.
+    const panic = 1 + (1 - clamp(s.gap / 26, 0, 1)) * 0.7;
+    s.throwIn -= dt * panic;
     if (s.throwIn <= 0) {
         spawnObstacle(s, JUNK, s.z + 48 + rnd(s) * 14, Math.round(s.thiefLane));
         s.talk = 'CATCH, blood!';
@@ -700,12 +810,36 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
         return;
     }
 
+    // Hitstop: a handful of frozen frames on a hard impact sells the weight of
+    // a crash far better than shake alone. Nothing about the world advances
+    // while it runs except the cosmetic shake/spark decay, so it costs
+    // nothing in the physics anything else depends on.
+    if (s.hitstop > 0) {
+        s.hitstop = Math.max(0, s.hitstop - dt);
+        s.shake = Math.max(0, s.shake - dt * 26);
+        stepSparks(s, dt);
+        return;
+    }
+
     s.t += dt;
     s.introT = Math.max(0, s.introT - dt);
     s.cool = Math.max(0, s.cool - dt);
     s.invT = Math.max(0, s.invT - dt);
     s.oilT = Math.max(0, s.oilT - dt);
     s.flashT = Math.max(0, s.flashT - dt);
+    s.comboT = Math.max(0, s.comboT - dt);
+
+    // --- drafting -----------------------------------------------------------
+    // Second lever besides the tuck (see DRAFT_ACCEL above): close behind him,
+    // roughly his lane, and his wake pulls you forward on top of whatever the
+    // tuck is already doing. Reads last frame's gap/lane — both only move a
+    // fraction of a metre per frame, so the one-frame lag is imperceptible and
+    // it keeps this function's ordering simple (his lane for THIS frame isn't
+    // known yet; stepThief runs after the street).
+    const laneGapT = Math.abs(s.laneF - s.thiefLane);
+    const draftPos = clamp(1 - s.gap / DRAFT_REACH, 0, 1);
+    const draftLane = clamp(1 - laneGapT / DRAFT_LANES, 0, 1);
+    s.draft = s.airT > 0 ? 0 : draftPos * draftLane;
 
     // --- momentum ---------------------------------------------------------
     // The hill accelerates you every single frame. Quadratic drag is what sets
@@ -714,7 +848,7 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
     // trolley: carving, crashing and standing up are the only ways to slow.
     const tuck = inp.tuck && s.oilT <= 0 && s.airT <= 0;
     s.tucking = tuck;
-    const pull = HILL_ACCEL * (tuck ? TUCK_GAIN : 1);
+    const pull = HILL_ACCEL * (tuck ? TUCK_GAIN : 1) + DRAFT_ACCEL * s.draft;
     const drag = tuck ? s.dragTuck : s.drag;
     s.speed += (pull - drag * s.speed * s.speed) * dt;
     s.speed = Math.max(3, s.speed);
@@ -778,6 +912,22 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
             o.lane += o.dir * o.def.drift * dt;
             if (o.lane < 0 || o.lane > LANES - 1) { o.dir *= -1; o.lane = clamp(o.lane, 0, LANES - 1); }
         }
+
+        // Near-miss tracking. Watch a zone a bit wider than the real hitbox
+        // (`overlaps()` below) so a tight-but-clean dodge gets its closest
+        // approach recorded before the obstacle scrolls off the back of the
+        // screen. Ramps and oil aren't "dodged", so they don't count.
+        if (!o.def.ramp && !o.def.oil && !o.evaluated) {
+            const dz = Math.abs(o.z - s.z);
+            if (dz < o.def.len + 2.6) {
+                const lat = Math.abs(o.lane - s.laneF) - o.def.wide;
+                if (lat < o.minLat) o.minLat = lat;
+            } else if (o.z < s.z) {
+                o.evaluated = true;
+                if (!o.done && o.minLat < NEARMISS_LAT && o.minLat >= 0) nearMiss(s, o);
+            }
+        }
+
         if (o.done || !overlaps(s, o)) continue;
 
         if (o.def.ramp) {
@@ -837,10 +987,31 @@ function stepSparks(s: RaceState, dt: number) {
 // ---------------------------------------------------------------------------
 // Rendering. Nothing here mutates the simulation.
 // ---------------------------------------------------------------------------
-const SKY = ['#10203a', '#1b3357', '#2f4a6e', '#4a6483'];
-const TILT = 0.055;   // radians. The road slopes away to the right: downhill.
+/**
+ * Two sky palettes, blended by how far down the hill you are (`hillT`). The
+ * drop-in is a cool, hazy morning; the bottom of a 1900m descent is a hot,
+ * dust-orange dusk. It's a cheap trick — the actual terrain never changes —
+ * but a shifting sky sells "you have been riding downhill for a long time"
+ * far better than any amount of extra parallax geometry would.
+ */
+const SKY_DAWN = ['#10203a', '#1b3357', '#2f4a6e', '#4a6483'];
+const SKY_DUSK = ['#2a0f1e', '#5a1f2e', '#9a3a3a', '#e08a4a'];
+/** Base road tilt, radians; steepens slightly further down the hill. */
+const TILT_BASE = 0.055;
 
-const drawTrolley = (ctx: Ctx, x: number, y: number, sc: number, main: string, roll: number) => {
+/** Linear-interpolate two '#rrggbb' colours. Used for the sky and nothing
+ * performance-sensitive, so a string return is fine. */
+function lerpHex(a: string, b: string, t: number): string {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+    const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
+    const lr = Math.round(ar + (br - ar) * t);
+    const lg = Math.round(ag + (bg - ag) * t);
+    const lb = Math.round(ab + (bb - ab) * t);
+    return `rgb(${lr},${lg},${lb})`;
+}
+
+const drawTrolley = (ctx: Ctx, x: number, y: number, sc: number, main: string, roll: number, spin = 0) => {
     const w = 18 * sc, h = 10 * sc;
     ctx.save();
     ctx.translate(x, y);
@@ -851,8 +1022,16 @@ const drawTrolley = (ctx: Ctx, x: number, y: number, sc: number, main: string, r
     line(ctx, -w / 2, -h / 2 - 3 * sc, w / 2, -h / 2 - 3 * sc, PAL.line);
     outline(ctx, -w / 2, -h - 3 * sc, w, h, PAL.faint);
     rect(ctx, w / 2 - 1, -h - 9 * sc, 2 * sc, 7 * sc, PAL.faint);   // handle
-    circle(ctx, -w / 2 + 3 * sc, -1.5 * sc, 2 * sc, PAL.black);
-    circle(ctx, w / 2 - 3 * sc, -1.5 * sc, 2 * sc, PAL.black);
+    // Wheels get a spinning spoke each — `spin` is speed-driven (see callers),
+    // so the wheels visibly spin faster as you speed up.
+    for (const wx of [-w / 2 + 3 * sc, w / 2 - 3 * sc]) {
+        circle(ctx, wx, -1.5 * sc, 2 * sc, PAL.black);
+        ctx.save();
+        ctx.translate(wx, -1.5 * sc);
+        ctx.rotate(spin);
+        line(ctx, -1.6 * sc, 0, 1.6 * sc, 0, PAL.faint, 0.8);
+        ctx.restore();
+    }
     ctx.restore();
 };
 
@@ -866,6 +1045,33 @@ const drawBoard = (ctx: Ctx, x: number, y: number, sc: number, roll: number) => 
     circle(ctx, 7 * sc, -0.6 * sc, 1.7 * sc, PAL.legend);
     ctx.restore();
 };
+
+/**
+ * Thrown AM/PM items get real pixel art wherever it exists (chancla, frisbee,
+ * slushie, bureka, dog launcher — see data/sprites/items.ts). Anything
+ * without a mapped sprite — chiefly the pocket-litter placeholder weapon —
+ * falls back to its emoji glyph exactly as before, so nothing ever draws
+ * blank. `px` is the desired final height in logical pixels; items are
+ * authored feet-anchored like the rest of the sprite system, so we nudge the
+ * draw point down by half that height to keep them visually centred while
+ * they spin end over end.
+ */
+function drawItemSprite(ctx: Ctx, w: Weapon, x: number, y: number, px: number, elapsed: number, rotation: number, alpha = 1) {
+    const def = spriteForItem(w.id);
+    if (!def) { glyph(ctx, w.glyph, x, y, px, rotation, alpha); return; }
+    const bakeScale = Math.max(1, Math.round(px / 16));
+    const baked = bakeSprite(def, { scale: bakeScale });
+    const frame = frameAt(baked, elapsed);
+    drawSprite(ctx, baked, x, y + px / 2, frame, { alpha, rotation, scale: px / (16 * bakeScale) });
+}
+
+/** The stolen goods, as a real sprite instead of a floating emoji. */
+function drawShoeBox(ctx: Ctx, x: number, y: number, px: number, elapsed: number, rotation: number) {
+    const bakeScale = Math.max(1, Math.round(px / 14));
+    const baked = bakeSprite(SPR_SHOE_BOX, { scale: bakeScale });
+    const frame = frameAt(baked, elapsed);
+    drawSprite(ctx, baked, x, y + px / 2, frame, { rotation, scale: px / (14 * bakeScale) });
+}
 
 const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: number) => {
     const d = o.def;
@@ -927,16 +1133,34 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
 export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const [sx, sy] = shakeOffset(s.shake);
 
-    // --- sky (barely moves) ----------------------------------------------
-    clear(ctx, W, H, SKY[0]);
-    for (let i = 0; i < SKY.length; i++) rect(ctx, 0, i * 26, W, 27, SKY[i]);
-    circle(ctx, 268, 26, 12, '#ffb347');
-    circle(ctx, 268, 26, 18, 'rgba(255,179,71,0.12)');
+    // How far down the 1900m hill you are, and how close to redline — both
+    // drive the lighting, the camera and the speed FX below.
+    const hillT = clamp(s.z / HILL_LENGTH, 0, 1);
+    const spdFrac = clamp(s.speed / (s.rig.tuckTop * 1.05), 0, 1);
+    // The catch cinematic (see the "him"/"box" sections below): 0 outside a
+    // 'caught' ending, easing 0->1 over roughly the first second of it.
+    const catchT = s.outcome === 'caught' ? clamp(s.wipe / 1.1, 0, 1) : 0;
+    const catchEase = catchT * catchT * (3 - 2 * catchT);
 
-    // Far ridge, then the skyline, then palms: three speeds of parallax.
+    // --- sky — lighting changes across the descent -------------------------
+    const skyCols = [0, 1, 2, 3].map(i => lerpHex(SKY_DAWN[i], SKY_DUSK[i], hillT));
+    clear(ctx, W, H, skyCols[0]);
+    for (let i = 0; i < skyCols.length; i++) rect(ctx, 0, i * 26, W, 27, skyCols[i]);
+    // The sun sinks and reddens as the hill goes on — the one cue that this
+    // has been a long way down, even though the terrain loop never changes.
+    const sunY = 18 + hillT * 44;
+    const sunCol = lerpHex('#ffb347', '#ff5b3a', hillT);
+    circle(ctx, 268, sunY, 12 + hillT * 6, sunCol);
+    circle(ctx, 268, sunY, 18 + hillT * 10, `rgba(255,${Math.round(179 - 70 * hillT)},${Math.round(71 - 20 * hillT)},0.14)`);
+
+    // Far ridge, then the skyline, then palms: three speeds of parallax,
+    // recoloured toward dusk along with the sky so the whole scene commits
+    // to the same lighting change instead of just the strip at the top.
+    const ridgeCol = lerpHex('#243a55', '#4a2f3f', hillT);
+    const ridgeCol2 = lerpHex('#1d3049', '#3a2233', hillT);
     band(ctx, 74, 12, W, s.z * 0.9, 90, PAL.panel, (c, x, y) => {
-        rect(c, x, y, 60, 14, '#243a55');
-        rect(c, x + 44, y - 6, 26, 20, '#1d3049');
+        rect(c, x, y, 60, 14, ridgeCol);
+        rect(c, x + 44, y - 6, 26, 20, ridgeCol2);
     });
     band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
         rect(c, x, y + 6, 20, 36, '#16202e');
@@ -948,12 +1172,33 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         rect(c, x + 6, y + 8, 2, 34, '#2a3a2a');
         glyph(c, '🌴', x + 7, y + 6, 15);
     });
+    // Weather: a thin scatter of dust/haze drifting across the mid-ground,
+    // plus the odd gull riding the thermals. Purely decorative — derived from
+    // s.t/s.z each frame, so it costs no sim state at all.
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 10; i++) {
+        const wx = (((i * 53.7) - s.z * (0.4 + (i % 4) * 0.2)) % (W + 30) + (W + 30)) % (W + 30) - 15;
+        const wy = 34 + ((i * 17) % 50) + Math.sin(s.t * 0.7 + i) * 3;
+        rect(ctx, wx, wy, 1.3, 1.3, PAL.dim);
+    }
+    ctx.restore();
+    band(ctx, 44, 14, W, s.z * 1.3, 150, PAL.panel, (c, x, y) => {
+        glyph(c, '🕊️', x, y + Math.sin(s.t * 2.4) * 2, 6, Math.sin(s.t * 2.4) * 0.1, 0.55);
+    });
 
-    // --- the hill ---------------------------------------------------------
+    // --- the hill -----------------------------------------------------------
+    // FOV pull: the world scales up slightly as you approach top speed (and a
+    // little more while drafting/at the catch), so the whole frame communicates
+    // "faster" instead of just the HUD number. The road also steepens a touch
+    // further down the hill so a 1900m descent visibly reads as one.
+    const zoom = 1 + spdFrac * 0.06 + s.draft * 0.03 + catchEase * 0.3;
+    const tilt = TILT_BASE + hillT * 0.02;
     ctx.save();
     ctx.translate(sx, sy);
     ctx.translate(W / 2, ROAD_TOP);
-    ctx.rotate(TILT);
+    ctx.rotate(tilt);
+    ctx.scale(zoom, zoom);
     ctx.translate(-W / 2, -ROAD_TOP);
 
     rect(ctx, -50, ROAD_TOP - 8, W + 100, 8, '#3b3f34');                  // verge
@@ -984,23 +1229,43 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         drawObstacle(ctx, o, x, laneY(o.lane), laneScale(o.lane), s.t);
     }
 
-    // --- him --------------------------------------------------------------
-    const tx = clamp(PLAYER_X + s.gap * GAP_PX, PLAYER_X + 14, 302);
+    // --- him ----------------------------------------------------------------
+    // During the catch cinematic he eases in alongside the player instead of
+    // sitting at the frozen gap distance — a real "you pull level with him"
+    // moment instead of the number just hitting zero off-screen.
+    let tx = clamp(PLAYER_X + s.gap * GAP_PX, PLAYER_X + 14, 302);
+    if (catchT > 0) tx = tx + (PLAYER_X + 20 - tx) * catchEase;
     const ty = laneY(s.thiefLane);
     const tsc = laneScale(s.thiefLane);
     const rattled = s.thiefStun > 0 || s.crashT > 0;
     const lurch = Math.sin(s.t * 7) * 0.09 + (rattled ? Math.sin(s.t * 30) * 0.22 : 0);
-    drawTrolley(ctx, tx, ty, tsc * 1.05, '#6b3340', lurch);
-    figure(ctx, tx - 2 * tsc, ty - 7 * tsc, 25 * tsc, {
-        kit: KIT.rival, facing: 1,
+    // Drafting feedback: a faint slipstream trailing off his wheels toward the
+    // player whenever the wake is actually reaching you (see DRAFT_ACCEL).
+    if (s.draft > 0.04) {
+        ctx.save();
+        ctx.globalAlpha = s.draft * 0.5;
+        for (let i = 0; i < 3; i++) {
+            const yy = ty - (3 + i * 2) * tsc;
+            line(ctx, tx - 8 * tsc, yy, tx - (18 + i * 6) * tsc, yy, PAL.accent, 1.3);
+        }
+        ctx.restore();
+    }
+    drawTrolley(ctx, tx, ty, tsc * 1.05, '#6b3340', lurch, s.t * (4 + s.thiefSpeed * 0.5));
+    actor(ctx, 'the-game', tx - 2 * tsc, ty - 7 * tsc, {
+        height: 25 * tsc, facing: 1,
         stride: s.t * 2,
         armUp: rattled ? 1 : 0.35,
         crouch: s.crashT > 0,
         hurt: s.thiefStun > 0.35 || s.crashT > 0.35,
+        kit: KIT.rival,
     });
-    glyph(ctx, '📦', tx - 8 * tsc, ty - 26 * tsc, 9 * tsc, Math.sin(s.t * 5) * 0.3);
+    // The box: floats above his head normally, and hands off to the player
+    // during the second half of the catch cinematic below (see "you").
+    const boxBob = Math.sin(s.t * 5) * 0.3;
+    const handT = catchT > 0 ? clamp((catchT - 0.35) / 0.65, 0, 1) : 0;
+    const handEase = handT * handT * (3 - 2 * handT);
 
-    // --- you --------------------------------------------------------------
+    // --- you ------------------------------------------------------------
     const py = laneY(s.laneF);
     const psc = laneScale(s.laneF);
     const wipe = s.outcome === 'wipeout' ? Math.min(1.6, s.wipe * 2.4) : 0;
@@ -1014,15 +1279,27 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const ry = py - s.airH;
     const roll = s.wob * Math.sin(s.t * 26) * 0.07;
     if (s.hasBoard) drawBoard(ctx, PLAYER_X, ry, psc, roll);
-    else drawTrolley(ctx, PLAYER_X, ry, psc, '#3d4a58', roll);
-    figure(ctx, PLAYER_X, ry - (s.hasBoard ? 3 : 7) * psc, 26 * psc, {
-        kit: KIT.player, facing: 1,
+    else drawTrolley(ctx, PLAYER_X, ry, psc, '#3d4a58', roll, s.t * (4 + s.speed * 0.5));
+    actor(ctx, 'player', PLAYER_X, ry - (s.hasBoard ? 3 : 7) * psc, {
+        height: 26 * psc, facing: 1,
         stride: s.t * 2.4,
-        armUp: s.cool > 0.2 ? 1 : 0,
+        armUp: s.cool > 0.2 || handEase > 0.6 ? 1 : 0,
         crouch: s.tucking,
         hurt: s.invT > 0.45,
+        kit: KIT.player,
     });
     ctx.restore();
+
+    // The box hand-off, drawn after both riders so it reads as passing
+    // between them. Below handT=0 it just floats over his head as normal.
+    {
+        const bx = (tx - 8 * tsc) + (PLAYER_X - (tx - 8 * tsc)) * handEase;
+        const by = (ty - 26 * tsc) + ((py - (s.hasBoard ? 22 : 26) * psc) - (ty - 26 * tsc)) * handEase;
+        drawShoeBox(ctx, bx, by, (11 * tsc) + (9 * psc - 11 * tsc) * handEase, s.t, boxBob * (1 - handEase));
+        if (handEase > 0.75) {
+            text(ctx, 'GOT IT', (bx + PLAYER_X) / 2, by - 15, { size: 8, color: PAL.legend, align: 'center', bold: true });
+        }
+    }
 
     // --- projectiles ------------------------------------------------------
     for (const sh of s.shots) {
@@ -1030,22 +1307,52 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         if (!w) continue;
         const x = PLAYER_X + sh.travel * GAP_PX;
         const arc = Math.sin(clamp(sh.travel / Math.max(1, s.gap), 0, 1) * Math.PI) * 12;
-        glyph(ctx, w.glyph, x, laneY(sh.lane) - 10 - arc, 9, sh.spin * (sh.back ? -1 : 1));
+        drawItemSprite(ctx, w, x, laneY(sh.lane) - 10 - arc, 13, s.t, sh.spin * (sh.back ? -1 : 1));
     }
 
     for (const p of s.sparks) glyph(ctx, p.ch, p.x, p.y, 9, 0, clamp(p.life * 2, 0, 1));
     ctx.restore();
 
-    // --- speed lines ------------------------------------------------------
-    if (s.wob > 0.05 || s.speed > s.rig.cruise * 0.8) {
-        const n = Math.round(3 + s.wob * 9);
+    // --- speed FX -----------------------------------------------------------
+    // Perspective speed lines: they radiate from a vanishing point near the
+    // top of the road rather than running flat, so faster reads as "rushing
+    // toward camera" instead of just "more horizontal streaks". Colour tips
+    // over to the accent-2 magenta near redline as a cheap stand-in for
+    // motion-blur tinting, and a combo streak adds its own extra lines so a
+    // hot run visibly looks hotter.
+    const fxDrive = Math.max(spdFrac, s.wob * 0.8, s.combo > 0 ? 0.3 : 0);
+    if (fxDrive > 0.1) {
+        const n = Math.round(4 + fxDrive * 16);
+        const vx = W * 0.58, vy = ROAD_TOP - 8;
         ctx.save();
-        ctx.globalAlpha = 0.25 + s.wob * 0.45;
         for (let i = 0; i < n; i++) {
-            const y = ROAD_TOP + ((s.t * 400 + i * 137) % (H - ROAD_TOP));
-            const len = 20 + ((i * 53) % 60);
-            line(ctx, 0, y, len, y, PAL.ink, 1);
+            const seed = (s.t * 70 + i * 91.3) % 977;
+            const tx2 = (i * 67 + s.t * 240) % (W + 80) - 40;
+            const ty2 = ROAD_TOP + ((i * 43 + seed) % (H - ROAD_TOP + 20));
+            const len = 12 + fxDrive * 44 + ((i * 13) % 18);
+            const dx = tx2 - vx, dy = ty2 - vy;
+            const d = Math.hypot(dx, dy) || 1;
+            const ux = dx / d, uy = dy / d;
+            const x2 = tx2 - ux * len, y2 = ty2 - uy * len;
+            ctx.globalAlpha = clamp((0.12 + fxDrive * 0.4) * (0.55 + 0.45 * Math.sin(seed)), 0, 0.75);
+            ctx.strokeStyle = spdFrac > 0.82 ? PAL.accent2 : PAL.ink;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(tx2, ty2);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
         }
+        ctx.restore();
+    }
+    // Chromatic fringe at max velocity: a thin red/cyan glow at the screen
+    // edges, 'screen'-blended so it never just looks like a tinted border.
+    if (spdFrac > 0.55) {
+        const fringe = (spdFrac - 0.55) / 0.45;
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = fringe * 0.28;
+        rect(ctx, 0, ROAD_TOP, 3, H - ROAD_TOP, '#ff3355');
+        rect(ctx, W - 3, ROAD_TOP, 3, H - ROAD_TOP, '#33d9ff');
         ctx.restore();
     }
 
@@ -1076,7 +1383,7 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // Rig readout — you should never have to guess what you're riding.
     glyph(ctx, s.rig.glyph, 188, 7, 10);
     text(ctx, s.rig.label.toUpperCase(), 196, 3, { size: 6, color: s.hasBoard ? PAL.accent : PAL.warn });
-    text(ctx, `${Math.round(s.speed * 2.2)} MPH${s.tucking ? '  TUCK' : ''}`, 196, 12, {
+    text(ctx, `${Math.round(s.speed * 2.2)} MPH${s.tucking ? '  TUCK' : ''}${s.draft > 0.3 ? '  DRAFT' : ''}`, 196, 12, {
         size: 6, color: s.wob > 0.6 ? PAL.bad : PAL.dim,
     });
 
@@ -1084,7 +1391,13 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     text(ctx, `HP ${Math.max(0, Math.round(s.health))}`, W - 42, 12, { size: 6, color: PAL.dim });
 
     if (s.wob > 0.55) text(ctx, 'SPEED WOBBLE', W / 2, 26, { size: 7, color: PAL.bad, align: 'center' });
-    if (s.flashT > 0) text(ctx, s.flash.toUpperCase(), W / 2, H - 12, { size: 7, color: PAL.legend, align: 'center' });
+    // The near-miss / combo callout and the ordinary flash share one line —
+    // whichever is live; nearMiss() and crash() never set flash in the same
+    // frame, so there's never a conflict to arbitrate.
+    if (s.flashT > 0) {
+        const hot = s.flash.startsWith('CLOSE');
+        text(ctx, s.flash.toUpperCase(), W / 2, H - 12, { size: hot ? 8 : 7, color: hot ? PAL.accent : PAL.legend, align: 'center' });
+    }
 
     // --- banners ----------------------------------------------------------
     if (s.introT > 0) {
@@ -1096,12 +1409,38 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         text(ctx, `${thiefName} has your box. Get it back.`, W / 2, 90, { size: 6, color: PAL.dim, align: 'center' });
         ctx.restore();
     }
-    if (s.outcome === 'caught') banner(ctx, 'CAUGHT HIM!', W, 64, PAL.ok, 26);
+    // Endings hold back their banner text until the cinematic beat (box
+    // hand-off / wipeout dust) has had a moment on its own, rather than
+    // slapping text over the action the instant the outcome resolves.
+    if (s.outcome === 'caught' && catchT > 0.55) banner(ctx, 'CAUGHT HIM!', W, 64, PAL.ok, 26);
     if (s.outcome === 'lost') banner(ctx, "HE'S GONE", W, 64, PAL.bad, 26);
     if (s.outcome === 'flat') banner(ctx, 'OUT OF HILL', W, 64, PAL.bad, 24);
     if (s.outcome === 'wipeout') {
-        banner(ctx, 'WIPEOUT', W, 64, PAL.bad, 26);
-        glyph(ctx, '💥', PLAYER_X + 6, laneY(s.laneF) - 10, 22);
+        // A real wipeout instead of a banner over an unchanged frame: a dust
+        // cloud punches out from the impact point, the sky goes bloody for a
+        // beat, and the banner only lands once that's had a moment to read.
+        const p = clamp(s.wipe / 1.2, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = 0.3 * clamp(s.wipe * 1.6, 0, 1) * (1 - p * 0.4);
+        rect(ctx, 0, 0, W, H, '#4a0000');
+        ctx.restore();
+        for (let i = 0; i < 5; i++) {
+            const ang = (i / 5) * Math.PI * 2 + s.wipe * 1.5;
+            const r = 6 + p * 30;
+            glyph(ctx, '💨', PLAYER_X + Math.cos(ang) * r, laneY(s.laneF) - 10 + Math.sin(ang) * r * 0.4, 10, 0, 1 - p * 0.6);
+        }
+        if (p > 0.35) banner(ctx, 'WIPEOUT', W, 64, PAL.bad, 26);
+        glyph(ctx, '💥', PLAYER_X + 6, laneY(s.laneF) - 10, 18 + Math.min(10, s.wipe * 9));
+    }
+
+    // Hitstop punch: a bright single-frame flash right as an impact freezes
+    // the world (see the hitstop check in stepRace) is most of what sells the
+    // weight of a hit — cheap, and it costs nothing physics-side.
+    if (s.hitstop > 0) {
+        ctx.save();
+        ctx.globalAlpha = clamp(s.hitstop / 0.12, 0, 1) * 0.5;
+        rect(ctx, 0, 0, W, H, '#ffffff');
+        ctx.restore();
     }
 }
 
@@ -1224,6 +1563,7 @@ const CartRace: React.FC<{
         const bits: string[] = [];
         if (s.thiefHits) bits.push(`${s.thiefHits} hit${s.thiefHits === 1 ? '' : 's'} landed`);
         if (s.cleanLandings) bits.push(`${s.cleanLandings} clean landing${s.cleanLandings === 1 ? '' : 's'}`);
+        if (s.closeCalls) bits.push(`${s.closeCalls} close call${s.closeCalls === 1 ? '' : 's'}`);
         if (s.hits) bits.push(`${s.hits} crash${s.hits === 1 ? '' : 'es'}`);
         const tail = bits.length ? ` (${bits.join(', ')})` : '';
         onFinish(
@@ -1302,7 +1642,9 @@ const CartRace: React.FC<{
                     ? `▲ ollies bins, cones, dogs and roadworks, and doubles your ramp air — clean landings are free speed. `
                     : `▲ is a man lifting a trolley: it clears an oil slick and nothing else. Weave everything. `)
                 + `THROW hurls the selected AM/PM item at him${ammoLeft !== undefined ? ` (${ammoLeft} left)` : ''}. `
-                + `Slushie slows him, the chancla homes in and comes back, the frisbee cuts through parked cars, the dog launcher is rapid fire.`
+                + `Slushie slows him, the chancla homes in and comes back, the frisbee cuts through parked cars, the dog launcher is rapid fire. `
+                + `Cut it close on a dodge without touching anything for a CLOSE CALL speed bump — chain them for a bigger one. `
+                + `Get right on his back wheel and his wake pulls you forward for free (watch for DRAFT on the speedo) — but riding that close means his thrown junk finds you more often too.`
             }
         />
     );

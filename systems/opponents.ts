@@ -37,7 +37,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'The Game',
         spriteId: 'the-game',
         skill: 0.45,
-        games: ['street-brawl', 'street-ball', 'street-dice', 'cart-race'],
+        games: ['street-brawl', 'street-ball', 'street-dice', 'cart-race', 'rooftop-artillery'],
         stake: 150,
         challenge: [
             '"Yo. Square up. Not for money. Well — a little for money."',
@@ -59,7 +59,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Gutter Gabe',
         spriteId: 'gutter-gabe',
         skill: 0.62,
-        games: ['street-dice', 'street-brawl', 'legit-check'],
+        games: ['street-dice', 'street-brawl', 'legit-check', 'rooftop-artillery'],
         stake: 300,
         challenge: [
             '"You play? Course you play. Everybody plays." He is already setting up.',
@@ -73,7 +73,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Wiz K',
         spriteId: 'wiz-k',
         skill: 0.38,
-        games: ['street-ball', 'drunk-darts', 'street-dice'],
+        games: ['street-ball', 'drunk-darts', 'street-dice', 'rooftop-artillery'],
         stake: 80,
         challenge: [
             '"Yeah, alright. Low stakes though. Everything low stakes."',
@@ -87,7 +87,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Scalper Sid',
         spriteId: 'scalper-sid',
         skill: 0.7,
-        games: ['legit-check', 'street-dice', 'mystery-box'],
+        games: ['legit-check', 'street-dice', 'mystery-box', 'rooftop-artillery'],
         stake: 500,
         minCred: 20,
         challenge: [
@@ -102,7 +102,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Bro Jogan',
         spriteId: 'bro-jogan',
         skill: 0.55,
-        games: ['hypecast-roulette', 'street-brawl', 'drunk-darts'],
+        games: ['hypecast-roulette', 'street-brawl', 'drunk-darts', 'rooftop-artillery'],
         stake: 0,
         challenge: [
             '"We should do this on the podcast. We are ON the podcast. It started."',
@@ -130,7 +130,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Grandma Laces',
         spriteId: 'grandma-laces',
         skill: 0.8,
-        games: ['street-dice', 'drunk-darts'],
+        games: ['street-dice', 'drunk-darts', 'rooftop-artillery'],
         stake: 200,
         challenge: [
             '"Sit down, bubbeleh. I used to do this for money." She still does this for money.',
@@ -144,7 +144,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'Yasser Abbasfat',
         spriteId: 'yasser',
         skill: 0.3,
-        games: ['street-brawl', 'flight-404'],
+        games: ['street-brawl', 'flight-404', 'rooftop-artillery'],
         stake: 100,
         challenge: ['"THIS IS A CHALLENGE! IT IS PART OF THE STRUGGLE!"'],
         onLoss: ['"THE RULES WERE RIGGED! THE RULES! WERE! RIGGED!"'],
@@ -155,7 +155,7 @@ export const OPPONENTS: Opponent[] = [
         name: 'The AM/PM Clerk',
         spriteId: 'clerk',
         skill: 0.45,
-        games: ['drunk-darts', 'street-dice'],
+        games: ['drunk-darts', 'street-dice', 'rooftop-artillery'],
         stake: 60,
         challenge: ['"Achi. Achi. One game. I am on break. I decide when break is."'],
         onLoss: ['"Sababa. Take a bureka. Take two." He is not upset.'],

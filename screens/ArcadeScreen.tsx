@@ -146,6 +146,21 @@ const ENTRIES: ArcadeEntry[] = [
         }),
     },
     {
+        id: 'rooftop-artillery',
+        name: 'Rooftop Artillery',
+        tagline: 'Two buildings, one crosswind, and a shoe you are never getting back.',
+        icon: '\u{1F3D9}',
+        stake: 'One pair, thrown off a roof',
+        energyCost: 8,
+        build: () => ({
+            game: 'rooftop-artillery',
+            title: 'Rooftop Artillery',
+            config: { opponent: 'Some Guy On The Other Roof', skill: 0.5 },
+            onWin: [money(520, 'He pays up and climbs down the fire escape.'), cred(6, 'Eleven storeys of witnesses.')],
+            onLose: [money(-260, 'You pay up.'), cred(-3, 'You threw a shoe into traffic. Twice.')],
+        }),
+    },
+    {
         id: 'pizza-run',
         name: 'Pizza Run',
         tagline: 'A night shift, a stack of boxes, and doorsteps on both sides.',

@@ -30,7 +30,7 @@ import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { reputationSpread } from '../systems/npc/reactions';
-import { seedWorld, advanceWorld, applyTradePressure } from '../systems/market/simulate';
+import { seedWorld, advanceWorld, applyTradePressure, snapshotMarket } from '../systems/market/simulate';
 import { banksIn } from '../data/banks';
 import {
     deposit, withdraw, repayCredit, openCreditLine, accrueInterest,
@@ -235,12 +235,25 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 interestLog.push(...mugged.robbery.log);
             }
 
+            // What you carry away from a city is what it looked like on the day
+            // you left, not what it does behind your back. Both ends of the
+            // flight get stamped: the city you are leaving as of today, and the
+            // one you are landing in as of tomorrow.
+            const leaving = state.markets[state.currentCityId];
+            const arriving = newMarkets[action.payload.cityId];
+            const marketIntel = {
+                ...state.marketIntel,
+                ...(leaving ? { [state.currentCityId]: snapshotMarket(leaving, state.day) } : {}),
+                ...(arriving ? { [action.payload.cityId]: snapshotMarket(arriving, newDay) } : {}),
+            };
+
             const baseNextState: GameState = {
                 ...state,
                 player,
                 currentCityId: action.payload.cityId,
                 day: newDay,
                 markets: newMarkets,
+                marketIntel,
                 activeMarketSignals: activeSignals,
                 pendingTravelEvent: null,
                 outcomeLog: interestLog,
@@ -927,6 +940,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             return {
                 ...initialState,
                 markets: generateInitialMarkets(),
+                marketIntel: {},
                 player: { ...INITIAL_PLAYER, storage: STARTER_STORAGE },
             };
 
@@ -1043,6 +1057,9 @@ const initialState: GameState = {
     day: INITIAL_DAY,
     currentScreen: Screen.Dashboard,
     markets: generateInitialMarkets(),
+    // You start knowing the city you start in, and nowhere else. Everything
+    // beyond Tokyo has to be gone and looked at.
+    marketIntel: {},
     notification: null,
     currentStoreId: null,
     activeInteraction: null,

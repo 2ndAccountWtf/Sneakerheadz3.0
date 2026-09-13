@@ -8,6 +8,7 @@ import LegitCheck from './LegitCheck';
 import HoopsGame from './HoopsGame';
 import CartRace from './CartRace';
 import Flight404 from './Flight404';
+import RooftopArtillery from './RooftopArtillery';
 import Flight404Phaser from './phaser/Flight404Phaser';
 import DiceGame from './DiceGame';
 import DartsGame from './DartsGame';
@@ -90,6 +91,16 @@ const MiniGameHost: React.FC = () => {
             return <DiceGame opponent={req.config?.opponent} onFinish={finish} onQuit={quit} />;
         case 'drunk-darts':
             return <DartsGame opponent={req.config?.opponent} onFinish={finish} onQuit={quit} />;
+        case 'rooftop-artillery':
+            return (
+                <RooftopArtillery
+                    opponent={req.config?.opponent}
+                    skill={req.config?.skill}
+                    opponentNpcId={req.config?.opponentNpcId}
+                    onFinish={finish}
+                    onQuit={quit}
+                />
+            );
         case 'pizza-run':
             return <PizzaRun onFinish={finish} onQuit={quit} />;
         case 'hypecast-roulette':

@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { useGame } from '../hooks/useGame';
 import { Screen, PriceHistoryData } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
+import { CITIES } from '../data/cities';
+import { trendFor, localValue, bestAsk, relativeValue, intelConfidence } from '../systems/market/simulate';
 import { SNEAKERS } from '../data/sneakers';
 import { useSneakerHistory } from '../hooks/useSneakerHistory';
 import { calculateRSI } from '../utils/technicalAnalysis';
@@ -112,10 +114,126 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, ch
     </div>
 );
 
+
 /**
- * Model analysis. Same charts, retinted onto the shared palette, plus the piece
- * that was missing: which live market signals are acting on this model right
- * now and when they lapse.
+ * Where to sell it.
+ *
+ * A persistent market with real city-by-city differences is worth nothing if
+ * the player cannot see the differences, and worth too little if they can see
+ * all of them at once. So this table shows what the player actually knows: the
+ * city they are standing in is live, and every other city is whatever it looked
+ * like on the day they last left it, with the age of that number stated
+ * plainly.
+ *
+ * That turns a flight into two purchases — the shoes, and the information — and
+ * makes a nine-day-old price a bet the player takes knowingly rather than a
+ * number they were quietly misled by.
+ */
+/**
+ * Thresholds set against the real spread rather than round numbers. City
+ * affinities are compressed so that a model's relative value across the six
+ * cities typically spans about 0.92 to 1.09 — so a 1.15 cutoff, which reads as
+ * reasonable, labelled literally everything "middling interest" and told the
+ * player nothing at all.
+ */
+const tasteLabel = (taste: number): string =>
+    taste >= 1.1 ? 'this is their thing'
+        : taste >= 1.04 ? 'pays up for this'
+            : taste <= 0.9 ? 'actively unwanted here'
+                : taste <= 0.97 ? 'not their thing'
+                    : 'middling interest';
+
+const WhereToSell: React.FC<{ sneakerId: string; here: number | undefined }> = ({ sneakerId, here }) => {
+    const { gameState } = useGame();
+    const { markets, marketIntel, currentCityId, day } = gameState;
+
+    const rows = useMemo(() => CITIES.map(city => {
+        const isHere = city.id === currentCityId;
+        const intel = marketIntel[city.id];
+        const price = isHere ? localValue(markets[city.id], sneakerId) : intel?.prices[sneakerId];
+        const age = isHere ? 0 : intel ? day - intel.day : undefined;
+        const confidence = isHere ? 1 : intelConfidence(intel, day);
+        const margin = price !== undefined && here ? (price - here) / here : undefined;
+        const sneaker = SNEAKERS.find(s => s.id === sneakerId);
+        return {
+            city,
+            isHere,
+            price,
+            age,
+            confidence,
+            margin,
+            // Taste is knowable without having been there — it is what the city
+            // is famous for, not a number on a shelf. So this column is never
+            // blanked out, and is the only hint a player gets about an unvisited
+            // city.
+            taste: sneaker ? relativeValue(sneaker, city.id) : 1,
+        };
+    }).sort((a, b) => (b.price ?? -1) - (a.price ?? -1)), [markets, marketIntel, currentCityId, day, sneakerId, here]);
+
+    return (
+        <div className="panel">
+            <div className="panel-head">
+                <span className="label">Where to sell it</span>
+                <span className="label">Prices you have seen</span>
+            </div>
+            <div className="divide-y divide-[var(--line)]">
+                {rows.map(r => (
+                    <div key={r.city.id} className="px-3 py-2 flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-sm text-[var(--ink)] truncate">{r.city.name}</span>
+                                {r.isHere && <span className="chip chip-accent">here</span>}
+                            </div>
+                            <div className="label mt-0.5">
+                                {r.isHere
+                                    ? 'live'
+                                    : r.age === undefined
+                                        ? 'never been'
+                                        : r.age === 0
+                                            ? 'seen today'
+                                            : `${r.age} day${r.age === 1 ? '' : 's'} old`}
+                                {' · '}
+                                {tasteLabel(r.taste)}
+                            </div>
+                        </div>
+
+                        <div className="text-right flex-shrink-0">
+                            {r.price === undefined ? (
+                                <span className="numeric text-sm text-[var(--ink-faint)]">—</span>
+                            ) : (
+                                <>
+                                    <div
+                                        className="numeric text-sm"
+                                        style={{ color: r.confidence < 0.4 ? 'var(--ink-faint)' : 'var(--ink)' }}
+                                    >
+                                        ${r.price.toLocaleString()}
+                                    </div>
+                                    {r.margin !== undefined && !r.isHere && (
+                                        <div
+                                            className="numeric text-[11px]"
+                                            style={{ color: r.margin > 0.02 ? UP : r.margin < -0.02 ? DOWN : 'var(--ink-faint)' }}
+                                        >
+                                            {r.margin > 0 ? '+' : ''}{Math.round(r.margin * 100)}% vs here
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <p className="px-3 py-2 label border-t border-[var(--line)]">
+                Nothing here is live except the city you are in. An old number is a guess.
+            </p>
+        </div>
+    );
+};
+
+/**
+ * Model analysis. Same charts, retinted onto the shared palette, plus the two
+ * pieces that were missing: which live market signals are acting on this model,
+ * and — the one that makes the market a game rather than a decoration — what it
+ * is worth in the other five cities as far as the player actually knows.
  */
 const MarketAnalysisScreen: React.FC = () => {
     const { gameState, changeScreen } = useGame();
@@ -133,6 +251,18 @@ const MarketAnalysisScreen: React.FC = () => {
     const signals = useMemo(
         () => (sneaker ? activeSignalsFor(sneaker, activeMarketSignals, day) : []),
         [sneaker, activeMarketSignals, day],
+    );
+
+    const trend = useMemo(
+        () => (currentAnalysisSneakerId ? trendFor(markets[currentCityId], currentAnalysisSneakerId) : undefined),
+        [markets, currentCityId, currentAnalysisSneakerId],
+    );
+
+    // What it would cost to pick one up here, which is the number a margin has
+    // to be measured against — not what a shop would pay you for it.
+    const askHere = useMemo(
+        () => (currentAnalysisSneakerId ? bestAsk(markets[currentCityId], currentAnalysisSneakerId) : undefined),
+        [markets, currentCityId, currentAnalysisSneakerId],
     );
 
     if (!sneaker) {
@@ -181,6 +311,26 @@ const MarketAnalysisScreen: React.FC = () => {
                             {up ? '▲ +' : '▼ −'}${Math.abs(change).toLocaleString()} vs yesterday
                         </div>
                     </div>
+
+                    {trend && (
+                        <div className="panel p-3">
+                            <div className="label">Trend here</div>
+                            <div className="numeric text-sm mt-0.5" style={{ color: trend.direction === 'up' ? UP : trend.direction === 'down' ? DOWN : 'var(--ink-dim)' }}>
+                                {trend.direction === 'up' ? '▲' : trend.direction === 'down' ? '▼' : '—'}{' '}
+                                {Math.abs(trend.changePct).toFixed(1)}% overnight
+                                {trend.running ? ' · still running' : ''}
+                            </div>
+                            <div className="label mt-1">
+                                {trend.vsFairPct > 8
+                                    ? `Trading ${Math.round(trend.vsFairPct)}% over what this city normally pays`
+                                    : trend.vsFairPct < -8
+                                        ? `Trading ${Math.round(-trend.vsFairPct)}% under what this city normally pays`
+                                        : 'About what this city normally pays'}
+                            </div>
+                        </div>
+                    )}
+
+                    <WhereToSell sneakerId={sneaker.id} here={askHere ?? current} />
 
                     {signals.length > 0 && (
                         <div className="panel">
