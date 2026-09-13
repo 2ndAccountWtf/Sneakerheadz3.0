@@ -23,6 +23,10 @@ import { rollBibiEvent } from '../systems/events/bibiEvents';
 import { rollNapEvent } from '../systems/events/napEvents';
 import { findInteractionData } from '../data/npcs';
 import { generateSideQuest, QUEST_OFFER_CHANCE, MAX_ACTIVE_QUESTS } from '../systems/quests/questGenerator';
+import { rollDigestiveOutcome, attemptBathroom, disasterOutcomes, emergencyHeadline, startEmergency } from '../systems/digestion/emergency';
+import { rollGasIncident, settleGas } from '../systems/digestion/gas';
+import { bathroomsIn } from '../data/bathrooms';
+import { MAX_SOFT_STAT } from '../constants';
 
 // Game Actions
 type Action =
@@ -54,7 +58,11 @@ type Action =
     | { type: 'TAKE_NAP' }
     | { type: 'ADD_QUEST'; payload: SideQuest }
     | { type: 'ADVANCE_QUEST'; payload: { questId: string } }
-    | { type: 'ABANDON_QUEST'; payload: { questId: string } };
+    | { type: 'ABANDON_QUEST'; payload: { questId: string } }
+    // --- Digestion ---
+    | { type: 'USE_BATHROOM'; payload: { bathroomId: string } }
+    | { type: 'EMERGENCY_EXPIRED' }
+    | { type: 'GAS_INCIDENT'; payload: { npcId: string } };
 
 interface GameContextType {
     gameState: GameState;
@@ -70,6 +78,7 @@ interface GameContextType {
     startInteraction: (npcId: string, scenarioId: string) => void;
     launchMiniGame: (req: MiniGameRequest) => void;
     takeNap: () => void;
+    useBathroom: (bathroomId: string) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -166,6 +175,18 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             return { ...state, currentAnalysisSneakerId: action.payload.sneakerId, currentScreen: Screen.MarketAnalysis };
 
         case 'TRAVEL': {
+            // An emergency interrupts the core loop. That is the whole point of
+            // it: you cannot simply fly away from this.
+            if (state.player.emergency) {
+                return {
+                    ...state,
+                    notification: {
+                        message: 'You are not getting on a plane in this condition. Find a bathroom.',
+                        type: 'error',
+                    },
+                };
+            }
+
             const newDay = state.day + 1;
             const newMarkets = generateInitialMarkets();
             const cityName = CITIES.find(c => c.id === action.payload.cityId)?.name;
@@ -173,6 +194,14 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // Signals and buffs age out on the day boundary.
             const activeSignals = state.activeMarketSignals.filter(signal => signal.expiresOnDay > newDay);
             let player = expireBuffs(state.player, newDay);
+
+            // Overnight the body resets somewhat, and you get grubbier.
+            player = {
+                ...player,
+                gas: settleGas(player.gas),
+                cleanliness: Math.max(0, player.cleanliness - 8),
+                focus: Math.min(MAX_SOFT_STAT, player.focus + 10),
+            };
 
             // Flying costs energy; with the tank empty it costs health instead.
             const energyCost = TRAVEL_ENERGY_COST;
@@ -447,22 +476,69 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             if (updatedItem.qty > 0) newStorage[itemIndex] = updatedItem;
             else newStorage.splice(itemIndex, 1);
 
+            // --- Guaranteed stat deltas declared on the item ---
+            let cleanliness = state.player.cleanliness;
+            let mood = state.player.mood;
+            let focus = state.player.focus;
+            const clampSoft = (v: number) => Math.max(0, Math.min(MAX_SOFT_STAT, v));
+
+            if (item.deltas) {
+                for (const [stat, raw] of Object.entries(item.deltas)) {
+                    const value = raw as number;
+                    if (!value) continue;
+                    if (stat === 'health') health = Math.max(0, Math.min(MAX_HEALTH, health + value));
+                    else if (stat === 'energy') energy = Math.max(0, Math.min(MAX_ENERGY, energy + value));
+                    else if (stat === 'cleanliness') cleanliness = clampSoft(cleanliness + value);
+                    else if (stat === 'mood') mood = clampSoft(mood + value);
+                    else if (stat === 'focus') focus = clampSoft(focus + value);
+                    log.push({
+                        icon: value > 0 ? '▲' : '▼',
+                        text: `${value > 0 ? '+' : ''}${value} ${stat}`,
+                        tone: value > 0 ? 'good' : 'bad',
+                    });
+                }
+            }
+
+            // --- Gas: silent, cumulative, and never shown as a number ---
+            const gas = state.player.gas + (item.gas ?? 0);
+            if (item.gas) {
+                newStats.timesFarted += 0; // the count increments when it actually escapes
+            }
+
+            const eatenPlayer: typeof state.player = {
+                ...state.player,
+                storage: newStorage,
+                statusEffects: newStatusEffects,
+                stats: newStats,
+                health,
+                energy,
+                cleanliness,
+                mood,
+                focus,
+                gas,
+            };
+
+            // --- The digestive roll ---
+            const emergency = rollDigestiveOutcome(item, eatenPlayer);
+            if (emergency) {
+                log.push({
+                    icon: '🚨',
+                    text: `${emergencyHeadline(emergency)} Travel is off the table until you deal with this.`,
+                    tone: 'bad',
+                });
+            }
+
             if (log.length === 0) {
                 log.push({ icon: '😐', text: `You used ${item.name}. Nothing eventful happens.`, tone: 'neutral' });
             }
 
             return {
                 ...state,
-                player: {
-                    ...state.player,
-                    storage: newStorage,
-                    statusEffects: newStatusEffects,
-                    stats: newStats,
-                    health,
-                    energy,
-                },
+                player: { ...eatenPlayer, emergency: emergency ?? eatenPlayer.emergency },
                 outcomeLog: log,
-                notification: { message: log.map(l => l.text).join(' '), type: 'info' },
+                notification: emergency
+                    ? { message: emergencyHeadline(emergency), type: 'error' }
+                    : { message: log.map(l => l.text).join(' '), type: 'info' },
             };
         }
 
@@ -509,8 +585,8 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         case 'SET_NOTIFICATION':
             return { ...state, notification: action.payload };
 
-        case 'START_INTERACTION':
-            return {
+        case 'START_INTERACTION': {
+            const base: GameState = {
                 ...state,
                 outcomeLog: [],
                 activeInteraction: {
@@ -519,6 +595,30 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                     currentNodeId: 'intro',
                 },
             };
+
+            // --- THE WORST POSSIBLE TIMING ---
+            // Fires only when there is genuinely something to lose: a loaded
+            // bag, real money, a stomach already under load, and no emergency
+            // already running. Rare by construction, devastating by design.
+            const carrying = state.player.inventory.length >= 3;
+            const flush = state.player.cash >= 5000;
+            const loaded = state.player.gas >= 6;
+            if (!state.player.emergency && carrying && flush && loaded && Math.random() < 0.07) {
+                const worst = startEmergency('everything you have eaten today', 3);
+                return {
+                    ...base,
+                    player: { ...state.player, emergency: worst },
+                    outcomeLog: [{
+                        icon: '🚨',
+                        text: 'Of all the moments. You are carrying a full bag, real money, and a decision you made at lunch.',
+                        tone: 'bad',
+                    }],
+                    notification: { message: 'STOMACH: NO. Not now. Not NOW.', type: 'error' },
+                };
+            }
+
+            return base;
+        }
 
         case 'PROGRESS_INTERACTION': {
             if (!state.activeInteraction) return state;
@@ -677,6 +777,79 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             };
         }
 
+        case 'USE_BATHROOM': {
+            const emergency = state.player.emergency;
+            if (!emergency) return state;
+
+            const bathroom = bathroomsIn(state.currentCityId).find(b => b.id === action.payload.bathroomId);
+            if (!bathroom) return state;
+
+            const attempt = attemptBathroom(bathroom, state.player);
+
+            if (!attempt.ok) {
+                // Failing costs you the walk there — the clock keeps running and
+                // you are now further from every other option.
+                const penalised: typeof state.player = {
+                    ...state.player,
+                    emergency: { ...emergency, deadline: emergency.deadline - bathroom.travelSeconds * 1000 },
+                };
+                return {
+                    ...state,
+                    player: penalised,
+                    outcomeLog: [{ icon: '🚫', text: attempt.line, tone: 'bad' }],
+                    notification: { message: attempt.line, type: 'error' },
+                };
+            }
+
+            const resolved = withOutcomes({ ...state, player: { ...state.player, emergency: null } }, attempt.outcomes, bathroom.name);
+            const cleanliness = Math.max(0, Math.min(MAX_SOFT_STAT,
+                resolved.player.cleanliness + [0, 6, 14, 24, 34, 44][bathroom.dignity]));
+
+            return {
+                ...resolved,
+                player: {
+                    ...resolved.player,
+                    emergency: null,
+                    cleanliness,
+                    // Whatever was happening down there is over.
+                    gas: Math.max(0, resolved.player.gas - 6),
+                },
+                outcomeLog: [{ icon: '🚽', text: attempt.line, tone: 'good' }, ...resolved.outcomeLog],
+                notification: { message: attempt.line, type: 'success' },
+            };
+        }
+
+        case 'EMERGENCY_EXPIRED': {
+            if (!state.player.emergency) return state;
+            const disaster = disasterOutcomes();
+            const after = withOutcomes({ ...state, player: { ...state.player, emergency: null } }, disaster.outcomes, 'Gravity');
+            return {
+                ...after,
+                player: { ...after.player, emergency: null, cleanliness: 0, gas: 0 },
+                outcomeLog: [{ icon: '💀', text: disaster.line, tone: 'bad' }, ...after.outcomeLog],
+                notification: { message: disaster.line, type: 'error' },
+            };
+        }
+
+        case 'GAS_INCIDENT': {
+            const incident = rollGasIncident(state.player, action.payload.npcId);
+            if (!incident) return state;
+
+            return {
+                ...state,
+                player: {
+                    ...state.player,
+                    gas: Math.max(0, state.player.gas - incident.gasRelieved),
+                    streetCred: Math.max(0, state.player.streetCred + incident.credChange),
+                    stats: { ...state.player.stats, timesFarted: state.player.stats.timesFarted + 1 },
+                },
+                outcomeLog: [
+                    ...state.outcomeLog,
+                    { icon: '💨', text: incident.line, tone: incident.credChange < 0 ? 'bad' : 'neutral' },
+                ],
+            };
+        }
+
         case 'ABANDON_QUEST':
             return {
                 ...state,
@@ -790,6 +963,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'TAKE_NAP' });
     }, []);
 
+    const useBathroom = useCallback((bathroomId: string) => {
+        dispatch({ type: 'USE_BATHROOM', payload: { bathroomId } });
+    }, []);
+
+    // The emergency clock is real time, so something has to watch it.
+    useEffect(() => {
+        const emergency = gameState.player.emergency;
+        if (!emergency) return;
+        const remaining = emergency.deadline - Date.now();
+        if (remaining <= 0) {
+            dispatch({ type: 'EMERGENCY_EXPIRED' });
+            return;
+        }
+        const timer = setTimeout(() => dispatch({ type: 'EMERGENCY_EXPIRED' }), remaining);
+        return () => clearTimeout(timer);
+    }, [gameState.player.emergency]);
+
     useEffect(() => {
         if (gameState.notification) {
             const timer = setTimeout(() => {
@@ -816,6 +1006,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 startInteraction,
                 launchMiniGame,
                 takeNap,
+                useBathroom,
             },
         },
         children,

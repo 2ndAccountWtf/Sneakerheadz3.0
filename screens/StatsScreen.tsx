@@ -112,6 +112,22 @@ const StatsScreen: React.FC = () => {
                     <Stat label="Energy" value={`${Math.round(player.energy)}/100`} icon="⚡" color="var(--warn)" subtext="Travel costs 15" />
                     <Stat label="Police Heat" value={`${Math.round(player.heat)}/100`} icon="🚨" color={player.heat > 50 ? 'var(--bad)' : 'var(--ink-dim)'} subtext={player.heat > 50 ? 'Legit checks are catching you' : 'Below the radar'} />
                     <Stat label="Active Effects" value={player.buffs.length} icon="✦" color="var(--accent)" subtext={player.buffs.map(b => b.label).join(', ') || 'None'} />
+                    <Stat
+                        label="Cleanliness"
+                        value={`${Math.round(player.cleanliness)}/100`}
+                        icon="🧼"
+                        color={player.cleanliness < 35 ? 'var(--bad)' : 'var(--accent)'}
+                        subtext={player.cleanliness < 35 ? 'People have started saying "bro…"' : 'Presentable'}
+                    />
+                    <Stat label="Mood" value={`${Math.round(player.mood)}/100`} icon="🙂" color="var(--legend)" />
+                    <Stat label="Focus" value={`${Math.round(player.focus)}/100`} icon="🎯" color="var(--accent)" subtext="Steadies your hand in mini-games" />
+                    <Stat
+                        label="Digestion"
+                        value={player.emergency ? 'EMERGENCY' : player.gas >= 9 ? 'Critical' : player.gas >= 6 ? 'Audible' : player.gas >= 3 ? 'Unsettled' : 'Fine'}
+                        icon="🫃"
+                        color={player.emergency || player.gas >= 9 ? 'var(--bad)' : player.gas >= 6 ? 'var(--warn)' : 'var(--ink-dim)'}
+                        subtext={player.gas >= 6 ? 'Avoid important meetings' : 'No notes'}
+                    />
                 </div>
             </section>
 

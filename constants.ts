@@ -8,6 +8,27 @@ export const TOTAL_DAYS = 30;
 export const MAX_HEALTH = 100;
 export const MAX_ENERGY = 100;
 export const MAX_HEAT = 100;
+export const MAX_SOFT_STAT = 100;
+
+/**
+ * Gas thresholds. The meter itself is never shown — the player learns it
+ * through escalating public consequences, which is funnier and more alarming.
+ */
+export const GAS_THRESHOLDS = {
+    /** Below this, nothing happens at all. */
+    silent: 3,
+    /** A cartoon sound only you hear. */
+    audible: 3,
+    /** An NPC notices and says something. */
+    noticed: 6,
+    /** Public incident: reputation hit, bystanders react. */
+    incident: 9,
+    /** Biological event. The room clears. */
+    biological: 11,
+} as const;
+
+/** How long the player has to find a toilet, by severity. */
+export const EMERGENCY_SECONDS: Record<1 | 2 | 3, number> = { 1: 180, 2: 120, 3: 90 };
 /** Energy burned by a single flight. Running out costs you health instead. */
 export const TRAVEL_ENERGY_COST = 15;
 
@@ -36,6 +57,11 @@ export const INITIAL_PLAYER: Player = {
     stats: INITIAL_PLAYER_STATS,
     health: MAX_HEALTH,
     energy: MAX_ENERGY,
+    cleanliness: 80,
+    mood: 60,
+    focus: 60,
+    gas: 0,
+    emergency: null,
     streetCred: 0,
     heat: 0,
     bibiApproval: 25,

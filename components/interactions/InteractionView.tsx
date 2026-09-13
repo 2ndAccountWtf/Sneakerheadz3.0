@@ -53,6 +53,7 @@ const TONE_STYLES: Record<string, string> = {
 const InteractionView: React.FC = () => {
     const { gameState, dispatch } = useGame();
     const { activeInteraction, outcomeLog, activeMiniGame } = gameState;
+    const emergency = gameState.player.emergency;
 
     const npcId = activeInteraction?.npcId ?? '';
     const scenarioId = activeInteraction?.scenarioId ?? '';
@@ -96,6 +97,10 @@ const InteractionView: React.FC = () => {
                 payload: { outcomes: node.outcomes, sourceName: npc?.name },
             });
         }
+
+        // The gas meter expresses itself at the worst possible moment. Rolled
+        // per node, deliberately rare, and every NPC reacts in character.
+        dispatch({ type: 'GAS_INCIDENT', payload: { npcId } });
     }, [activeInteraction, node, npcId, scenarioId, currentNodeId, npc, dispatch]);
 
     // A mini-game takes the stage; the conversation waits behind it.
@@ -157,6 +162,17 @@ const InteractionView: React.FC = () => {
                         {displayedText}
                         {!isComplete && <span className="inline-block w-2 h-4 bg-[var(--accent)] ml-1 animate-pulse align-middle" />}
                     </div>
+
+                    {/* You are not at your best right now, and it shows. */}
+                    {emergency && (
+                        <div
+                            className="mb-2 px-3 py-1.5 border text-[11px] font-mono flex items-center gap-2 flex-shrink-0"
+                            style={{ borderColor: 'var(--warn)', color: 'var(--warn)' }}
+                        >
+                            <span>🚨</span>
+                            <span>You are visibly distracted. They have noticed and are choosing not to mention it.</span>
+                        </div>
+                    )}
 
                     {/* OUTCOME RECEIPT */}
                     {isComplete && outcomeLog.length > 0 && (

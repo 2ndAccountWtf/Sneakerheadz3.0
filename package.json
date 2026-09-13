@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx tests/engine.test.mts"
+    "test": "tsx tests/engine.test.mts && tsx tests/digestion.test.mts"
   },
   "dependencies": {
     "react": "^19.1.1",

@@ -37,6 +37,25 @@ export interface StatusEffect {
 }
 
 export type ItemType = 'food' | 'drinks' | 'weapons' | 'tools' | 'oddities' | 'All';
+
+/**
+ * AM/PM shelves. A real convenience store spans dairy, bakery, frozen, pantry,
+ * household and personal care — mirroring that is what lets the *effects* be
+ * completely deranged while the stock stays believable.
+ */
+export type AmpmAisle =
+    | 'food'
+    | 'drinks'
+    | 'bakery'
+    | 'snacks'
+    | 'frozen'
+    | 'household'
+    | 'personal-care'
+    | 'specialty'
+    | 'questionable';
+
+/** Social and condition stats that consumables move. */
+export type SoftStat = 'health' | 'energy' | 'mood' | 'focus' | 'cleanliness';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'legendary';
 
 export interface ItemEffect {
@@ -71,6 +90,18 @@ export interface StorageItem {
   addedAgo: string;
   stackable?: boolean;
   effects?: ItemEffect[];
+
+  // --- Consumable systems ---
+  /** Which AM/PM shelf this sits on. */
+  aisle?: AmpmAisle;
+  /** 0..1 chance of triggering a bathroom emergency when consumed. */
+  digestiveRisk?: number;
+  /** Gas units added on consumption. The meter is hidden from the player. */
+  gas?: number;
+  /** Flat stat deltas applied on use, before the random effect table runs. */
+  deltas?: Partial<Record<SoftStat, number>>;
+  /** Shown on the card so joke items read as jokes rather than as bugs. */
+  uselessness?: string;
 }
 
 export interface PlayerStats {
@@ -100,6 +131,17 @@ export interface Player {
     health: number;
     /** 0-100. Spent by travel and mini-games, restored by food and naps. */
     energy: number;
+    /** 0-100. Deodorant, mouthwash and not sleeping in a doorway. NPCs notice. */
+    cleanliness: number;
+    /** 0-100. Sugar, croissants and small victories. */
+    mood: number;
+    /** 0-100. Coffee and gum. Steadies your hand in mini-games. */
+    focus: number;
+    /**
+     * Hidden 0-12+ meter. Hummus goes in, consequences come out, and the
+     * player is never shown the number — only the escalating symptoms.
+     */
+    gas: number;
     /** Reputation on the street. Gates prices, NPC attitude and rank. */
     streetCred: number;
     /** 0-100 police attention. Rises with fakes and shady stores. */
@@ -109,6 +151,24 @@ export interface Player {
     /** Named world-state switches set by scenarios (e.g. 'bibi-favored'). */
     flags: Record<string, boolean | number>;
     buffs: Buff[];
+    /** Set when the chocolate milk was a mistake. Blocks travel until resolved. */
+    emergency: BathroomEmergency | null;
+}
+
+/**
+ * A bathroom emergency. Real-time, because the joke only works if the player
+ * feels the clock. While one is active the core loop is interrupted: travel is
+ * disabled and encounters are compromised.
+ */
+export interface BathroomEmergency {
+    id: string;
+    /** What you ate, named and shamed. */
+    cause: string;
+    startedAt: number;
+    /** Wall-clock ms when this becomes a disaster. */
+    deadline: number;
+    /** 1 = uncomfortable, 3 = do not speak to anyone. */
+    severity: 1 | 2 | 3;
 }
 
 export interface City {
@@ -179,6 +239,7 @@ export enum Screen {
     MarketAnalysis = 'MARKET_ANALYSIS',
     Arcade = 'ARCADE',
     Quests = 'QUESTS',
+    Bathrooms = 'BATHROOMS',
 }
 
 export interface AmpmItem {
