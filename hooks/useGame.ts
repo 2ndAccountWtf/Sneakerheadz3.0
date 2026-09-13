@@ -79,6 +79,7 @@ type Action =
     | { type: 'GAS_INCIDENT'; payload: { npcId: string } }
     // --- Money ---
     | { type: 'RESOLVE_COLLECTOR_DEAL'; payload: { player: Player; log: OutcomeLogEntry[] } }
+    | { type: 'RESOLVE_STREET_SALE'; payload: { player: Player; log: OutcomeLogEntry[] } }
     | { type: 'BANK_DEPOSIT'; payload: { amount: number } }
     | { type: 'BANK_WITHDRAW'; payload: { bankId: string; amount: number } }
     | { type: 'BANK_REPAY_CREDIT'; payload: { amount: number } }
@@ -1005,6 +1006,13 @@ const gameReducer = (state: GameState, action: Action): GameState => {
          * anything in state. So this is a hand-off, the same shape as
          * USE_BATHROOM.
          */
+        /**
+         * A sale on a pavement. Same hand-off shape as a collector deal: the
+         * pure code in `systems/street/selling.ts` already produced the whole
+         * new player, because what a street sale does depends on the
+         * negotiation the screen is holding rather than on anything in state.
+         */
+        case 'RESOLVE_STREET_SALE':
         case 'RESOLVE_COLLECTOR_DEAL':
             return {
                 ...state,

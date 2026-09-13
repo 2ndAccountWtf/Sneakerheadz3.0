@@ -335,6 +335,7 @@ export enum Screen {
     Venues = 'VENUES',
     Bank = 'BANK',
     Collectors = 'COLLECTORS',
+    StreetSell = 'STREET_SELL',
     GameOver = 'GAME_OVER',
 }
 

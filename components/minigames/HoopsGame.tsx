@@ -48,8 +48,8 @@ const VW = 352;
 const VH = 198;
 
 /** Player x bounds. The fence is at the very edge; this is the playable floor. */
-const COURT_L = 34;
-const COURT_R = 318;
+export const COURT_L = 34;
+export const COURT_R = 318;
 /** Depth (z) runs 0 = far sideline, 1 = near sideline. */
 const Z_MIN = 0.06;
 const Z_MAX = 0.97;
@@ -76,43 +76,57 @@ const screenY = (z: number, height: number) => floorY(z) - height * sc(z);
  * mattering at all.
  */
 const Z_PX = 70;
-const dist2d = (ax: number, az: number, bx: number, bz: number) =>
+export const dist2d = (ax: number, az: number, bx: number, bz: number) =>
     Math.hypot(ax - bx, (az - bz) * Z_PX);
 
-interface Hoop { x: number; z: number; h: number; inward: 1 | -1 }
+export interface Hoop { x: number; z: number; h: number; inward: 1 | -1 }
 /** Rim height 46px against a ~26px player: dunkable only with an absurd leap. */
-const HOOPS: [Hoop, Hoop] = [
+export const HOOPS: [Hoop, Hoop] = [
     { x: 30, z: 0.45, h: 46, inward: 1 },
     { x: 322, z: 0.45, h: 46, inward: -1 },
 ];
 /** Team 0 (you) attacks the right rim, team 1 attacks the left one. */
-const attackHoop = (team: number) => (team === 0 ? 1 : 0);
+export const attackHoop = (team: number) => (team === 0 ? 1 : 0);
 
 /* ------------------------------------------------------------------ */
 /* Balance constants — tuned by playing, commented so they stay honest */
 /* ------------------------------------------------------------------ */
 
-const GAME_SECONDS = 90;
-const TARGET_SCORE = 21;
+export const GAME_SECONDS = 90;
+export const TARGET_SCORE = 21;
 
-const BASE_SPEED = 76;          // px/s. Court is 284px wide: ~3.7s end to end.
-const TURBO_MULT = 1.52;        // turbo is worth it, but the bar only lasts ~3s
+export const BASE_SPEED = 76;   // px/s. Court is 284px wide: ~3.7s end to end.
+export const TURBO_MULT = 1.52; // turbo is worth it, but the bar only lasts ~3s
 const FIRE_MULT = 1.3;          // on fire you are simply faster than everyone
 const TURBO_DRAIN = 0.34;       // per second of held turbo
 const TURBO_REGEN = 0.22;       // per second while off — slower than the drain
 
 const GRAVITY = 430;            // px/s^2 for loose balls. Arcade-heavy, snappy.
-const JUMP_V = 168;             // apex ~33px: enough to contest, not to fly
-const DUNK_RANGE = 42;          // inside this you slam instead of shoot
+export const JUMP_V = 168;      // apex ~33px: enough to contest, not to fly
+/**
+ * Dunk range is not a hard radius — it scales with how fast you got there.
+ * Walk up close (DUNK_RANGE_BASE) and that's all you get. Sprint in with
+ * TURBO held and the range stretches out by DUNK_RANGE_BONUS, continuously
+ * with speed rather than a binary "turbo on" flag — see `dunkRangeFor()`.
+ * On fire adds a flat bit more on top, because you are simply better then.
+ */
+const DUNK_RANGE_BASE = 32;
+const DUNK_RANGE_BONUS = 34;
+const DUNK_RANGE_FIRE_BONUS = 14;
 const CONTEST_R = 28;           // a defender this close starts hurting the shot
 const BLOCK_R = 16;             // airborne defender inside this can swat it
-const STEAL_R = 14;
+export const STEAL_R = 14;
+export const SHOVE_R = 18;      // TURBO+PASS on defence inside this range knocks him down
+const STUMBLE_TIME = 0.85;      // seconds a shoved player is down and out of control
+const SWAP_COOL = 0.4;          // debounce on PASS-to-swap-control so one tap isn't three
+export const ALLEY_HOOP_R = 72; // close enough to the rim that a jump here is a lob call
+const ALLEY_CALL_TIME = 0.5;    // how long the "I'm open, throw it here" cue shows
 const THREE_DIST = 118;         // beyond this a bucket is worth 3
 
-const SHOT_CHARGE_TIME = 0.62;  // seconds for the release meter to fill
-const SHOT_SWEET = 0.84;        // sweet spot near the top of the meter
-const SHOT_WINDOW = 0.30;       // half-width of the window that still scores
-const SHOT_COOK = 1.1;          // hold past this and the shot is "overcooked"
+export const SHOT_CHARGE_TIME = 0.62;  // seconds for the release meter to fill
+export const SHOT_SWEET = 0.84;        // sweet spot near the top of the meter
+export const SHOT_WINDOW = 0.30;       // half-width of the window that still scores
+export const SHOT_COOK = 1.1;          // hold past this and the shot is "overcooked"
 
 const AI_SKILL = 1;          // opponents are worse than a perfect release
 const MATE_SKILL = 0.84;        // your teammate is worse than that. He tries.
@@ -154,10 +168,25 @@ const SAY = {
         'He took that like rent money.',
         'That was NOT a foul.',
     ],
+    intercept: [
+        'PICKED OUT OF THE AIR!',
+        'That pass never had a chance.',
+        'Read it like a book!',
+    ],
     block: [
         'GET THAT OUTTA HERE!',
         'Rejected into the fence.',
         'Swatted. Into next Tuesday.',
+    ],
+    shove: [
+        'SENT HIM TO THE POPCORN LINE!',
+        'That was a foul. There are no fouls.',
+        'On the ground! Somebody help him up. Eventually.',
+    ],
+    alley: [
+        'ALLEY-OOP!',
+        'OFF THE PASS!',
+        'They called that one at the diner!',
     ],
     heat: ['He is heating up!', 'Two in a row — he is feeling it.'],
     fire: ['HE IS ON FIRE!', 'CALL THE FIRE DEPARTMENT!'],
@@ -185,7 +214,7 @@ interface Kit {
     swap: Record<string, string>;
 }
 
-interface Player {
+export interface Player {
     id: number;
     team: 0 | 1;
     human: boolean;
@@ -214,12 +243,20 @@ interface Player {
     dunkFrom: { x: number; z: number };
     dunkHoop: number;
     dunkSlammed: boolean;
+    /** What kind of slam this is — drives the announcer line and the flourish. */
+    dunkKind: 'normal' | 'turbo' | 'alley';
     aiTimer: number;            // AI re-decides on a cadence, not every frame
+    /** Shoved: down and uncontrollable until this reaches 0. See attemptShove(). */
+    stumbleT: number;
+    /** Cosmetic-plus-signal window after calling for a lob near the rim. */
+    alleyCall: number;
+    /** Debounce after a PASS-button control swap. */
+    swapCool: number;
 }
 
-type BallMode = 'held' | 'flight' | 'loose';
+export type BallMode = 'held' | 'flight' | 'loose';
 
-interface Ball {
+export interface Ball {
     x: number; z: number; y: number;
     vx: number; vz: number; vy: number;
     mode: BallMode;
@@ -261,23 +298,36 @@ export interface World {
     say: string;
     sayT: number;
     rimFlash: [number, number];
+    /** Backboard-shatter flash timer per hoop — a fire dunk earns this. */
+    shatter: [number, number];
     parts: Particle[];
     /** Last team to score, used to drive the inbound. */
     lastScorer: 0 | 1;
     winner: 0 | 1 | null;
     /** Diagnostics the headless simulation asserts on. */
-    stats: { shots: number; makes: number; dunks: number; steals: number; blocks: number };
+    stats: {
+        shots: number; makes: number; dunks: number; steals: number; blocks: number;
+        /** Completed passes and the picks that killed them — separate from hand steals. */
+        passes: number; interceptions: number;
+        /** TURBO+PASS on defence: attempts and the ones that connected. */
+        shoves: number; shovesLanded: number;
+        alleyOops: number; turboDunks: number;
+        /** Every time any player ignites, across the whole game. */
+        fires: number;
+    };
 }
 
 export interface Cmd {
     left: boolean; right: boolean; up: boolean; down: boolean;
-    a: boolean; b: boolean;
-    aPress: boolean; bPress: boolean;
+    /** SHOOT / PASS / TURBO. TURBO (`c`) is read as a level, held or not — the
+     * other two are edge-triggered off `aPress`/`bPress` below. */
+    a: boolean; b: boolean; c: boolean;
+    aPress: boolean; bPress: boolean; cPress: boolean;
 }
 
 export const blankCmd = (): Cmd => ({
     left: false, right: false, up: false, down: false,
-    a: false, b: false, aPress: false, bPress: false,
+    a: false, b: false, c: false, aPress: false, bPress: false, cPress: false,
 });
 
 /* ------------------------------------------------------------------ */
@@ -301,20 +351,47 @@ const shout = (w: World, s: string, color: string, hold = 1.4) => {
     w.bannerText = s; w.bannerT = hold; w.bannerColor = color;
 };
 
-const teammateOf = (w: World, p: Player) => w.players.find(o => o.team === p.team && o.id !== p.id)!;
-const opponentsOf = (w: World, p: Player) => w.players.filter(o => o.team !== p.team);
+export const teammateOf = (w: World, p: Player) => w.players.find(o => o.team === p.team && o.id !== p.id)!;
+export const opponentsOf = (w: World, p: Player) => w.players.filter(o => o.team !== p.team);
+/** A shoved defender is down and cannot contest, block, mark or steal. */
+const activeOpponentsOf = (w: World, p: Player) => opponentsOf(w, p).filter(o => o.stumbleT <= 0);
 
-/** Distance from the nearest opposing player — "how open am I". */
-const openness = (w: World, p: Player) => {
+/** Distance from the nearest opposing player — "how open am I". A defender
+ * currently on the ground from a shove does not count: that is the payoff. */
+export const openness = (w: World, p: Player) => {
     let best = 999;
     for (const o of w.players) {
-        if (o.team === p.team) continue;
+        if (o.team === p.team || o.stumbleT > 0) continue;
         best = Math.min(best, dist2d(p.x, p.z, o.x, o.z));
     }
     return best;
 };
 
-const hoopDist = (p: { x: number; z: number }, h: Hoop) => dist2d(p.x, p.z, h.x, h.z);
+export const hoopDist = (p: { x: number; z: number }, h: Hoop) => dist2d(p.x, p.z, h.x, h.z);
+
+/** Current ground speed in px/s — what the dunk range and the turbo flourish key off. */
+const speedMag = (p: Player) => Math.hypot(p.vx, p.vz * Z_PX);
+
+/**
+ * Dunk range as a continuous function of how fast you're moving, not a fixed
+ * radius: a walk-up only reaches DUNK_RANGE_BASE, a full turbo sprint stretches
+ * it out to DUNK_RANGE_BASE + DUNK_RANGE_BONUS. Nothing here is hidden from the
+ * player — the range is exactly what your speed already looks like, and
+ * `drawPlayer` shows the live radius as a ring while you're carrying the ball,
+ * so the threshold is something you learn by watching your own feet rather
+ * than memorising a number.
+ */
+export const dunkRangeFor = (p: Player): number => {
+    const floor = BASE_SPEED * 0.55;
+    const ceil = BASE_SPEED * TURBO_MULT;
+    const t = clamp((speedMag(p) - floor) / (ceil - floor), 0, 1);
+    let r = DUNK_RANGE_BASE + DUNK_RANGE_BONUS * t;
+    if (p.onFire) r += DUNK_RANGE_FIRE_BONUS;
+    return r;
+};
+
+/** Sprinting hard enough that a dunk from here should look and feel bigger. */
+export const isPoweringIn = (p: Player): boolean => speedMag(p) > BASE_SPEED * 1.15;
 
 /* ------------------------------------------------------------------ */
 /* World construction                                                  */
@@ -329,7 +406,7 @@ const mkPlayer = (
     stride: 0, y: 0, vy: 0,
     turbo: 1, charge: -1, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
-    aiTimer: 0,
+    dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
 });
 
 const mkBall = (): Ball => ({
@@ -394,10 +471,15 @@ export const createWorld = (seed: number, opponent: string): World => {
         bannerText: '', bannerT: 0, bannerColor: PAL.warn,
         say: '', sayT: 0,
         rimFlash: [0, 0],
+        shatter: [0, 0],
         parts: [],
         lastScorer: 1,
         winner: null,
-        stats: { shots: 0, makes: 0, dunks: 0, steals: 0, blocks: 0 },
+        stats: {
+            shots: 0, makes: 0, dunks: 0, steals: 0, blocks: 0,
+            passes: 0, interceptions: 0, shoves: 0, shovesLanded: 0,
+            alleyOops: 0, turboDunks: 0, fires: 0,
+        },
     };
     say(w, pick(w, SAY.tip));
     return w;
@@ -444,6 +526,7 @@ const inbound = (w: World, receivingTeam: 0 | 1) => {
     for (const p of w.players) {
         p.vx = 0; p.vz = 0; p.y = 0; p.vy = 0;
         p.charge = -1; p.cool = 0; p.dunkT = 0;
+        p.stumbleT = 0; p.alleyCall = 0;
         p.facing = p.team === receivingTeam ? (inw as 1 | -1) : (-inw as 1 | -1);
     }
     giveBall(w, recv[0].id);
@@ -458,14 +541,15 @@ const inbound = (w: World, receivingTeam: 0 | 1) => {
  * from the far baseline. Linear because it is easy to reason about while
  * tuning, and because nobody in this alley has a shot chart.
  */
-const baseFromDist = (d: number) => clamp(0.9 - Math.max(0, d - DUNK_RANGE) * 0.0034, 0.16, 0.9);
+const baseFromDist = (d: number) => clamp(0.9 - Math.max(0, d - DUNK_RANGE_BASE) * 0.0034, 0.16, 0.9);
 
-/** How badly the nearest defender is bothering this shot. */
+/** How badly the nearest defender is bothering this shot. Someone shoved onto
+ * the ground a moment ago is not contesting anything. */
 const contestFactor = (w: World, p: Player) => {
     let d = 999;
     let airborne = false;
     for (const o of w.players) {
-        if (o.team === p.team) continue;
+        if (o.team === p.team || o.stumbleT > 0) continue;
         const dd = dist2d(p.x, p.z, o.x, o.z);
         if (dd < d) { d = dd; airborne = o.y > 8; }
     }
@@ -476,7 +560,7 @@ const contestFactor = (w: World, p: Player) => {
 };
 
 /** Release quality from the charge meter: 1 in the sweet spot, 0 at the edges. */
-const releaseQuality = (charge: number) =>
+export const releaseQuality = (charge: number) =>
     clamp(1 - Math.abs(charge - SHOT_SWEET) / SHOT_WINDOW, 0, 1);
 
 const shotChance = (w: World, p: Player, q: number, skill: number) => {
@@ -501,8 +585,9 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
 
     // A defender already in the air inside the block radius can eat it. NOT a
     // certainty: an automatic block made nearly every contested possession end
-    // in a swat, which is spectacular twice and then just annoying.
-    for (const o of opponentsOf(w, p)) {
+    // in a swat, which is spectacular twice and then just annoying. A defender
+    // currently on the ground from a shove obviously cannot jump to block it.
+    for (const o of activeOpponentsOf(w, p)) {
         if (o.y > 10 && dist2d(o.x, o.z, p.x, p.z) < BLOCK_R && rng(w) < 0.55) {
             w.stats.blocks++;
             shout(w, 'REJECTED!', PAL.bad, 1.1);
@@ -535,37 +620,84 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
     w.possession = null;
 };
 
+/**
+ * A pass leads the receiver rather than throwing at where they stood when it
+ * left your hands — a real "pass that matters" has to account for both
+ * players moving. It also means a pass thrown well ahead of a teammate who
+ * then stops, or a lazy pass across the whole court while a defender sits in
+ * the lane, is genuinely more interceptable: see the pick check in
+ * `stepBall`, which samples the ball's actual interpolated position, not the
+ * receiver's.
+ */
 const launchPass = (w: World, from: Player, to: Player) => {
     const b = w.ball;
     const d = dist2d(from.x, from.z, to.x, to.z);
+    const dur = 0.2 + d / 420;      // passes are fast; this is not a patient sport
+    // Lead by where the receiver will be when the ball actually arrives.
+    const leadX = clamp(to.x + to.vx * dur, COURT_L, COURT_R);
+    const leadZ = clamp(to.z + to.vz * dur, Z_MIN, Z_MAX);
     b.mode = 'flight';
     b.kind = 'pass';
     b.shooter = from.id;
     b.target = to.id;
     b.made = false;
     b.t = 0;
-    b.dur = 0.2 + d / 420;      // passes are fast; this is not a patient sport
+    b.dur = dur;
     b.sx = from.x; b.sz = from.z; b.sy = 18 + from.y;
-    b.tx = to.x; b.tz = to.z; b.ty = 18;
+    b.tx = leadX; b.tz = leadZ; b.ty = 18;
     b.arc = 7;
     from.facing = to.x > from.x ? 1 : -1;
     from.cool = 0.2;
     w.possession = null;
+    w.stats.passes++;
 };
 
-const startDunk = (w: World, p: Player) => {
+const startDunk = (w: World, p: Player, opts: { kind?: 'normal' | 'turbo' | 'alley' } = {}) => {
     const hi = attackHoop(p.team);
     // Non-zero: dunkT > 0 IS the "I am dunking" flag, and the frame loop hands
     // the body over to stepDunk on that test. Starting it at exactly 0 would
     // leave the dunk un-run and re-triggerable every frame.
     p.dunkT = 0.0001;
-    p.dunkDur = 0.72;
+    // An alley-oop starts from wherever the player already is (airborne, near
+    // the rim) so the finish is quick; everything else gets the full drive.
+    p.dunkDur = opts.kind === 'alley' ? 0.38 : opts.kind === 'turbo' ? 0.8 : 0.72;
     p.dunkFrom = { x: p.x, z: p.z };
     p.dunkHoop = hi;
     p.dunkSlammed = false;
+    p.dunkKind = opts.kind ?? 'normal';
     p.charge = -1;
+    p.alleyCall = 0;
     p.facing = HOOPS[hi].x > p.x ? 1 : -1;
     w.stats.shots++;
+};
+
+/**
+ * The signature move: TURBO+PASS on defence. No timing minigame, no chance to
+ * whiff into nothing — hold turbo, get close, press PASS, and the ball
+ * carrier goes down and the ball comes loose. The real cost is committed
+ * turbo and a defender who is briefly a non-participant if it's read (nothing
+ * stops the shover from being shoved right back once they're this close).
+ */
+const attemptShove = (w: World, defender: Player, handler: Player) => {
+    w.stats.shoves++;
+    defender.turbo = clamp(defender.turbo - 0.3, 0, 1);
+    // Landing it is the common case — that is what makes it the signature
+    // move — but it is not free: a handler already airborne (mid-shot, or
+    // already leaping to save one) is too committed to knock down cleanly.
+    if (handler.y > 6 || rng(w) < 0.08) {
+        say(w, 'He shoves at air. That is somehow worse.');
+        return;
+    }
+    w.stats.shovesLanded++;
+    handler.stumbleT = STUMBLE_TIME;
+    handler.charge = -1;
+    const dir = handler.x >= defender.x ? 1 : -1;
+    handler.vx = dir * 130;
+    handler.vz = (rng(w) - 0.5) * 0.6;
+    shout(w, 'KNOCKED DOWN!', PAL.bad, 1);
+    say(w, pick(w, SAY.shove));
+    w.shake = Math.max(w.shake, 7);
+    looseBall(w, handler.x, handler.z, 12, dir * 60 + (rng(w) - 0.5) * 30, -30, (rng(w) - 0.5) * 0.5);
 };
 
 /* ------------------------------------------------------------------ */
@@ -582,7 +714,8 @@ const startDunk = (w: World, p: Player) => {
  *  4. Any bucket by the other team also resets your streak counter, which is
  *     why "he's heating up" has to be earned in one possession run.
  */
-const score = (w: World, scorer: Player, pts: number, viaDunk: boolean) => {
+const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal' | 'turbo' | 'alley' = 'none') => {
+    const viaDunk = dunkKind !== 'none';
     w.score[scorer.team] += pts;
     w.lastScorer = scorer.team;
     w.stats.makes++;
@@ -599,12 +732,17 @@ const score = (w: World, scorer: Player, pts: number, viaDunk: boolean) => {
         }
     }
 
-    if (!scorer.onFire && scorer.streak >= FIRE_STREAK) {
+    const ignited = !scorer.onFire && scorer.streak >= FIRE_STREAK;
+    if (ignited) {
         scorer.onFire = true;
         scorer.fireT = FIRE_SECONDS;
+        w.stats.fires++;
         shout(w, `${scorer.name} IS ON FIRE!`, PAL.warn, 2);
         say(w, pick(w, SAY.fire));
         w.shake = Math.max(w.shake, 4);
+    } else if (dunkKind === 'alley') {
+        shout(w, pick(w, SAY.alley), PAL.legend, 1.6);
+        say(w, pick(w, SAY.alley));
     } else if (viaDunk) {
         shout(w, pick(w, SAY.dunk).replace(/[.!]$/, '!'), PAL.legend, 1.5);
         say(w, pick(w, SAY.dunk));
@@ -619,6 +757,24 @@ const score = (w: World, scorer: Player, pts: number, viaDunk: boolean) => {
     }
 
     w.stats.dunks += viaDunk ? 1 : 0;
+    if (dunkKind === 'turbo') w.stats.turboDunks++;
+    if (dunkKind === 'alley') w.stats.alleyOops++;
+
+    // Backboard shatter: earned, not cheap — only a dunk landed by a player
+    // who is already (or just now) on fire cracks the glass.
+    if (viaDunk && scorer.onFire) {
+        const hi = attackHoop(scorer.team);
+        w.shatter[hi] = 1.1;
+        w.shake = Math.max(w.shake, 11);
+        for (let i = 0; i < 14; i++) {
+            w.parts.push({
+                x: HOOPS[hi].x, z: HOOPS[hi].z, y: HOOPS[hi].h - 6,
+                vx: (rng(w) - 0.5) * 150, vy: -rng(w) * 100,
+                life: 0.6, max: 0.6, kind: 'spark',
+            });
+        }
+    }
+
     w.phase = 'score';
     w.phaseT = viaDunk ? 1.15 : 0.95;
     w.possession = null;
@@ -697,6 +853,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
         const d = hoopDist(p, hoop);
         const open = openness(w, p);
         const mate = teammateOf(w, p);
+        const range = dunkRangeFor(p);
 
         // Drive at the rim, drifting to the depth lane the defence isn't in.
         // `inward` points from the rim toward mid-court, so ADD it: subtracting
@@ -710,8 +867,14 @@ const aiThink = (w: World, p: Player, dt: number) => {
         turbo = p.turbo > 0.25 && (d > 60 || open < 14);
 
         if (p.cool <= 0) {
-            if (d < DUNK_RANGE && open > 10) {
-                startDunk(w, p);
+            // Alley-oop: a teammate already in the air near the rim is a free
+            // dunk. Check it every frame, ahead of the normal decision cadence
+            // below — the jump only hangs for a fraction of a second, and
+            // waiting for the next 0.18s tick would miss it more often than not.
+            if (mate.y > 6 && mate.dunkT === 0 && hoopDist(mate, hoop) < ALLEY_HOOP_R) {
+                launchPass(w, p, mate);
+            } else if (d < range && open > 10) {
+                startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
             } else if (p.aiTimer <= 0) {
                 p.aiTimer = 0.18;
                 const q = 0.55 + rng(w) * 0.4;     // CPU release is decent, not perfect
@@ -752,6 +915,21 @@ const aiThink = (w: World, p: Player, dt: number) => {
         )[0];
         if (dist2d(guard.x, guard.z, p.x, p.z) < 22) tx += (p.x - guard.x) * 1.4;
         turbo = p.turbo > 0.4 && dist2d(p.x, p.z, tx, tz) > 70;
+
+        // Alley-oop cut: slip backdoor and go up for the lob when the rim is
+        // close, nobody's tight on you, and the handler still has time to see
+        // it. This is what makes the mechanic show up without a human ever
+        // asking for it — the AI teammate (and the opposing pair) sets these
+        // up on their own.
+        const guardClose = dist2d(guard.x, guard.z, p.x, p.z) < 14;
+        if (
+            p.y === 0 && p.aiTimer <= 0 && !guardClose && handler.cool <= 0
+            && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.02
+        ) {
+            p.vy = JUMP_V;
+            p.alleyCall = ALLEY_CALL_TIME;
+            p.aiTimer = 1.2;
+        }
     } else if (w.possession !== null) {
         /* --- defence ---------------------------------------------------- */
         const handler = w.players[w.possession];
@@ -774,6 +952,16 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // gamble on a poke at a cadence so it never feels like a wall.
             if (handler.charge >= 0 && dd < BLOCK_R && p.y === 0 && rng(w) < 0.018 * gamble) {
                 p.vy = JUMP_V;
+            } else if (
+                dd < SHOVE_R && p.turbo > 0.35 && p.cool <= 0 && p.aiTimer <= 0
+                && handler.y <= 2 && rng(w) < 0.012 * gamble
+            ) {
+                // The shove. Rarer than a steal gamble — it burns real turbo —
+                // but real: the CPU commits to it, not just the player.
+                p.aiTimer = 0.9;
+                p.cool = 0.9;
+                turbo = true;
+                attemptShove(w, p, handler);
             } else if (dd < STEAL_R && p.cool <= 0 && p.aiTimer <= 0 && w.ball.pickCool <= 0) {
                 // Steals are the easiest thing to over-tune: at a 30% gamble
                 // every half second the ball never settles and neither team
@@ -825,14 +1013,25 @@ const aiThink = (w: World, p: Player, dt: number) => {
 /* Human control                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The NBA Jam layout: three buttons, and the last two swap meaning with the
+ * ball.
+ *
+ *              WITH BALL          WITHOUT BALL, OFFENCE   WITHOUT BALL, DEFENCE
+ *   SHOOT (a)  shoot / dunk       cut to the rim, call     jump: block / swat
+ *   PASS  (b)  pass to teammate   swap control              steal attempt
+ *   TURBO (c)  held: sprint, extends dunk range and is free while on fire
+ *
+ * Plus the two combinations: TURBO+PASS on defence is the shove (the
+ * signature move — see `attemptShove`), and TURBO+SHOOT with the ball just
+ * means the dunk you get from `dunkRangeFor` is the big, sprinting one.
+ */
 const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
     const hasBall = w.possession === p.id;
     const teamHasBall = w.possession !== null && w.players[w.possession].team === p.team;
     const mate = teammateOf(w, p);
 
-    // B is turbo on offence and a steal lunge on defence — both make you move,
-    // which keeps the button meaning roughly the same thing to a thumb.
-    const wantTurbo = cmd.b && (p.onFire || p.turbo > 0);
+    const wantTurbo = cmd.c && (p.onFire || p.turbo > 0);
     if (wantTurbo && !p.onFire) p.turbo = clamp(p.turbo - TURBO_DRAIN * dt, 0, 1);
     else p.turbo = clamp(p.turbo + TURBO_REGEN * dt, 0, 1);
 
@@ -847,7 +1046,10 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         const hoop = HOOPS[attackHoop(p.team)];
         const d = hoopDist(p, hoop);
         if (cmd.aPress && p.cool <= 0) {
-            if (d < DUNK_RANGE) startDunk(w, p);
+            // Dunk range is live and speed-driven (see dunkRangeFor): walk it
+            // in and you need to be underneath the rim, sprint in on TURBO and
+            // the same button slams it from well outside that.
+            if (d < dunkRangeFor(p)) startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
             else p.charge = 0;                     // start the release meter
         }
         if (p.charge >= 0) {
@@ -857,19 +1059,45 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
                 launchShot(w, p, releaseQuality(Math.min(p.charge, SHOT_COOK)), 1);
             }
         }
-        // Tap B with the ball while standing still-ish and a teammate open:
-        // turbo doubles as a bail-out pass when you are pinned on the line.
-        if (cmd.bPress && openness(w, p) < 14 && p.cool <= 0) launchPass(w, p, mate);
+        // PASS always passes — no openness gate. A lazy one across the whole
+        // court is exactly the pass that gets read and picked off; a sharp
+        // one to a teammate who broke open is how you actually use this.
+        if (cmd.bPress && p.cool <= 0) launchPass(w, p, mate);
     } else if (teamHasBall) {
-        // A calls for the rock. Your teammate will oblige, mostly.
-        if (cmd.aPress && mate.cool <= 0 && w.possession === mate.id) launchPass(w, mate, p);
+        const hoop = HOOPS[attackHoop(p.team)];
+        const nearHoop = hoopDist(p, hoop) < ALLEY_HOOP_R;
+        if (cmd.aPress) {
+            if (nearHoop && p.y === 0) {
+                // Cut, right now, under the rim: jump and call for the lob.
+                // The teammate AI/human holding the ball recognises an
+                // airborne man this close to the hoop and can hit the alley.
+                p.vy = JUMP_V;
+                p.alleyCall = ALLEY_CALL_TIME;
+            } else if (mate.cool <= 0 && w.possession === mate.id) {
+                // Too far out for a lob: just call for the rock, grounded.
+                launchPass(w, mate, p);
+            }
+        }
+        // PASS without the ball, on offence, swaps which of your two guys you
+        // are driving — straight out of the arcade original.
+        if (cmd.bPress && p.swapCool <= 0 && mate.swapCool <= 0) {
+            p.human = false;
+            mate.human = true;
+            p.swapCool = SWAP_COOL;
+            mate.swapCool = SWAP_COOL;
+        }
     } else {
-        // Defence: A jumps (block / rebound), B lunges for the steal.
+        // Defence: SHOOT jumps (block / contest), PASS steals. Hold TURBO and
+        // PASS becomes the shove instead — the read is "am I close enough and
+        // willing to burn turbo", same as it is for the CPU.
         if (cmd.aPress && p.y === 0) p.vy = JUMP_V;
         if (cmd.bPress && p.cool <= 0 && w.possession !== null) {
             const handler = w.players[w.possession];
             p.cool = 1.1;
-            if (dist2d(p.x, p.z, handler.x, handler.z) < STEAL_R + 3 && w.ball.pickCool <= 0) {
+            const dd = dist2d(p.x, p.z, handler.x, handler.z);
+            if (wantTurbo && dd < SHOVE_R) {
+                attemptShove(w, p, handler);
+            } else if (dd < STEAL_R + 3 && w.ball.pickCool <= 0) {
                 // Reaching from behind the handler is the high-percentage steal.
                 const behind = (handler.facing === 1 && p.x > handler.x) || (handler.facing === -1 && p.x < handler.x);
                 if (rng(w) < (behind ? 0.26 : 0.14)) {
@@ -914,15 +1142,17 @@ const stepBall = (w: World, dt: number) => {
 
         // A pass can be jumped — but only once it has left the neighbourhood.
         // Checking from t=0 meant the passer's own defender, who is standing
-        // 8px away by definition, intercepted every pass out of pressure.
+        // 8px away by definition, intercepted every pass out of pressure. A
+        // lazy cross-court pass spends a lot longer in this window than a
+        // sharp one, which is exactly the punishment the brief asked for.
         if (b.kind === 'pass' && b.t > 0.3) {
             const from = w.players[b.shooter];
             for (const o of w.players) {
-                if (o.team === from.team) continue;
+                if (o.team === from.team || o.stumbleT > 0) continue;
                 if (b.y < 26 && dist2d(o.x, o.z, b.x, b.z) < 9) {
-                    w.stats.steals++;
+                    w.stats.interceptions++;
                     shout(w, 'PICKED OFF!', PAL.accent2, 0.9);
-                    say(w, pick(w, SAY.steal));
+                    say(w, pick(w, SAY.intercept));
                     giveBall(w, o.id);
                     return;
                 }
@@ -932,9 +1162,18 @@ const stepBall = (w: World, dt: number) => {
         if (b.t >= 1) {
             if (b.kind === 'pass') {
                 const to = w.players[b.target];
+                // Alley-oop: the pass arrives while the receiver is already in
+                // the air near their own rim — instead of catching it, they
+                // finish it. This is the single mechanic most worth getting
+                // right: no separate button, just a pass that lands on a man
+                // already up over the hoop.
+                const hoop = HOOPS[attackHoop(to.team)];
                 giveBall(w, to.id);
+                if (to.y > 6 && to.dunkT === 0 && hoopDist(to, hoop) < ALLEY_HOOP_R) {
+                    startDunk(w, to, { kind: 'alley' });
+                }
             } else if (b.made) {
-                score(w, w.players[b.shooter], b.pts, false);
+                score(w, w.players[b.shooter], b.pts, 'none');
             } else {
                 // Clank. Live rebound off the iron, tipped back into the court.
                 const h = HOOPS[attackHoop(w.players[b.shooter].team)];
@@ -972,14 +1211,27 @@ const stepBall = (w: World, dt: number) => {
     if (b.z > Z_MAX) { b.z = Z_MAX; b.vz = -Math.abs(b.vz) * 0.6; }
 
     if (w.phase !== 'score' && b.pickCool <= 0) {
-        // Pickup: whoever is closest and can reach it. Jumping helps.
-        let best: Player | null = null;
-        let bestD = 999;
+        // Pickup: everybody in reach is a candidate — a real scramble, not a
+        // strict nearest-wins. Jumping helps, and a shoved player on the deck
+        // is out of it. Two bodies both in reach is resolved as a weighted
+        // coin flip rather than a deterministic tie so a contested loose ball
+        // is actually winnable by either side, not just whichever array index
+        // happens to be first.
+        const candidates: { p: Player; w: number }[] = [];
         for (const p of w.players) {
-            if (p.dunkT > 0) continue;
+            if (p.dunkT > 0 || p.stumbleT > 0) continue;
             const d = dist2d(p.x, p.z, b.x, b.z);
             const reach = 12 + (p.y > 4 ? 22 : 16);
-            if (d < 13 && b.y < reach + p.y && d < bestD) { best = p; bestD = d; }
+            if (d < 13 && b.y < reach + p.y) candidates.push({ p, w: 1 / (d + 1.5) });
+        }
+        let best: Player | null = null;
+        if (candidates.length === 1) {
+            best = candidates[0].p;
+        } else if (candidates.length > 1) {
+            const total = candidates.reduce((n, c) => n + c.w, 0);
+            let roll = rng(w) * total;
+            for (const c of candidates) { roll -= c.w; if (roll <= 0) { best = c.p; break; } }
+            best ??= candidates[candidates.length - 1].p;
         }
         if (best) {
             giveBall(w, best.id);
@@ -1014,8 +1266,9 @@ const stepDunk = (w: World, p: Player, dt: number) => {
     if (!p.dunkSlammed && t >= 0.62) {
         p.dunkSlammed = true;
         // A body in the air inside the block radius can still deny the dunk;
-        // otherwise the arcade rule applies and a dunk always goes in.
-        const denier = opponentsOf(w, p).find(o => o.y > 12 && dist2d(o.x, o.z, p.x, p.z) < 16);
+        // otherwise the arcade rule applies and a dunk always goes in. Someone
+        // currently on the ground from a shove cannot contest anything.
+        const denier = activeOpponentsOf(w, p).find(o => o.y > 12 && dist2d(o.x, o.z, p.x, p.z) < 16);
         if (denier && rng(w) < 0.55) {
             w.stats.blocks++;
             shout(w, 'DENIED!', PAL.bad, 1.2);
@@ -1031,7 +1284,7 @@ const stepDunk = (w: World, p: Player, dt: number) => {
                     life: 0.5, max: 0.5, kind: 'spark',
                 });
             }
-            score(w, p, 2, true);
+            score(w, p, 2, p.dunkKind);
         }
     }
     if (t >= 1) { p.dunkT = 0; p.y = 0; }
@@ -1050,6 +1303,8 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     w.sayT = Math.max(0, w.sayT - dt);
     w.rimFlash[0] = Math.max(0, w.rimFlash[0] - dt);
     w.rimFlash[1] = Math.max(0, w.rimFlash[1] - dt);
+    w.shatter[0] = Math.max(0, w.shatter[0] - dt);
+    w.shatter[1] = Math.max(0, w.shatter[1] - dt);
 
     // Particles (flame trail + dunk sparks) live on a fixed budget.
     for (let i = w.parts.length - 1; i >= 0; i--) {
@@ -1108,6 +1363,8 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
 
     for (const p of w.players) {
         p.cool = Math.max(0, p.cool - dt);
+        p.swapCool = Math.max(0, p.swapCool - dt);
+        p.alleyCall = Math.max(0, p.alleyCall - dt);
         p.touchT = w.possession === p.id ? p.touchT + dt : 0;
         if (!p.onFire) p.fireT = 0;
         else {
@@ -1124,6 +1381,16 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         }
 
         if (p.dunkT > 0) { stepDunk(w, p, dt); clampToCourt(p); continue; }
+
+        // Shoved: down and sliding, no input reaches this body until it ends.
+        if (p.stumbleT > 0) {
+            p.stumbleT = Math.max(0, p.stumbleT - dt);
+            p.x += p.vx * dt;
+            p.z += p.vz * dt;
+            p.vx *= 0.86; p.vz *= 0.86;
+            clampToCourt(p);
+            continue;
+        }
 
         if (p.human) humanControl(w, p, cmd, dt);
         else aiThink(w, p, dt);
@@ -1300,6 +1567,26 @@ const drawHoop = (ctx: CanvasRenderingContext2D, w: World, idx: 0 | 1) => {
     if (flash > 0) {
         circle(ctx, x, rimY, 12 * flash + 4, `rgba(255,180,0,${0.35 * flash})`);
     }
+
+    // Backboard shatter — earned by a fire dunk, not cheap. A jagged crack
+    // across the glass plus a hot glow that fades over about a second.
+    const sh = w.shatter[idx];
+    if (sh > 0) {
+        const bx = poleX + h.inward * 1.5;
+        ctx.save();
+        ctx.globalAlpha = clamp(sh, 0, 1);
+        ctx.strokeStyle = '#fff8e6';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(bx - h.inward * 1, rimY - 22);
+        ctx.lineTo(bx + h.inward * 1, rimY - 14);
+        ctx.lineTo(bx - h.inward * 2, rimY - 9);
+        ctx.moveTo(bx, rimY - 18);
+        ctx.lineTo(bx + h.inward * 2.4, rimY - 6);
+        ctx.stroke();
+        ctx.restore();
+        circle(ctx, bx, rimY - 14, 10 * sh + 2, `rgba(255,220,150,${0.3 * sh})`);
+    }
 };
 
 const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
@@ -1308,6 +1595,25 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     const h = 32 * sc(p.z);
     const isShooting = p.charge >= 0 || p.dunkT > 0;
     const armUp = p.dunkT > 0 ? 1.35 : p.charge >= 0 ? clamp(p.charge, 0, 1) : p.y > 6 ? 1 : 0;
+    const down = p.stumbleT > 0;
+
+    // Dunk range, made visible: a ring under the ball handler's feet that
+    // shows exactly how close they need to be right now — which grows as they
+    // pick up speed. Watching your own outline stretch is how the range is
+    // meant to be learned, not a number in a manual.
+    if (w.possession === p.id && p.charge < 0 && p.dunkT === 0 && !down) {
+        const hoop = HOOPS[attackHoop(p.team)];
+        const inRange = hoopDist(p, hoop) < dunkRangeFor(p);
+        const rr = (6 + dunkRangeFor(p) * 0.14) * sc(p.z);
+        ctx.save();
+        ctx.globalAlpha = inRange ? 0.5 : 0.22;
+        ctx.strokeStyle = inRange ? PAL.legend : PAL.accent;
+        ctx.lineWidth = inRange ? 1.4 : 1;
+        ctx.beginPath();
+        ctx.ellipse(x, floorY(p.z), rr, rr * 0.36, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
 
     if (p.onFire) {
         // Heat haze under the on-fire player so you can find him instantly.
@@ -1321,20 +1627,25 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     // is registered under p.kit.sprite (the art file is absent or renamed),
     // actor() draws the old figure() with the same kit colours instead.
     actor(ctx, p.kit.sprite, x, feet, {
-        height: h,
+        height: down ? h * 0.55 : h,
         facing: p.facing,
         // Walk cycle is driven by position, as before — stride picks the frame.
         stride: p.stride,
         swap: p.kit.swap,
         kit: p.kit,
         armUp,
-        crouch: p.charge > 0.15 && p.charge < 0.6,
-        hurt: false,
+        crouch: down || (p.charge > 0.15 && p.charge < 0.6),
+        hurt: down && p.stumbleT > STUMBLE_TIME * 0.6,
         // The heat haze / jump shadow above already handles the ground contact.
         shadow: p.y <= 2,
+        rotation: down ? p.facing * 1.15 : 0,
     });
 
     if (p.onFire) glyph(ctx, '🔥', x - p.facing * 7, feet - h - 4, 9 + Math.sin(w.t * 14) * 1.5);
+    // Alley-oop cue: this man is up, near the rim, ready to catch a lob.
+    if (p.alleyCall > 0 || (p.y > 6 && hoopDist(p, HOOPS[attackHoop(p.team)]) < ALLEY_HOOP_R)) {
+        glyph(ctx, '🙌', x, feet - h - 12, 10 + Math.sin(w.t * 16) * 1.5);
+    }
     if (p.human) {
         // The "that's you" arrow, because four block men look alike in a pile.
         // glyph() paints with the current fillStyle, so set one explicitly.
@@ -1357,6 +1668,21 @@ const drawBall = (ctx: CanvasRenderingContext2D, w: World) => {
     const b = w.ball;
     const x = screenX(b.x, b.z);
     const y = screenY(b.z, b.y);
+
+    // A pass in flight gets a fading streak back to where it left the hand —
+    // it's the one ball state that's easy to lose in a scramble otherwise.
+    if (b.mode === 'flight' && b.kind === 'pass') {
+        const sx = screenX(b.sx, b.sz);
+        const sy = screenY(b.sz, b.sy);
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = PAL.accent;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        line(ctx, sx, sy, x, y, PAL.accent, 1);
+        ctx.restore();
+    }
+
     shadow(ctx, screenX(b.x, b.z), floorY(b.z), 3.2, 1.3, 0.45);
     const r = 3.4 * sc(b.z);
     circle(ctx, x, y, r + 0.6, '#0b0705');
@@ -1426,7 +1752,9 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     }
 
     // Turbo bar for the human, bottom-left, with a fire label when lit.
-    const you = w.players[0];
+    // Whichever of your two guys you're currently driving — PASS-to-swap can
+    // move this off player 0, so the HUD has to follow, not assume.
+    const you = w.players.find(p => p.human) ?? w.players[0];
     bar(ctx, 6, VH - 10, 48, 4, you.onFire ? 1 : you.turbo, you.onFire ? PAL.warn : PAL.accent, PAL.panel);
     text(ctx, you.onFire ? 'ON FIRE' : 'TURBO', 58, VH - 11, { size: 6, color: you.onFire ? PAL.warn : PAL.faint });
 
@@ -1485,14 +1813,14 @@ const HoopsGame: React.FC<{
             const s = input.current;
             stepWorld(w, dt, {
                 left: s.left, right: s.right, up: s.up, down: s.down,
-                a: s.a, b: s.b,
-                aPress: consume('a'), bPress: consume('b'),
+                a: s.a, b: s.b, c: s.c,
+                aPress: consume('a'), bPress: consume('b'), cPress: consume('c'),
             });
         }
         drawWorld(ctx, w);
 
         const clock = Math.ceil(w.clock);
-        const fire = w.players[0].onFire;
+        const fire = (w.players.find(p => p.human) ?? w.players[0]).onFire;
         const h = hudRef.current;
         if (h.you !== w.score[0] || h.them !== w.score[1] || h.clock !== clock || h.fire !== fire) {
             hudRef.current = { you: w.score[0], them: w.score[1], clock, fire };
@@ -1529,7 +1857,7 @@ const HoopsGame: React.FC<{
             running={done === null}
             onFrame={onFrame}
             onInput={set}
-            actions={['SHOOT', 'TURBO']}
+            actions={['SHOOT', 'PASS', 'TURBO']}
             vertical
             onQuit={done === null ? onQuit : undefined}
             quitLabel="Forfeit"
@@ -1564,7 +1892,7 @@ const HoopsGame: React.FC<{
                 )
             }
             help={
-                '◀ ▶ run the court, ▲ ▼ slide in and out. SHOOT: hold with the ball to charge — release in the green for a pure look, or get inside and tap it for a dunk. Without the ball SHOOT calls for the pass, or jumps to block on defence. TURBO: sprint with the ball, poke for a steal without it. Three straight buckets and you are ON FIRE until they score.'
+                '◀ ▶ run the court, ▲ ▼ slide in and out. With the ball: SHOOT charges a jumper (release in the green) or dunks if you\'re in range — hold TURBO while you drive and that range stretches way out. PASS throws it to your teammate; lead him or a defender will read it. Without the ball on offence: SHOOT cuts to the rim and calls for a lob — catch it in the air near the hoop for an alley-oop — PASS swaps which guy you\'re running. On defence: SHOOT jumps to block or goaltend, PASS pokes for a steal, and TURBO+PASS up close is the shove — no fouls, ball comes loose. Three straight buckets and you\'re ON FIRE until they score, and a fire dunk cracks the backboard.'
             }
         />
     );

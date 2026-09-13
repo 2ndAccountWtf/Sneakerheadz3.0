@@ -8,6 +8,7 @@ import { getBagValue } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
 import { venuesIn, isVenueOpen } from '../data/venues';
 import { collectorsIn } from '../systems/collectors';
+import { spotsIn } from '../data/sellingSpots';
 import HypeCalendar from '../components/HypeCalendar';
 import { getRunClock } from '../data/ranks';
 import Img from '../components/Img';
@@ -71,6 +72,11 @@ const DashboardScreen: React.FC = () => {
     const openVenues = useMemo(
         () => venuesIn(currentCityId).filter(v => isVenueOpen(v, day)).length,
         [currentCityId, day],
+    );
+
+    const spotCount = useMemo(
+        () => spotsIn(currentCityId).length,
+        [currentCityId],
     );
 
     const collectorCount = useMemo(
@@ -289,6 +295,14 @@ const DashboardScreen: React.FC = () => {
                     icon="🗺"
                     onClick={() => changeScreen(Screen.Quests)}
                     badge={quests.length ? `${quests.length} active` : undefined}
+                />
+                <Tile
+                    label="Set Up Shop"
+                    sublabel="Sell to whoever walks past. Watch your back"
+                    icon="🧃"
+                    accent="var(--warn)"
+                    onClick={() => changeScreen(Screen.StreetSell)}
+                    badge={spotCount ? `${spotCount} pitches` : 'Nowhere here'}
                 />
                 <Tile
                     label="Collectors"

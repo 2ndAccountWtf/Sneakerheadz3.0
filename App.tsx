@@ -18,6 +18,7 @@ import VenuesScreen from './screens/VenuesScreen';
 import GameOverScreen from './screens/GameOverScreen';
 import BankScreen from './screens/BankScreen';
 import CollectorsScreen from './screens/CollectorsScreen';
+import StreetSellScreen from './screens/StreetSellScreen';
 import { Screen } from './types';
 import Layout from './components/Layout';
 import Notification from './components/Notification';
@@ -68,6 +69,8 @@ const ScreenManager: React.FC = () => {
                 return <BankScreen />;
             case Screen.Collectors:
                 return <CollectorsScreen />;
+            case Screen.StreetSell:
+                return <StreetSellScreen />;
             case Screen.GameOver:
                 return <GameOverScreen />;
             default:
