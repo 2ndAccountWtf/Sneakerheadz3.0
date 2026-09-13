@@ -1,0 +1,95 @@
+/**
+ * Run grades — the ladder the 30-day run is actually scored on.
+ *
+ * Street cred (CRED_RANKS in constants.ts) measures who knows your name.
+ * This measures whether the month was worth doing, and it is deliberately a
+ * *multiple* of the stake rather than an absolute number: $8,000 means
+ * something very different to a player who started with $2,000 than it would
+ * if the opening cash were ever retuned.
+ *
+ * The verdicts are the payoff of the whole run, so they are written like the
+ * rest of the game talks — flat, specific, and never congratulatory.
+ */
+
+export interface RunGrade {
+    /** Lowest net-worth-to-stake ratio that earns this grade. */
+    min: number;
+    title: string;
+    /** One line of dry accounting, shown under the title. */
+    verdict: string;
+    /** Drives the accent colour of the summary panel. */
+    tone: 'bad' | 'flat' | 'good' | 'great';
+}
+
+export const RUN_GRADES: RunGrade[] = [
+    {
+        min: 0,
+        title: 'Liquidated',
+        verdict: 'Thirty days of trading and you finish with less than bus fare. Somebody out there is walking around in your money.',
+        tone: 'bad',
+    },
+    {
+        min: 0.3,
+        title: 'Underwater',
+        verdict: 'You bought high and sold every time you got nervous. The market kept the difference.',
+        tone: 'bad',
+    },
+    {
+        min: 0.75,
+        title: 'Down, Slightly',
+        verdict: 'Not a catastrophe. A slow leak, observed over a month, by you, without intervention.',
+        tone: 'bad',
+    },
+    {
+        min: 1,
+        title: 'Break-Even Merchant',
+        verdict: 'You end roughly where you began, having aged noticeably. Accountants call this neutral.',
+        tone: 'flat',
+    },
+    {
+        min: 1.5,
+        title: 'Modest Operator',
+        verdict: 'A real profit. Small, but it is there, and it will still be there tomorrow.',
+        tone: 'good',
+    },
+    {
+        min: 3,
+        title: 'Certified Flipper',
+        verdict: 'You found the spread and worked it. Two cities recognise you and one of them is annoyed about it.',
+        tone: 'good',
+    },
+    {
+        min: 6,
+        title: 'Regional Menace',
+        verdict: 'Prices moved when you walked into a room. There is a group chat about you and you are not in it.',
+        tone: 'great',
+    },
+    {
+        min: 12,
+        title: 'Drip Syndicate',
+        verdict: 'You stopped trading shoes somewhere around week two and started trading the idea of shoes. It priced better.',
+        tone: 'great',
+    },
+    {
+        min: 25,
+        title: 'Footwear Oligarch',
+        verdict: 'You own the number, and the number owns everybody else. Bibi has your phone number now, which is its own kind of problem.',
+        tone: 'great',
+    },
+];
+
+/** The grade a given net worth earns against the stake it started from. */
+export const getRunGrade = (netWorth: number, startingCash: number): RunGrade => {
+    const ratio = startingCash > 0 ? netWorth / startingCash : 0;
+    let grade = RUN_GRADES[0];
+    for (const g of RUN_GRADES) if (ratio >= g.min) grade = g;
+    return grade;
+};
+
+/** Theme token for a grade, so the summary and the projection agree on colour. */
+export const gradeColor = (tone: RunGrade['tone']): string => ({
+    bad: 'var(--bad)',
+    flat: 'var(--ink-dim)',
+    good: 'var(--ok)',
+    great: 'var(--legend)',
+}[tone]);
