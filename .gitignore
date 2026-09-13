@@ -9,8 +9,19 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-*/
 dist-ssr
 *.local
+
+# Throwaway verification harnesses.
+# Agents build standalone Vite entry points to exercise a single component in a
+# real browser. These are scratch build artifacts, never source — and one of
+# them (a temporary single-city store list) was once committed by accident and
+# shipped, so they are ignored rather than left to be swept up by `git add -A`.
+__*.html
+__*.tsx
+vite.*.config.mts
+!vite.config.ts
 
 # Editor directories and files
 .vscode/*
