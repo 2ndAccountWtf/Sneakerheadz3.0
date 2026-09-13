@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MiniGameShell } from '../MiniGameShell';
 import { GameCanvas } from './GameCanvas';
 import { TouchPad } from './TouchPad';
@@ -40,11 +40,20 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
 }) => {
     const [showHelp, setShowHelp] = useState(false);
 
+    // When the game ends, bring the result into view. The board sits inline in
+    // a long scrolling page (the Arcade lists a dozen games below it), so on a
+    // phone the card announcing you lost could easily be above or below the
+    // fold at the moment it appeared.
+    const boardRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (overlay) boardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [overlay]);
+
     return (
         <MiniGameShell title={title} subtitle={subtitle} onQuit={onQuit} quitLabel={quitLabel}>
             {hud && <div className="mb-2">{hud}</div>}
 
-            <div className="relative">
+            <div className="relative" ref={boardRef}>
                 <GameCanvas width={width} height={height} running={running} onFrame={onFrame} />
                 {overlay && (
                     <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/70 backdrop-blur-[2px]">
@@ -54,7 +63,7 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
             </div>
 
             {/* AM/PM weapon rail */}
-            {loadout.length > 0 && (
+            {!overlay && loadout.length > 0 && (
                 <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto scrollbar-hide">
                     <span className="label flex-shrink-0">Kit</span>
                     {loadout.map(w => (
@@ -71,9 +80,17 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
                 </div>
             )}
 
-            <TouchPad onDown={onInput} actions={actions} vertical={vertical} />
+            {/* The pad disappears with the game.
 
-            {help && (
+                It used to stay on screen under the result card, fully rendered
+                and fully clickable, with the rest of the page scrolling below
+                it — so a finished game looked like a live one with dead
+                controls, and the only way out was a button you had to go and
+                find. Reported as being stuck on the walk-off screen, and it
+                was a fair description of what it looked like. */}
+            {!overlay && <TouchPad onDown={onInput} actions={actions} vertical={vertical} />}
+
+            {!overlay && help && (
                 <div className="mt-2">
                     <button className="label hover:text-[var(--ink)]" onClick={() => setShowHelp(h => !h)}>
                         {showHelp ? '▾ Controls' : '▸ Controls'}

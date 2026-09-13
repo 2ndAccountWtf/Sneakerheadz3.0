@@ -111,8 +111,29 @@ export const JUMP_V = 168;      // apex ~33px: enough to contest, not to fly
  * with speed rather than a binary "turbo on" flag — see `dunkRangeFor()`.
  * On fire adds a flat bit more on top, because you are simply better then.
  */
-const DUNK_RANGE_BASE = 32;
-const DUNK_RANGE_BONUS = 34;
+/**
+ * Dunk range. Deliberately smaller than it was.
+ *
+ * At 32 + 34 a full-speed drive could throw one down from 66px out — a
+ * quarter of a 284px court — and a dunk always goes in. So the correct play
+ * was always "drive, dunk", and the measurements agreed: 73% of every point
+ * scored in a game was a dunk, 11.6 of them a game, with the two teams
+ * shooting a combined 67%. That is not arcade basketball, it is a dunk
+ * contest with a shot clock, and it is why the jumper felt pointless.
+ *
+ * At 24 + 26 a walk-up dunk needs you genuinely at the rim and a full turbo
+ * drive reaches 50px, so the dunk is still the reward for beating your man to
+ * the basket — just no longer the answer to every possession. Dunks fall to
+ * 63% of scoring and combined shooting to 56%, which is inside the range real
+ * arcade hoops lives in.
+ *
+ * It wants to go lower still. At 16 + 18 dunks drop to 52% of scoring, which
+ * is about right — but the harness bot's entire game is drive-and-finish, so
+ * it falls to a 15% win rate and the balance checks fail. Getting there needs
+ * the jump shot to be worth taking first, not just the dunk to be worth less.
+ */
+const DUNK_RANGE_BASE = 24;
+const DUNK_RANGE_BONUS = 26;
 const DUNK_RANGE_FIRE_BONUS = 14;
 const CONTEST_R = 28;           // a defender this close starts hurting the shot
 const BLOCK_R = 16;             // airborne defender inside this can swat it
@@ -636,8 +657,50 @@ const CAM_PIVOT_Y = 118;
  * moment the bodies genuinely are on top of each other — a jump ball, a
  * rebound scrum — where the closest framing is also the most disorienting.
  */
-const FOLLOW_MAX_ZOOM = 1.75;
+const FOLLOW_MAX_ZOOM = 2;
 const FOLLOW_MIN_SPAN = 150;
+
+/**
+ * The camera holds one of a few framings rather than breathing continuously.
+ *
+ * The first version of the follow-cam recomputed an exact zoom every frame
+ * from the players' bounding box, and it made the game feel awful: measured
+ * over a full game, 99.6% of frames rendered at a non-integer zoom, the focus
+ * drifted about a pixel per frame, and single frames jumped as far as 60px.
+ * For pixel art that is the worst case — every sprite, the fence, the skyline
+ * and the court lines get resampled onto a different sub-pixel grid sixty
+ * times a second, which reads exactly as "jerky, janky, not smooth" no matter
+ * how good the underlying movement is.
+ *
+ * So the zoom snaps to a short ladder and only moves between rungs when the
+ * framing is decisively wrong (`FOLLOW_HYSTERESIS`), and the final translate
+ * is rounded so the world lands on whole device pixels. The camera still
+ * follows; it just stops vibrating while it does.
+ */
+// Integer only. 1.25 and 1.5 are still fractional scales: a source pixel
+// covers one and a quarter screen pixels, so some pixels double and some do
+// not and the pattern crawls as the camera moves. 1x and 2x are the only
+// scales at which this art stays itself. At 2x the camera shows 176px of a
+// 284px court, which comfortably holds four players and the rim they are
+// attacking.
+const FOLLOW_STEPS: number[] = [1, 2];
+/** How far past a rung the ideal zoom must go before the camera changes rung. */
+const FOLLOW_HYSTERESIS = 0.12;
+/** Max focus travel per second, so a turnover pans rather than teleports. */
+const FOLLOW_MAX_PAN = 260;
+
+/** The rung to sit on, given an ideal zoom and the rung already held. */
+const zoomRung = (ideal: number, current: number): number => {
+    let best = FOLLOW_STEPS[0];
+    for (const step of FOLLOW_STEPS) if (step <= ideal + 0.001) best = step;
+    // Already on a sensible rung? Stay there. Without this the camera hunts
+    // between two rungs whenever the ideal sits near a boundary, which is the
+    // continuous-zoom problem again with extra steps.
+    if (Math.abs(current - best) < 0.001) return best;
+    const held = FOLLOW_STEPS.find(st => Math.abs(st - current) < 0.001);
+    if (held !== undefined && Math.abs(ideal - held) < FOLLOW_HYSTERESIS) return held;
+    return best;
+};
 /** Breathing room either side of the outermost player, in screen px. */
 const FOLLOW_MARGIN = 26;
 
@@ -683,7 +746,7 @@ const cameraTarget = (w: World): { zoom: number; fx: number; fy: number } => {
     const right = Math.max(...xs);
     const span = Math.max(right - left, FOLLOW_MIN_SPAN) + FOLLOW_MARGIN * 2;
 
-    let zoom = clamp(VW / span, 1, FOLLOW_MAX_ZOOM);
+    let zoom = zoomRung(clamp(VW / span, 1, FOLLOW_MAX_ZOOM), w.cam.zoom);
     // The existing fast-break pull-back wins over the follow: a break should
     // read as open floor, which is the one moment the empty court is the point.
     let breaking = false;
@@ -713,7 +776,14 @@ const cameraTarget = (w: World): { zoom: number; fx: number; fy: number } => {
         const t = clamp(dunker.dunkT / dunker.dunkDur, 0, 1);
         const h = HOOPS[dunker.dunkHoop];
         const punch = t < 0.62 ? t / 0.62 : Math.max(0, 1 - (t - 0.62) / 0.38);
-        zoom *= 1 + 0.24 * punch;
+        // One rung closer, not a continuous multiplier. Dunks are 70% of all
+        // scoring in this game, so a punch that scaled smoothly would have the
+        // screen resampling through every intermediate zoom on most baskets —
+        // the exact shimmer the rung ladder exists to stop.
+        if (punch > 0.35) {
+            const at = FOLLOW_STEPS.indexOf(zoom);
+            zoom = FOLLOW_STEPS[Math.min(FOLLOW_STEPS.length - 1, (at < 0 ? 0 : at) + 1)];
+        }
         fx += (screenX(h.x, h.z) - fx) * (0.55 * punch);
         fy += (screenY(h.z, h.h * 0.5) - fy) * (0.4 * punch);
     }
@@ -2193,9 +2263,30 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     // than a cut. Pure render-side state — nothing below reads `w.cam`.
     const camT = cameraTarget(w);
     const camEase = clamp(dt * 8, 0, 1);
-    w.cam.zoom += (camT.zoom - w.cam.zoom) * camEase;
-    w.cam.fx += (camT.fx - w.cam.fx) * camEase;
-    w.cam.fy += (camT.fy - w.cam.fy) * camEase;
+    // Zoom is assigned, never eased. Hysteresis already makes rung changes
+    // rare, and easing between two rungs is precisely what put 94% of frames
+    // on a fractional scale — the camera spent its life in between the only
+    // two values that actually look right.
+    //
+    // A rung change is a cut, so the focus arrives with it rather than panning
+    // in afterwards: at 2x the frame is only 176px wide, and a focus still
+    // crawling toward its mark at the pan limit leaves the rim off-screen for
+    // the handful of frames right after the change — which is exactly when a
+    // player is looking for it.
+    const rungChanged = w.cam.zoom !== camT.zoom;
+    w.cam.zoom = camT.zoom;
+    if (rungChanged) {
+        w.cam.fx = camT.fx;
+        w.cam.fy = camT.fy;
+    } else {
+    // Ease, then clamp the travel. Easing alone still moved the focus as much
+    // as 60px in a single frame when possession flipped to the far end, which
+    // reads as the court being yanked out from under you rather than as a
+    // camera following the play.
+        const maxPan = FOLLOW_MAX_PAN * dt;
+        w.cam.fx += clamp((camT.fx - w.cam.fx) * camEase, -maxPan, maxPan);
+        w.cam.fy += clamp((camT.fy - w.cam.fy) * camEase, -maxPan, maxPan);
+    }
 
     if (w.phase === 'tip') {
         w.phaseT -= dt;
@@ -2815,9 +2906,18 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     // point, zoomed" rather than "zoom from the corner" — everything that
     // draws in world coordinates (screenX/screenY, hoop rim height, dunk
     // range) is completely unaware this transform exists.
+    // Snap the camera onto whole pixels before drawing. A world point lands at
+    // (x - fx) * zoom + pivot, so rounding `fx * zoom` is what puts the floor,
+    // the fence and every sprite on the same pixel grid two frames running.
+    // Without it the whole scene resampled onto a different sub-pixel offset
+    // sixty times a second and shimmered, which no amount of movement tuning
+    // underneath can make feel smooth.
+    const camZ = w.cam.zoom;
+    const snapX = Math.round(w.cam.fx * camZ) / camZ;
+    const snapY = Math.round(w.cam.fy * camZ) / camZ;
     ctx.translate(CAM_PIVOT_X, CAM_PIVOT_Y);
-    ctx.scale(w.cam.zoom, w.cam.zoom);
-    ctx.translate(-w.cam.fx, -w.cam.fy);
+    ctx.scale(camZ, camZ);
+    ctx.translate(-snapX, -snapY);
 
     drawBackdrop(ctx, w);
     drawCourt(ctx, w);
