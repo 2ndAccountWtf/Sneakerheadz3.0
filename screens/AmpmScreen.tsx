@@ -8,14 +8,19 @@ import { useAmpmWorker } from '../hooks/useAmpmWorker';
 import { ampmGreeting, ampmChatter, ampmWeaponsTalk, ampmAfterPurchase } from '../data/ampm/dialogue';
 import { isPartyMode, rollAmpmEvent, AMPM_EVENT_CHANCE, AMPM_PARTY_EVENT_CHANCE } from '../systems/events/ampmEvents';
 import { priceFor, paymentBlocked, type PaymentMethod } from '../systems/payment';
+import { shelfFor, isWeaponItem } from '../systems/ampm/stock';
+import { AMPM_AISLE_ORDER, AMPM_AISLE_LABEL } from '../data/ampmItems';
+import type { AmpmAisle } from '../types';
+
+/** Filter pills: the nine real aisles, plus Weapons and an All. */
+const FILTER_LABEL: Record<string, string> = { all: 'Everything', weapons: 'Weapons', ...AMPM_AISLE_LABEL };
+const FILTER_ICON: Record<string, string> = {
+    all: '\u{1F6D2}', weapons: '\u{1FA83}', food: '\u{1F957}', drinks: '\u{1F964}',
+    bakery: '\u{1F956}', snacks: '\u{1F36B}', frozen: '\u{1F366}', household: '\u{1F9F4}',
+    'personal-care': '\u{1F9FB}', specialty: '\u2728', questionable: '\u{1F440}',
+};
 import { cardUsable } from '../systems/banking';
 import { CASH_DISCOUNT, CARD_SURCHARGE } from '../constants';
-
-const CATEGORY_ICON: Record<string, string> = {
-    'Food & Drinks': '🍔',
-    'Tools & Gear': '🛠️',
-    'Local Specialties': '✨',
-};
 
 /**
  * The AM/PM. The clerk now actually talks — a greeting on entry, ambient
@@ -26,7 +31,7 @@ const CATEGORY_ICON: Record<string, string> = {
 const AmpmScreen: React.FC = () => {
     const { gameState, startInteraction, buyStorageItem, dispatch } = useGame();
     const { player, currentCityId, day } = gameState;
-    const [selectedCategory, setSelectedCategory] = useState<string>('Food & Drinks');
+    const [selectedFilter, setSelectedFilter] = useState<AmpmAisle | 'all' | 'weapons'>('all');
 
     const worker = useAmpmWorker();
     const partyMode = useMemo(() => isPartyMode(currentCityId, day), [currentCityId, day]);
@@ -65,21 +70,31 @@ const AmpmScreen: React.FC = () => {
         return () => clearInterval(t);
     }, [currentCityId, partyMode]);
 
-    const availableItems = useMemo(
-        () => AMPM_ITEMS.filter(item => !item.cities || item.cities.includes(currentCityId)),
-        [currentCityId],
-    );
+    // The shelf, not the catalogue. Each branch carries fifteen-ish items —
+    // staples it always has, a few that rotate, whatever is regional here, and
+    // a weapon or two — with one to three sold out today. See
+    // `systems/ampm/stock.ts` for why a shop that carries everything, every
+    // day, is not a shop.
+    const shelf = useMemo(() => shelfFor(currentCityId, gameState.day), [currentCityId, gameState.day]);
 
-    const groupedItems = useMemo(() => availableItems.reduce((acc, item) => {
-        (acc[item.category] ||= []).push(item);
-        return acc;
-    }, {} as Record<string, AmpmItem[]>), [availableItems]);
+    // Filters are the real aisles, plus a Weapons pill derived from the weapons
+    // registry rather than re-tagged by hand — an item is a weapon if you can
+    // swing it at somebody, and `systems/weapons.ts` already knows.
+    const filters = useMemo(() => {
+        const present = new Set(shelf.map(e => e.item.aisle).filter(Boolean) as AmpmAisle[]);
+        const aisles = AMPM_AISLE_ORDER.filter(a => present.has(a));
+        const hasWeapons = shelf.some(e => isWeaponItem(e.item.id));
+        return ['all' as const, ...(hasWeapons ? ['weapons' as const] : []), ...aisles];
+    }, [shelf]);
 
-    // One toggle for the whole shop rather than one per shelf item: a corner
-    // shop is a single till, and forty little cash/card pairs would bury the
-    // actual products.
-    const categories = Object.keys(groupedItems);
-    const activeCategory = categories.includes(selectedCategory) ? selectedCategory : categories[0];
+    const activeFilter = filters.includes(selectedFilter) ? selectedFilter : 'all';
+
+    const shown = useMemo(() => shelf.filter(e => {
+        if (activeFilter === 'all') return true;
+        if (activeFilter === 'weapons') return isWeaponItem(e.item.id);
+        return e.item.aisle === activeFilter;
+    }), [shelf, activeFilter]);
+
 
     const handleBuy = (item: AmpmItem) => {
         buyStorageItem(item.id, item.price, method);
@@ -173,39 +188,55 @@ const AmpmScreen: React.FC = () => {
                     </div>
                 )}
 
-                {/* Categories */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                    {categories.map(category => (
+                {/* Aisles. Only aisles with something on them today are offered,
+                    so the filter row never sends you to an empty shelf. */}
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                    {filters.map(f => (
                         <button
-                            key={category}
-                            onClick={() => setSelectedCategory(category)}
-                            className={`btn btn-sm ${activeCategory === category ? 'btn-primary' : ''}`}
+                            key={f}
+                            onClick={() => setSelectedFilter(f)}
+                            className={`btn btn-sm ${activeFilter === f ? 'btn-primary' : 'btn-ghost'}`}
                         >
-                            {CATEGORY_ICON[category] ?? '•'} {category}
+                            {FILTER_ICON[f] ?? '•'} {FILTER_LABEL[f] ?? f}
                         </button>
                     ))}
                 </div>
 
                 {/* Items */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {(groupedItems[activeCategory] ?? []).map(item => {
+                    {shown.map(({ item, inStock, reason }) => {
                         const sticker = partyMode ? Math.max(1, Math.round(item.price * 0.75)) : item.price;
                         const price = priceFor(sticker, method);
-                        const afford = !paymentBlocked(player, method, price, gameState.day);
+                        const afford = inStock && !paymentBlocked(player, method, price, gameState.day);
                         return (
-                            <div key={item.id} className="panel p-3 flex items-start justify-between gap-3">
+                            <div
+                                key={item.id}
+                                className={`panel p-3 flex items-start justify-between gap-3 ${inStock ? '' : 'opacity-55'}`}
+                            >
                                 <div className="min-w-0">
-                                    <h3 className="text-sm font-semibold text-white leading-tight">{item.name}</h3>
+                                    <h3 className={`text-sm font-semibold leading-tight ${inStock ? 'text-white' : 'text-[var(--ink-dim)] line-through'}`}>
+                                        {item.name}
+                                    </h3>
                                     <p className="text-xs text-[var(--ink-dim)] mt-1 leading-snug">{item.description}</p>
-                                    <span className="chip chip-warn mt-2">{item.effect}</span>
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                        {inStock
+                                            ? <span className="chip chip-warn">{item.effect}</span>
+                                            : <span className="chip chip-bad">Sold out today</span>}
+                                        {reason === 'regional' && <span className="chip chip-accent">Only here</span>}
+                                        {reason === 'weapon' && <span className="chip">Swingable</span>}
+                                    </div>
                                 </div>
                                 <div className="flex flex-col items-end gap-2 flex-shrink-0">
                                     <div className="text-right">
-                                        {partyMode && <div className="text-[10px] line-through text-[var(--ink-faint)] numeric">${item.price}</div>}
-                                        <div className="numeric text-lg text-[var(--ok)]">${price}</div>
+                                        {partyMode && inStock && <div className="text-[10px] line-through text-[var(--ink-faint)] numeric">${item.price}</div>}
+                                        <div className={`numeric text-lg ${inStock ? 'text-[var(--ok)]' : 'text-[var(--ink-faint)] line-through'}`}>${price}</div>
                                     </div>
-                                    <button className="btn btn-primary btn-sm" disabled={!afford} onClick={() => handleBuy({ ...item, price: sticker })}>
-                                        Buy
+                                    <button
+                                        className="btn btn-primary btn-sm"
+                                        disabled={!afford}
+                                        onClick={() => handleBuy({ ...item, price: sticker })}
+                                    >
+                                        {inStock ? 'Buy' : 'Gone'}
                                     </button>
                                 </div>
                             </div>
@@ -213,8 +244,8 @@ const AmpmScreen: React.FC = () => {
                     })}
                 </div>
 
-                {(groupedItems[activeCategory] ?? []).length === 0 && (
-                    <div className="panel p-8 text-center text-[var(--ink-dim)]">Nothing in this section.</div>
+                {shown.length === 0 && (
+                    <div className="panel p-8 text-center text-[var(--ink-dim)]">Nothing on this shelf today.</div>
                 )}
 
                 <p className="label text-center mt-5">
