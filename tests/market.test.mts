@@ -375,6 +375,45 @@ t('history grows by exactly one point a day and stays bounded', () => {
     assert.ok(world['tokyo'].preRunDays >= 0, 'the invented-past marker went negative');
 });
 
+/* ---------------- liquidity ---------------- */
+
+t('every pair is worth something in every city', () => {
+    // The bug this guards against made the game feel broken rather than hard.
+    // Value used to be read off shop *listings*, and a city stocks three to
+    // eight models per tab out of forty-five — so about half of what you were
+    // carrying had no price wherever you stood, the Sell button was disabled,
+    // and in Paris a ten-pair bag had one sellable pair in it. Players read that
+    // as "you cannot sell anything", which is exactly what it was.
+    const world = seedWorld(rng(4242));
+    for (const c of CITIES) {
+        for (const s of SNEAKERS) {
+            const value = localValue(world[c.id], s.id);
+            assert.ok(
+                value !== undefined && value > 0,
+                `${s.id} has no value in ${c.id} — it cannot be sold there`,
+            );
+        }
+    }
+});
+
+t('a city with nothing on the shelf still knows what a shoe is worth', () => {
+    // Supply and valuation are different questions. A city having none in stock
+    // says something about buying, and nothing about whether anyone there would
+    // give you money for the pair on your feet.
+    const world = seedWorld(rng(4243));
+    let citiesWithGaps = 0;
+    for (const c of CITIES) {
+        const listed = new Set(world[c.id].sneakers.map(l => l.sneakerId));
+        const unlisted = SNEAKERS.filter(s => !listed.has(s.id));
+        if (!unlisted.length) continue;
+        citiesWithGaps++;
+        for (const s of unlisted) {
+            assert.ok(localValue(world[c.id], s.id)! > 0, `${c.id} cannot value the unstocked ${s.id}`);
+        }
+    }
+    assert.ok(citiesWithGaps > 0, 'every city stocked every model — the test proves nothing');
+});
+
 /* ---------------- a full run ---------------- */
 
 t('nothing runs away over a thirty-day run', () => {

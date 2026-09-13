@@ -13,7 +13,7 @@ interface ArcadeShellProps {
     running: boolean;
     onFrame: (ctx: CanvasRenderingContext2D, dt: number, elapsed: number) => void;
     onInput: (btn: Btn, down: boolean) => void;
-    actions?: [string, string];
+    actions?: [string, string] | [string, string, string];
     vertical?: boolean;
     onQuit?: () => void;
     quitLabel?: string;

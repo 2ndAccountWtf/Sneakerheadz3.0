@@ -1,10 +1,21 @@
 import { useEffect, useRef, useCallback } from 'react';
 
-export type Btn = 'left' | 'right' | 'up' | 'down' | 'a' | 'b';
+/**
+ * Three action buttons, not two.
+ *
+ * `c` was added for Hoops, which needs the NBA Jam layout — Turbo held, Pass,
+ * Shoot — where the second two swap meaning between offence and defence. Two
+ * buttons could not express it: the game had no way to pass the ball at all,
+ * because the only spare binding was already doing double duty.
+ *
+ * Every other game ignores `c` and is unaffected: it is simply never pressed
+ * when a game declares only two actions.
+ */
+export type Btn = 'left' | 'right' | 'up' | 'down' | 'a' | 'b' | 'c';
 
 export interface InputState {
     left: boolean; right: boolean; up: boolean; down: boolean;
-    a: boolean; b: boolean;
+    a: boolean; b: boolean; c: boolean;
     /** Edge-triggered; read with consume() so a press fires exactly once. */
     pressed: Record<Btn, boolean>;
 }
@@ -16,11 +27,14 @@ const KEYMAP: Record<string, Btn> = {
     ArrowDown: 'down', s: 'down', S: 'down',
     ' ': 'a', j: 'a', J: 'a', z: 'a', Z: 'a', Enter: 'a',
     k: 'b', K: 'b', x: 'b', X: 'b', Shift: 'b',
+    // No modifier keys here: `preventDefault` on Control would swallow the
+    // browser's own shortcuts while a game has focus.
+    l: 'c', L: 'c', c: 'c', C: 'c',
 };
 
 const blank = (): InputState => ({
-    left: false, right: false, up: false, down: false, a: false, b: false,
-    pressed: { left: false, right: false, up: false, down: false, a: false, b: false },
+    left: false, right: false, up: false, down: false, a: false, b: false, c: false,
+    pressed: { left: false, right: false, up: false, down: false, a: false, b: false, c: false },
 });
 
 /**

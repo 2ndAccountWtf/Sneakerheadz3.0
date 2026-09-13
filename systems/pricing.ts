@@ -7,6 +7,7 @@ import type { Player, InventoryItem, Sneaker, GameState } from '../types';
 import type { MarketSignal } from '../types/news';
 import { SNEAKERS } from '../data/sneakers';
 import { buffMultiplier } from './outcomes/outcomeEngine';
+import { localValue } from './market/simulate';
 
 /** Does this signal apply to this sneaker? */
 export function signalMatches(signal: MarketSignal, sneaker: Sneaker): boolean {

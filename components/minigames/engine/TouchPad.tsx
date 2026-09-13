@@ -3,8 +3,12 @@ import type { Btn } from './useInput';
 
 interface TouchPadProps {
     onDown: (btn: Btn, down: boolean) => void;
-    /** Labels for the two action buttons, e.g. ['Shoot', 'Jump']. */
-    actions?: [string, string];
+    /**
+     * Labels for the action buttons, e.g. ['Shoot', 'Jump']. A third is
+     * optional and only rendered when a game asks for one — Hoops needs
+     * Turbo/Pass/Shoot, everything else is happy with two.
+     */
+    actions?: [string, string] | [string, string, string];
     /** Hide the vertical arrows for side-on games that don't use them. */
     vertical?: boolean;
 }
@@ -68,10 +72,27 @@ export const TouchPad: React.FC<TouchPadProps> = ({ onDown, actions = ['A', 'B']
             <div />
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 flex-shrink-0">
-            <Pad btn="b" label={actions[1]} onDown={onDown} primary className="w-16 h-16 rounded-full" />
-            <Pad btn="a" label={actions[0]} onDown={onDown} primary className="w-16 h-16 rounded-full" />
+        {/* Actions. Three buttons have to fit a 390px screen next to a 132px
+            d-pad, so they shrink rather than wrap — a wrapped control cluster
+            pushes the canvas off the top of the viewport. */}
+        <div className={`flex flex-shrink-0 ${actions.length > 2 ? 'gap-1.5' : 'gap-2'}`}>
+            {actions.length > 2 && (
+                <Pad btn="c" label={actions[2]} onDown={onDown} primary className="w-[52px] h-[52px] rounded-full !text-[9px]" />
+            )}
+            <Pad
+                btn="b"
+                label={actions[1]}
+                onDown={onDown}
+                primary
+                className={actions.length > 2 ? 'w-[52px] h-[52px] rounded-full !text-[9px]' : 'w-16 h-16 rounded-full'}
+            />
+            <Pad
+                btn="a"
+                label={actions[0]}
+                onDown={onDown}
+                primary
+                className={actions.length > 2 ? 'w-[52px] h-[52px] rounded-full !text-[9px]' : 'w-16 h-16 rounded-full'}
+            />
         </div>
     </div>
 );
