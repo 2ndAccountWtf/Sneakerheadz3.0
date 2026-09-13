@@ -126,7 +126,7 @@ const TravelScreen: React.FC = () => {
                 <div className="panel p-3 mb-4 flex items-start gap-2 text-sm" style={{ borderColor: clock.color }}>
                     <span className="flex-shrink-0">⏳</span>
                     <span className="leading-snug" style={{ color: clock.color }}>
-                        {clock.daysLeft} flights and the month is gone. Each one is a day you are not selling in.
+                        {clock.daysLeft} {clock.daysLeft === 1 ? 'flight' : 'flights'} and the month is gone. Each one is a day you are not selling in.
                     </span>
                 </div>
             )}

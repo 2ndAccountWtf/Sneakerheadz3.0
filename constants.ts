@@ -28,6 +28,20 @@ export const GAS_THRESHOLDS = {
 } as const;
 
 /** How long the player has to find a toilet, by severity. */
+/**
+ * Cash economics.
+ *
+ * Carrying cash is a real trade-off rather than flavour: sellers discount it
+ * because it is untraceable and instant, and muggers can only take what you
+ * are holding. Everything about the banking layer flows from this tension.
+ */
+export const CASH_DISCOUNT = 0.92;          // pay 8% less when paying in cash
+export const CARD_SURCHARGE = 1.03;         // card transactions cost a little more
+export const CREDIT_DAILY_INTEREST = 0.06;  // and credit costs a lot more
+export const ROBBERY_CASH_FLOOR = 800;      // below this, muggers lose interest
+export const BANK_WITHDRAW_FEE = 4;
+export const STARTING_CREDIT_LIMIT = 2500;
+
 export const EMERGENCY_SECONDS: Record<1 | 2 | 3, number> = { 1: 180, 2: 120, 3: 90 };
 /** Energy burned by a single flight. Running out costs you health instead. */
 export const TRAVEL_ENERGY_COST = 15;
@@ -67,6 +81,9 @@ export const INITIAL_PLAYER: Player = {
     bibiApproval: 25,
     flags: {},
     buffs: [],
+    bank: 0,
+    wallet: { hasCard: true, hasCredit: false, creditOwed: 0, creditLimit: 0 },
+    connections: {},
 };
 
 export const INITIAL_CITY_ID = 'tokyo';

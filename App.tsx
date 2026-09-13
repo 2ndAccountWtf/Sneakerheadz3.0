@@ -15,6 +15,7 @@ import ArcadeScreen from './screens/ArcadeScreen';
 import QuestsScreen from './screens/QuestsScreen';
 import BathroomsScreen from './screens/BathroomsScreen';
 import VenuesScreen from './screens/VenuesScreen';
+import GameOverScreen from './screens/GameOverScreen';
 import { Screen } from './types';
 import Layout from './components/Layout';
 import Notification from './components/Notification';
@@ -61,6 +62,8 @@ const ScreenManager: React.FC = () => {
                 return <BathroomsScreen />;
             case Screen.Venues:
                 return <VenuesScreen />;
+            case Screen.GameOver:
+                return <GameOverScreen />;
             default:
                 return <DashboardScreen />;
         }

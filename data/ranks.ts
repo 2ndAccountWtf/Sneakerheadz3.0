@@ -104,10 +104,11 @@ export interface RunClock {
  */
 export const getRunClock = (day: number, totalDays: number): RunClock => {
     const daysLeft = Math.max(0, totalDays - day);
+    const label = `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
     if (daysLeft <= 0) return { daysLeft: 0, label: 'Final day', color: 'var(--bad)', urgent: true };
-    if (daysLeft <= 3) return { daysLeft, label: `${daysLeft} days left`, color: 'var(--bad)', urgent: true };
-    if (daysLeft <= 7) return { daysLeft, label: `${daysLeft} days left`, color: 'var(--warn)', urgent: true };
-    return { daysLeft, label: `${daysLeft} days left`, color: 'var(--accent)', urgent: false };
+    if (daysLeft <= 3) return { daysLeft, label, color: 'var(--bad)', urgent: true };
+    if (daysLeft <= 7) return { daysLeft, label, color: 'var(--warn)', urgent: true };
+    return { daysLeft, label, color: 'var(--accent)', urgent: false };
 };
 
 /** Theme token for a grade, so the summary and the projection agree on colour. */

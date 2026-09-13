@@ -8,7 +8,7 @@ import type { NewsItem, MarketSignal } from '../types/news';
 import type { MiniGameRequest, OutcomeLogEntry, SideQuest } from '../types/game';
 import {
     INITIAL_PLAYER, INITIAL_CITY_ID, INITIAL_DAY, MAX_INVENTORY_SIZE,
-    MAX_HEALTH, MAX_ENERGY, TRAVEL_ENERGY_COST,
+    MAX_HEALTH, MAX_ENERGY, TRAVEL_ENERGY_COST, TOTAL_DAYS,
 } from '../constants';
 import { CITIES } from '../data/cities';
 import { SNEAKERS } from '../data/sneakers';
@@ -67,7 +67,8 @@ type Action =
     // --- City happenings ---
     | { type: 'ROLL_CITY_EVENT' }
     | { type: 'ACCEPT_CITY_EVENT' }
-    | { type: 'DECLINE_CITY_EVENT' };
+    | { type: 'DECLINE_CITY_EVENT' }
+    | { type: 'RESET_GAME' };
 
 interface GameContextType {
     gameState: GameState;
@@ -858,6 +859,15 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             };
         }
 
+        case 'RESET_GAME':
+            // Fresh markets too — otherwise the new run inherits the old
+            // world's prices and the first day is not a fresh read.
+            return {
+                ...initialState,
+                markets: generateInitialMarkets(),
+                player: { ...INITIAL_PLAYER, storage: STARTER_STORAGE },
+            };
+
         case 'ROLL_CITY_EVENT': {
             // Never interrupt something already on screen.
             if (state.activeCityEvent || state.activeMiniGame || state.activeInteraction || state.activeCutscene) return state;
@@ -1016,6 +1026,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const timer = setTimeout(() => dispatch({ type: 'EMERGENCY_EXPIRED' }), remaining);
         return () => clearTimeout(timer);
     }, [gameState.player.emergency]);
+
+    // The 30-day limit is enforced here rather than inside TRAVEL because naps
+    // and hospital stays also burn days, and every one of those paths should
+    // end the run the same way.
+    useEffect(() => {
+        if (gameState.day > TOTAL_DAYS && gameState.currentScreen !== Screen.GameOver) {
+            dispatch({ type: 'CHANGE_SCREEN', payload: Screen.GameOver });
+        }
+    }, [gameState.day, gameState.currentScreen]);
 
     useEffect(() => {
         if (gameState.notification) {

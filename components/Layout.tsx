@@ -18,6 +18,8 @@ import { Screen } from '../types';
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { gameState } = useGame();
     const isImmersive = gameState.currentScreen === Screen.ShoeStore;
+    // The run is over; there is nowhere else to go.
+    const isEnding = gameState.currentScreen === Screen.GameOver;
 
     return (
         <>
@@ -42,7 +44,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 </main>
             </div>
 
-            <BottomNav />
+            {!isEnding && <BottomNav />}
             <InteractionView />
             <MiniGameHost />
             <CutsceneView />

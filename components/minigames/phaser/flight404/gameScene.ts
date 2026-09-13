@@ -16,7 +16,7 @@ import type * as PhaserNS from 'phaser';
 import { PAL } from '../../engine/palette';
 import type { Weapon } from '../../../../systems/weapons';
 import {
-    VIEW_W, VIEW_H, FLOOR_Y, BIN_FEET, SEAT_PITCH, GRAVITY, JUMP_V, RUN_SPEED,
+    VIEW_W, VIEW_H, FLOOR_Y, BIN_FEET, GRAVITY, JUMP_V, RUN_SPEED,
     PLAYER_H, CROUCH_H, NOTICE_RANGE, DARK_R_BARE, DARK_R_LIT,
     BOSS_WINDOW, BOSS_HP, BOSS_CYCLES,
     SECTIONS, MOOK_HP, GLYPH_KEY_BY_CHAR,
@@ -99,6 +99,13 @@ interface MookData {
 }
 type Mook = BlockFigure & { md: MookData };
 
+/**
+ * Anything that can hold a speech bubble. Mooks, passengers and Yasser keep
+ * their own state records; this is the slice `say()` needs, which is what stops
+ * a hostage being cast to a Mook just to shout a line.
+ */
+interface Speaker { bubble?: Txt; bubbleT: number }
+
 interface HostageData {
     freed: boolean;
     dwell: number;
@@ -177,6 +184,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private pickups!: PhaserNS.Physics.Arcade.Group;
         private trolleys!: PhaserNS.Physics.Arcade.StaticGroup;
         private boss: Boss | null = null;
+        /** Colliders that only exist while Yasser does. */
+        private bossColliders: PhaserNS.Physics.Arcade.Collider[] = [];
 
         // --- scenery
         private layers: PhaserNS.GameObjects.TileSprite[] = [];
@@ -280,6 +289,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.events.once(P.Scenes.Events.SHUTDOWN, () => {
                 this.time.removeAllEvents();
                 this.tweens.killAll();
+                // The physics world outlives a scene restart; this listener
+                // must not.
+                this.physics.world.off('worldbounds', this.onWorldBounds, this);
             });
         }
 
@@ -395,6 +407,15 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.time.removeAllEvents();
             this.tweens.killAll();
 
+            // Each actor owns satellite Images (health pip, keffiyeh, the prop in
+            // his hand, the eyes he becomes in the dark) that are deliberately
+            // NOT children of its Container — they must not inherit the rig's
+            // mirror or its knock-out spin. That means they do not die with it,
+            // so they are torn down explicitly or they hang in the air over the
+            // next cabin.
+            for (const m of this.mooks.getChildren() as Mook[]) this.stripMook(m.md);
+            for (const h of this.hostages.getChildren() as Hostage[]) this.stripHostage(h.hd);
+            this.stripBoss();
             this.mooks.clear(true, true);
             this.hostages.clear(true, true);
             this.trolleys.clear(true, true);
@@ -402,6 +423,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.hostiles.clear(true, true);
             this.melee.clear(true, true);
             this.pickups.clear(true, true);
+            this.bossColliders.forEach(c => c.destroy());
+            this.bossColliders = [];
             this.boss?.destroy();
             this.boss = null;
             this.layers.forEach(l => l.destroy());
@@ -691,7 +714,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             }
             fig.bd.mega = this.add.image(0, 0, TG('mega')).setDisplaySize(12, 12).setDepth(10).setVisible(false);
             this.boss = fig;
-            this.say(fig as unknown as Mook, YASSER_INTRO, 3200, PAL.accent2, 0);
+            // He is a single object rather than a group, so these are
+            // group-vs-sprite overlaps registered as he arrives and destroyed
+            // with him.
+            this.bossColliders = [
+                this.physics.add.overlap(this.shots, fig, this.onShotBoss, undefined, this),
+                this.physics.add.overlap(this.melee, fig, this.onShotBoss, undefined, this),
+            ];
+            this.say(fig.bd, YASSER_INTRO, 3200, PAL.accent2, 0);
             this.time.delayedCall(3000, () => this.bossNext());
             return fig;
         }
@@ -705,8 +735,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
          * strokes an outline, then draws clipped text at a hand-staggered
          * vertical "lane" so three mooks shouting at once are readable.
          */
-        private say(actor: { md?: MookData; bd?: BossData }, line: string, ms: number, color: string, lane = 0) {
-            const d = (actor.md ?? actor.bd)!;
+        private say(d: Speaker, line: string, ms: number, color: string, lane = 0) {
             d.bubble?.destroy();
             const t = this.add.text(0, 0, line.length > 46 ? `${line.slice(0, 45)}…` : line, {
                 fontFamily: MONO, fontSize: '5px', color,
@@ -908,7 +937,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // Whichever brother is hiding behind it is delighted.
             const near = (this.mooks.getChildren() as Mook[])
                 .find(m => m.active && m.md.kind === 'trolley' && Math.abs(m.x - s.x) < 26 && m.md.bubbleT <= 0);
-            if (near) this.say(near, this.rng.pick(CLANK_BARKS), 1200, PAL.warn, near.md.id);
+            if (near) this.say(near.md, this.rng.pick(CLANK_BARKS), 1200, PAL.warn, near.md.id);
             if (!s.sd.pierce) this.killShot(s);
         };
 
@@ -925,13 +954,51 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (!s.sd.pierce) this.killShot(s);
         };
 
+        /**
+         * He is only properly hittable when he stops to shout, or when he has
+         * just run into a bulkhead. The rest of the time the falafel vest eats
+         * most of it — which is what turns the fight into a pattern-reading
+         * exercise instead of a hose.
+         *
+         * `BOSS_WINDOW` caps what he absorbs during any single attack, so he
+         * always takes at least eight windows to beat and the whole routine
+         * plays out. That is the joke; it also kills the degenerate
+         * "hug him and hold fire" strategy.
+         */
+        private onShotBoss = (a: unknown, b: unknown) => {
+            const [s] = sort2<Shot, unknown>(a, b, isShot);
+            const boss = this.boss;
+            if (!s?.active || !s.sd || !boss) return;
+            const bd = boss.bd;
+            if (bd.state === 'intro' || bd.state === 'defeat') return;
+            if (s.sd.hits.has(-99)) return;
+            s.sd.hits.add(-99);
+
+            const mult = bd.state === 'stagger' ? 1.6
+                : bd.state === 'rant' ? 1.4
+                : bd.state === 'charge' ? 0.3
+                : 0.7;
+            const room = BOSS_WINDOW - bd.taken;
+            const dealt = Math.min(s.sd.dmg * mult, Math.max(0, room));
+            bd.taken += dealt;
+            bd.hp -= dealt;
+            bd.hurtT = 0.14;
+            boss.setHurt(true);
+            this.pBoom.emitParticleAt(s.x, s.y, 1);
+            if (dealt <= 0.01 && this.rng.frac() < 0.15) {
+                this.float(boss.x, boss.y - 42, YASSER_VEST_HOLDS, PAL.dim);
+            }
+            if (!s.sd.pierce) this.killShot(s);
+            if (bd.hp <= 0) this.defeatBoss();
+        };
+
         /** Never do this. */
         private onShotHostage = (a: unknown, b: unknown) => {
             const [s, h] = sort2<Shot, Hostage>(a, b, isShot);
             if (!s?.active || !h?.active || !s.sd || !h.hd) return;
             this.hostageHits++;
             this.score -= 150;
-            this.say(h as unknown as Mook, this.rng.pick(WITHERED_LINES), 2600, PAL.bad, 0);
+            this.say(h.hd, this.rng.pick(WITHERED_LINES), 2600, PAL.bad, 0);
             this.float(h.x, FLOOR_Y - 30, '-150', PAL.bad);
             this.cameras.main.shake(120, 0.006);
             this.killShot(s);
@@ -982,7 +1049,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (body(boss) !== b) return;
             if (!left && !right) return;
             // Ran out of cabin. The bulkhead wins.
-            this.say(boss as unknown as Mook, YASSER_WALL, 1800, PAL.accent2, 0);
+            this.say(boss.bd, YASSER_WALL, 1800, PAL.accent2, 0);
             this.cameras.main.shake(340, 0.02);
             this.pStars.emitParticleAt(boss.x, boss.y - 34, 6);
             this.pSplat.emitParticleAt(boss.x, boss.y - 26, 4);
@@ -1057,15 +1124,39 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.dropLoot(m.x);
         }
 
+        private stripMook(md: MookData) {
+            md.bubble?.destroy();
+            md.bin?.destroy();
+            md.prop?.destroy();
+            md.band?.destroy();
+            md.eyes?.destroy();
+            md.barBg?.destroy();
+            md.barFill?.destroy();
+            md.cycle?.remove();
+            md.bubble = undefined;
+        }
+
+        private stripHostage(hd: HostageData) {
+            hd.bubble?.destroy();
+            hd.belt?.destroy();
+            hd.face?.destroy();
+            hd.barBg?.destroy();
+            hd.barFill?.destroy();
+            hd.bubble = undefined;
+        }
+
+        private stripBoss() {
+            const bd = this.boss?.bd;
+            if (!bd) return;
+            bd.bubble?.destroy();
+            bd.mega?.destroy();
+            bd.pips.forEach(p => p.destroy());
+            bd.tape?.forEach(t => t.destroy());
+            bd.bubble = undefined;
+        }
+
         private despawnMook(m: Mook) {
-            m.md.bubble?.destroy();
-            m.md.bin?.destroy();
-            m.md.prop?.destroy();
-            m.md.band?.destroy();
-            m.md.eyes?.destroy();
-            m.md.barBg?.destroy();
-            m.md.barFill?.destroy();
-            m.md.cycle?.remove();
+            this.stripMook(m.md);
             this.mooks.remove(m, true, true);
         }
 
@@ -1145,7 +1236,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                             b.setVelocityX(0);
                             if (adx < NOTICE_RANGE) {
                                 go('run');
-                                this.say(m, this.rng.pick(MOOK_BARKS), 1800, PAL.warn, md.id);
+                                this.say(m.md, this.rng.pick(MOOK_BARKS), 1800, PAL.warn, md.id);
                             }
                             break;
                         case 'run':
@@ -1154,7 +1245,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                             // ~0.65 trips per second of running. Not a soldier.
                             if (md.t > 0.7 && this.rng.frac() < 0.011) {
                                 go('trip');
-                                this.say(m, this.rng.pick(TRIP_BARKS), 1400, PAL.warn, md.id);
+                                this.say(m.md, this.rng.pick(TRIP_BARKS), 1400, PAL.warn, md.id);
                                 this.pStars.emitParticleAt(m.x, m.y - 20, 3);
                                 // PHASER: he actually falls over. One tween.
                                 this.tweens.add({ targets: m.rig, angle: -90 * md.facing, duration: 200, ease: 'Bounce.easeOut' });
@@ -1190,7 +1281,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                         b.setVelocityY(-40);
                         md.hp -= 5;
                         md.bin?.setVisible(false);
-                        this.say(m, THROWER_DISMOUNT, 2000, PAL.warn, md.id);
+                        this.say(m.md, THROWER_DISMOUNT, 2000, PAL.warn, md.id);
                         this.pStars.emitParticleAt(m.x, m.y - 10, 3);
                         go('rest');
                         if (md.hp <= 0) { this.koMook(m, this.player.x); break; }
@@ -1202,7 +1293,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                             md.facing = dx > 0 ? 1 : -1;
                             if (adx < 215 && md.t > 1.1) {
                                 go('aim');
-                                this.say(m, THROWER_AIM, 1100, PAL.warn, md.id);
+                                this.say(m.md, THROWER_AIM, 1100, PAL.warn, md.id);
                             }
                             break;
                         case 'aim':
@@ -1211,7 +1302,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                                 if (this.rng.frac() < 0.14) {
                                     // Straight up. It comes straight back down.
                                     go('bonk');
-                                    this.say(m, this.rng.pick(BONK_BARKS), 1600, PAL.warn, md.id);
+                                    this.say(m.md, this.rng.pick(BONK_BARKS), 1600, PAL.warn, md.id);
                                     this.pStars.emitParticleAt(m.x, m.y - 26, 4);
                                     this.pSplat.emitParticleAt(m.x, m.y - 30, 1);
                                     md.hp -= 6;
@@ -1247,7 +1338,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                         const target = coverX + (dx > 0 ? -7 : 7);
                         b.setVelocityX((target - m.x) * 5);
                         if (md.t > 0.9 && md.bubbleT <= 0 && this.rng.frac() < 0.01) {
-                            this.say(m, this.rng.pick(TROLLEY_BARKS), 1500, PAL.warn, md.id);
+                            this.say(m.md, this.rng.pick(TROLLEY_BARKS), 1500, PAL.warn, md.id);
                         }
                     } else if (md.state === 'pop') {
                         b.setVelocityX(0);
@@ -1258,7 +1349,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                     }
                     if (md.state !== 'panic' && adx < 26) {
                         go('panic');
-                        this.say(m, this.rng.pick(PANIC_BARKS), 2000, PAL.warn, md.id);
+                        this.say(m.md, this.rng.pick(PANIC_BARKS), 2000, PAL.warn, md.id);
                         // He shoves the trolley down the aisle at you and legs it.
                         this.hostileShot(
                             m.x + Math.sign(dx || 1) * 8, FLOOR_Y - 10,
@@ -1345,13 +1436,13 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
             switch (bd.state) {
                 case 'rant': {
-                    this.say(this.boss as unknown as Mook, this.rng.pick(YASSER_RANTS),
+                    this.say(this.boss.bd, this.rng.pick(YASSER_RANTS),
                         bd.phase === 3 ? 1400 : 2200, PAL.accent2, 0);
                     this.time.delayedCall(bd.phase === 3 ? 1500 : 2300, () => this.bossNext());
                     break;
                 }
                 case 'throw': {
-                    this.say(this.boss as unknown as Mook, YASSER_THROW, 1200, PAL.accent2, 0);
+                    this.say(this.boss.bd, YASSER_THROW, 1200, PAL.accent2, 0);
                     const gap = bd.phase === 3 ? 400 : 550;
                     this.time.addEvent({
                         delay: gap, startAt: gap - 350, repeat: 2,
@@ -1363,7 +1454,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                     break;
                 }
                 case 'summon': {
-                    this.say(this.boss as unknown as Mook, YASSER_SUMMON, 2000, PAL.accent2, 0);
+                    this.say(this.boss.bd, YASSER_SUMMON, 2000, PAL.accent2, 0);
                     this.time.delayedCall(600, () => this.bossSummon());
                     this.time.delayedCall(1800, () => {
                         if (this.boss?.bd.state === 'summon') this.bossNext();
@@ -1375,7 +1466,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                     // means he keeps going into the bulkhead, which is the trick.
                     bd.dir = this.player.x > this.boss.x ? 1 : -1;
                     bd.facing = bd.dir;
-                    this.say(this.boss as unknown as Mook, YASSER_CHARGE, 1600, PAL.accent2, 0);
+                    this.say(this.boss.bd, YASSER_CHARGE, 1600, PAL.accent2, 0);
                     // PHASER: a real telegraph — he squashes and flashes before
                     // he goes. The canvas build has no telegraph at all.
                     this.boss.setHurt(false);
@@ -1390,7 +1481,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                     break;
                 }
                 case 'megaphone': {
-                    this.say(this.boss as unknown as Mook, YASSER_MEGA, 2000, PAL.accent2, 0);
+                    this.say(this.boss.bd, YASSER_MEGA, 2000, PAL.accent2, 0);
                     bd.mega?.setVisible(true);
                     this.time.addEvent({
                         delay: 450, startAt: 0, repeat: 2, callback: () => this.bossRing(),
@@ -1410,7 +1501,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             b.bd.shots++;
             if (b.bd.phase === 3 && b.bd.shots === 2) {
                 // Drops one on his own foot.
-                this.say(b as unknown as Mook, YASSER_FOOT, 1600, PAL.accent2, 0);
+                this.say(b.bd, YASSER_FOOT, 1600, PAL.accent2, 0);
                 this.pStars.emitParticleAt(b.x, b.y - 8, 4);
                 b.bd.hp -= 8;
                 this.bossStagger();
@@ -1428,8 +1519,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const len = SECTIONS[this.sectionIdx].length;
             const a = this.spawnMook({ kind: 'charger', x: len - 24 }, []);
             const c = this.spawnMook({ kind: 'thrower', x: len - 40 }, []);
-            this.say(a, SUMMON_ARGUMENT[0], 2200, PAL.warn, a.md.id);
-            this.say(c, SUMMON_ARGUMENT[1], 2200, PAL.warn, c.md.id);
+            this.say(a.md, SUMMON_ARGUMENT[0], 2200, PAL.warn, a.md.id);
+            this.say(c.md, SUMMON_ARGUMENT[1], 2200, PAL.warn, c.md.id);
         }
 
         private bossRing() {
@@ -1474,11 +1565,10 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 body(b).setVelocityX(bd.dir * speed);
                 this.cameras.main.shake(60, 0.004);
                 // Contact is 16 and ends the charge.
-                const pb = body(this.player);
-                if (P.Geom.Intersects.RectangleToRectangle(
-                    body(b).getBounds(new P.Geom.Rectangle()) as PhaserNS.Geom.Rectangle,
-                    pb.getBounds(new P.Geom.Rectangle()) as PhaserNS.Geom.Rectangle,
-                )) {
+                // PHASER: a one-off overlap test with no callback returns a
+                // boolean, so the charge does not need its own collider or its
+                // own AABB.
+                if (this.physics.overlap(b, this.player)) {
                     this.hurtPlayer(16, b.x);
                     this.cameras.main.shake(300, 0.02);
                     this.bossNext();
@@ -1528,14 +1618,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             bus.emit('banner', { big: 'CABIN SECURED', sub: 'HE IS TAPED TO A JUMP SEAT', ms: 4000 });
 
             // Stage 1: the trolley rolls over his foot and he hops, spinning.
-            this.say(b as unknown as Mook, YASSER_DEFEAT[0], 1400, PAL.accent2, 0);
+            this.say(b.bd, YASSER_DEFEAT[0], 1400, PAL.accent2, 0);
             this.tweens.add({ targets: b.rig, angle: 360 * 2, duration: 1200, ease: 'Sine.easeOut' });
             this.tweens.add({ targets: b, x: b.x - 24, duration: 1200 });
 
             // Stage 2: the oxygen masks drop on his head.
             this.time.delayedCall(1200, () => {
                 if (!this.boss) return;
-                this.say(this.boss as unknown as Mook, YASSER_DEFEAT[1], 1400, PAL.accent2, 0);
+                this.say(this.boss.bd, YASSER_DEFEAT[1], 1400, PAL.accent2, 0);
                 for (let i = 0; i < 5; i++) {
                     const mask = this.add.image(this.boss.x + (i - 2) * 13, 40, TG('mask'))
                         .setDisplaySize(9, 9).setDepth(40);
@@ -1551,7 +1641,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.time.delayedCall(2400, () => {
                 const bb = this.boss;
                 if (!bb) return;
-                this.say(bb as unknown as Mook, YASSER_DEFEAT[2], 1800, PAL.accent2, 0);
+                this.say(bb.bd, YASSER_DEFEAT[2], 1800, PAL.accent2, 0);
                 bb.bd.tape = [
                     this.add.image(bb.x, bb.y - 26, T('tape')).setDepth(11),
                     this.add.image(bb.x, bb.y - 16, T('tape')).setDepth(11),
@@ -1570,8 +1660,10 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
         private stepBossDefeat(_dt: number) {
             const b = this.boss!;
-            b.bd.pips.forEach((pip, i) => pip.setVisible(i < b.bd.vest)
-                && pip.setPosition(b.x - 4 + (i % 2) * 8, b.y - 24 + Math.floor(i / 2) * 6));
+            b.bd.pips.forEach((pip, i) => {
+                pip.setVisible(i < b.bd.vest);
+                pip.setPosition(b.x - 4 + (i % 2) * 8, b.y - 24 + Math.floor(i / 2) * 6);
+            });
             b.bd.tape?.forEach((t, i) => t.setPosition(b.x, b.y - 26 + i * 10));
             b.setPose({ armUp: 0.2 });
         }
@@ -1692,7 +1784,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                             targets: h, y: FLOOR_Y - 5, duration: 260,
                             yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
                         });
-                        this.say(h as unknown as Mook, this.rng.pick(FREED_LINES), 3000, PAL.ok, 0);
+                        this.say(h.hd, this.rng.pick(FREED_LINES), 3000, PAL.ok, 0);
                         this.float(h.x, FLOOR_Y - 34, '+250', PAL.accent);
                         continue;
                     }

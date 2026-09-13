@@ -38,7 +38,7 @@ const signed = (n: number) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`;
  * snapshot of its own, so it reports whatever the reducer last left behind.
  */
 const GameOverScreen: React.FC = () => {
-    const { gameState } = useGame();
+    const { gameState, dispatch } = useGame();
     const { player, day } = gameState;
 
     const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
@@ -251,9 +251,9 @@ const GameOverScreen: React.FC = () => {
                         New markets, new rumours, the same hummus.
                     </p>
                 </div>
-                {/* A full reload is the only reset available from a screen: the
-                    reducer has no RESET_GAME action, so there is nothing to dispatch. */}
-                <button className="btn btn-primary w-full sm:w-auto" onClick={() => window.location.reload()}>
+                {/* RESET_GAME re-seeds state and regenerates the markets, so a new run
+                    starts on a fresh world without reloading the page. */}
+                <button className="btn btn-primary w-full sm:w-auto" onClick={() => dispatch({ type: 'RESET_GAME' })}>
                     Run it back
                 </button>
             </section>

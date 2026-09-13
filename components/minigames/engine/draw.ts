@@ -214,8 +214,12 @@ export { PAL, KIT };
  * independently and may not exist at all. Nothing here imports them by name.
  */
 
-
-/** Authored sprite dimensions. Every character grid in data/sprites is this size. */
+/**
+ * Authored CHARACTER dimensions. Every humanoid grid in data/sprites is 16x24.
+ * Props are authored at their own sizes (shoes are 24x12, for instance) — only
+ * `actor()`'s scale maths assumes the character grid, which is why props go
+ * through bakeSprite directly rather than through here.
+ */
 export const SPRITE_W = 16;
 export const SPRITE_H = 24;
 

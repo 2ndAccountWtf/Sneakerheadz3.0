@@ -96,8 +96,11 @@ const DashboardScreen: React.FC = () => {
                     <div className="absolute inset-0 scanlines opacity-40" />
                 </div>
                 <div className="relative p-4 sm:p-6">
-                    <div className="flex items-center gap-2 mb-1.5">
-                        <span className="label" style={{ color: clock.color }}>Day {day} of {TOTAL_DAYS} · {clock.label}</span>
+                    {/* The deadline gets the urgency colour here and the full
+                        count in the run-clock panel below; repeating the words
+                        in both wraps badly on a phone. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
+                        <span className="label" style={{ color: clock.color }}>Day {day} of {TOTAL_DAYS}</span>
                         <span className="w-1 h-1 rounded-full bg-[var(--ink-faint)]" />
                         <span className="label">{rank.icon} {rank.title}</span>
                     </div>
@@ -161,8 +164,8 @@ const DashboardScreen: React.FC = () => {
                 <div className="panel p-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3" style={{ borderColor: clock.color }}>
                     <span className="text-sm leading-snug flex-grow" style={{ color: clock.color }}>
                         {clock.daysLeft === 0
-                            ? 'Day 30. Whatever is still in your bag is worth what it is worth when the books close — sell it or own it.'
-                            : `${clock.daysLeft} days of trading left. Unsold pairs count at market value at the end, not at what you hoped for.`}
+                            ? `Day ${TOTAL_DAYS}. Whatever is still in your bag is worth what it is worth when the books close — sell it or own it.`
+                            : `${clock.daysLeft} ${clock.daysLeft === 1 ? 'day' : 'days'} of trading left. Unsold pairs count at market value at the end, not at what you hoped for.`}
                     </span>
                     <button className="btn btn-sm flex-shrink-0" onClick={() => changeScreen(Screen.Inventory)}>
                         Check the bag

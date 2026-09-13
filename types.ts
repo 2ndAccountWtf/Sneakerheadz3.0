@@ -153,6 +153,53 @@ export interface Player {
     buffs: Buff[];
     /** Set when the chocolate milk was a mistake. Blocks travel until resolved. */
     emergency: BathroomEmergency | null;
+
+    // --- Money, beyond what is in your pocket ---
+    /** Money in the bank. Safe from robbery, useless in a back alley. */
+    bank: number;
+    /** Your cards and what state they are in. */
+    wallet: Wallet;
+    /** How each collector and celebrity feels about you, by npc id. */
+    connections: Record<string, Connection>;
+}
+
+/**
+ * The wallet.
+ *
+ * Carrying cash buys you discounts and gets you robbed; carrying a card keeps
+ * the money safe and leaves you helpless the day you leave it in a jacket.
+ */
+export interface Wallet {
+    /** You have a bank card at all. Lose it and you cannot draw cash. */
+    hasCard: boolean;
+    /** A credit line — buy now, pay interest later. */
+    hasCredit: boolean;
+    /** Outstanding credit balance. Accrues interest daily. */
+    creditOwed: number;
+    /** Credit ceiling, raised by a clean repayment record. */
+    creditLimit: number;
+    /**
+     * Day the card becomes usable again. Left it in a jacket, dropped it in a
+     * bar, a machine ate it — either way you are cash-only until then.
+     */
+    cardBlockedUntilDay?: number;
+    /** Why the card is unusable, shown to the player. */
+    cardBlockedReason?: string;
+}
+
+/** Standing with a single collector or celebrity. */
+export interface Connection {
+    npcId: string;
+    /** -100 to 100. Drives price, trust, and whether they will see you at all. */
+    standing: number;
+    /** Completed deals, which is what earns the better prices. */
+    deals: number;
+    /** They caught you passing a fake. They do not forget. */
+    burnedYou: boolean;
+    /** You caught them paying in counterfeits. Neither do you. */
+    youBurnedThem: boolean;
+    /** Day you last did business, for cooling-off periods. */
+    lastDealDay: number;
 }
 
 /**
@@ -243,6 +290,7 @@ export enum Screen {
     Quests = 'QUESTS',
     Bathrooms = 'BATHROOMS',
     Venues = 'VENUES',
+    GameOver = 'GAME_OVER',
 }
 
 export interface AmpmItem {

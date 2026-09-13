@@ -89,7 +89,7 @@ const StatsScreen: React.FC = () => {
                         <div className="numeric text-2xl leading-none" style={{ color: clock.color }}>
                             {clock.daysLeft === 0 ? 'LAST' : clock.daysLeft}
                         </div>
-                        <div className="label">{clock.daysLeft === 0 ? 'day' : 'days left'}</div>
+                        <div className="label">{clock.daysLeft === 0 ? 'day' : clock.daysLeft === 1 ? 'day left' : 'days left'}</div>
                     </div>
                 </div>
                 <div className="meter h-2 mb-3">

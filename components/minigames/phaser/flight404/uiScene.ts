@@ -24,7 +24,7 @@
 import type * as PhaserNS from 'phaser';
 import { PAL } from '../../engine/palette';
 import { VIEW_W, SECTIONS } from './content';
-import { T, TG, C, MONO, DISPLAY, hexNum } from './textures';
+import { T, TG, C, MONO, DISPLAY } from './textures';
 
 export interface HudPayload {
     hp: number;
@@ -62,7 +62,6 @@ export function makeUIScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmitte
         private bossPhase!: PhaserNS.GameObjects.Text;
         private bannerBig!: PhaserNS.GameObjects.Text;
         private bannerSub!: PhaserNS.GameObjects.Text;
-        private bannerTween?: PhaserNS.Tweens.Tween | PhaserNS.Tweens.TweenChain;
 
         constructor() {
             super({ key: UI_KEY });
@@ -157,31 +156,31 @@ export function makeUIScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmitte
         };
 
         private onBanner = ({ big, sub, ms = 2600 }: { big: string; sub: string; ms?: number }) => {
-            this.bannerTween?.remove();
-            this.bannerBig.setText(big).setAlpha(1).setScale(0.7);
-            this.bannerSub.setText(sub).setAlpha(1);
-            // Punch in, hold, fade out — three lines instead of a hand-rolled
-            // timer plus a per-frame globalAlpha ramp.
-            this.bannerTween = this.tweens.chain({
+            // `tweens.chain()` reads better here, but removing a chain that has
+            // already completed throws inside Phaser
+            // (`TweenManager.remove -> Array.Remove -> null.indexOf`), and a
+            // banner is re-fired every time a section changes. Two plain tweens
+            // killed by target are the version that cannot crash.
+            this.tweens.killTweensOf(this.bannerBig);
+            this.tweens.killTweensOf(this.bannerSub);
+
+            this.bannerBig.setText(big).setColor(PAL.legend).setY(76).setAlpha(1).setScale(0.7);
+            this.bannerSub.setText(sub).setAlpha(1).setScale(1);
+
+            // Punch in, hold, fade out.
+            this.tweens.add({ targets: this.bannerBig, scale: 1, duration: 180, ease: 'Back.easeOut' });
+            this.tweens.add({
                 targets: [this.bannerBig, this.bannerSub],
-                tweens: [
-                    { scale: 1, duration: 180, ease: 'Back.easeOut' },
-                    { alpha: 1, duration: Math.max(0, ms - 500) },
-                    { alpha: 0, duration: 320 },
-                ],
+                alpha: 0, duration: 320, delay: Math.max(0, ms - 320), ease: 'Quad.easeIn',
             });
-            // The sub-line must not inherit the big line's scale punch.
-            this.bannerSub.setScale(1);
         };
 
         /** Big red centred word, used for the loss. */
         showLoss(str: string) {
-            this.bannerBig.setText(str).setColor(PAL.bad).setAlpha(1).setScale(1);
-            this.bannerBig.setY(100);
+            this.tweens.killTweensOf(this.bannerBig);
+            this.tweens.killTweensOf(this.bannerSub);
+            this.bannerBig.setText(str).setColor(PAL.bad).setAlpha(1).setScale(1).setY(100);
             this.bannerSub.setAlpha(0);
         }
     };
 }
-
-/** Re-exported so gameScene can tint without re-deriving hex numbers. */
-export const uiColors = { warn: hexNum(PAL.warn) };
