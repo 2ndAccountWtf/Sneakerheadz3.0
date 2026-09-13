@@ -31,6 +31,13 @@ export interface BakeOptions {
     flip?: boolean;
     /** Draw a 1px outline around the silhouette in this palette char. */
     outline?: string;
+    /**
+     * Names the specific look being baked — a sneaker colourway, usually.
+     * Only the art registry reads it: hand-drawn art is looked up as
+     * `<id>-<variant>` first, so a delivered PNG can replace one colourway
+     * without claiming every other colourway on the same silhouette.
+     */
+    variant?: string;
 }
 
 export interface BakedSprite {

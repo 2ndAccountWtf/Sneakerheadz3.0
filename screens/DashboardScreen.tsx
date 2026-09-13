@@ -7,6 +7,7 @@ import { getCredRank, TOTAL_DAYS, INITIAL_PLAYER_CASH, TRAVEL_ENERGY_COST } from
 import { getBagValue } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
 import { venuesIn, isVenueOpen } from '../data/venues';
+import { collectorsIn } from '../systems/collectors';
 import { getRunClock } from '../data/ranks';
 import Img from '../components/Img';
 
@@ -70,6 +71,22 @@ const DashboardScreen: React.FC = () => {
         () => venuesIn(currentCityId).filter(v => isVenueOpen(v, day)).length,
         [currentCityId, day],
     );
+
+    const collectorCount = useMemo(
+        () => collectorsIn(currentCityId, player).length,
+        [currentCityId, player],
+    );
+
+    // The bank tile earns its badge two ways: a debt you are being charged
+    // interest on, or a card you cannot currently use. Both are things you want
+    // to find out from the city screen rather than at a till.
+    const bankBadge = player.wallet.cardBlockedUntilDay && player.wallet.cardBlockedUntilDay > day
+        ? 'Card blocked'
+        : player.wallet.creditOwed > 0
+            ? `Owe $${Math.round(player.wallet.creditOwed).toLocaleString()}`
+            : player.bank > 0
+                ? `$${Math.round(player.bank).toLocaleString()} banked`
+                : undefined;
 
     // Give the arrival notification a beat to clear, then see whether anything
     // is happening. Keyed on city+day so it fires once per arrival, not on
@@ -266,6 +283,22 @@ const DashboardScreen: React.FC = () => {
                     icon="🗺"
                     onClick={() => changeScreen(Screen.Quests)}
                     badge={quests.length ? `${quests.length} active` : undefined}
+                />
+                <Tile
+                    label="Collectors"
+                    sublabel="Private sales. No receipts, no protection"
+                    icon="🤝"
+                    accent="var(--accent-2)"
+                    onClick={() => changeScreen(Screen.Collectors)}
+                    badge={collectorCount ? `${collectorCount} buying` : 'Nobody here'}
+                />
+                <Tile
+                    label="Bank"
+                    sublabel="Cash gets you robbed, cards get left behind"
+                    icon="🏦"
+                    accent="var(--ok)"
+                    onClick={() => changeScreen(Screen.Bank)}
+                    badge={bankBadge}
                 />
                 <Tile
                     label="SoleNet"

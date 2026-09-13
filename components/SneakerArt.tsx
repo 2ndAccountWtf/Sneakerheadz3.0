@@ -124,7 +124,10 @@ export const SneakerArt: React.FC<SneakerArtProps> = ({
 
         // Integer upscale only — a fractional one would smear the pixel grid.
         const scale = Math.max(1, Math.floor(size / Math.max(w, h)));
-        const baked = bakeSprite(def, { scale, swap });
+        // `variant` is the sneaker's own id, so a hand-drawn
+        // `shoe-lowtop-panda.png` can replace one colourway without claiming
+        // every other shoe built on the same silhouette.
+        const baked = bakeSprite(def, { scale, swap, variant: sneakerId });
 
         canvas.width = baked.frameWidth;
         canvas.height = baked.frameHeight;

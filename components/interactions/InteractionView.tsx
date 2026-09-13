@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../hooks/useGame';
+import { refusesYou } from '../../systems/npc/reactions';
+import { callback } from '../../systems/npc/memory';
 import { findInteractionData } from '../../data/npcs';
 import { ScenarioNode } from '../../types/interactions';
 import Img from '../Img';
@@ -73,11 +75,30 @@ const InteractionView: React.FC = () => {
             return;
         }
         let line = node.npcLine;
-        if (line === '{{random_greeting}}' && npc && 'dialogue' in npc && npc.dialogue) {
-            const allLines = Object.values(npc.dialogue).flat();
-            line = allLines.length ? allLines[Math.floor(Math.random() * allLines.length)] : '...';
+        if (line === '{{random_greeting}}') {
+            // The authored pool stays the base, because that is where the
+            // character's actual voice lives — a generic attitude tier would
+            // flatten Bro Jogan and ADC into the same person. What memory adds
+            // is a second sentence: the callback to whatever passed between you
+            // ("You still owe me five dollars. Separately from the OTHER five
+            // dollars."), and, if they have stopped dealing with you entirely,
+            // why.
+            let base = '...';
+            if (npc && 'dialogue' in npc && npc.dialogue) {
+                const allLines = Object.values(npc.dialogue).flat();
+                if (allLines.length) base = allLines[Math.floor(Math.random() * allLines.length)];
+            }
+
+            const memory = callback(gameState.player, npcId);
+            const refusal = refusesYou(gameState.player, npcId);
+            line = [
+                base,
+                memory,
+                refusal.refuses && refusal.reason !== memory ? refusal.reason : null,
+            ].filter(Boolean).join(' ');
         }
         setResolvedLine(line);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [node, npcId, scenarioId, currentNodeId]);
 
     const { displayedText, isComplete, complete } = useTypewriter(resolvedLine || '...', 22);

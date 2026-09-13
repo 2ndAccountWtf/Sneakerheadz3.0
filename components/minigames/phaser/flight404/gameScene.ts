@@ -217,6 +217,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // --- run state
         private sectionIdx = 0;
         private doorOpen = false;
+        /** Set while the camera is fading between cabins. */
+        private moving = false;
         private freed = 0;
         private hostageHits = 0;
         private kos = 0;
@@ -285,7 +287,6 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             cam.startFollow(this.player, true, 0.14, 0.14, 0, -18);
             cam.setDeadzone(48, VIEW_H);
 
-            (globalThis as unknown as Record<string, unknown>).__F404_DEBUG = this;
             this.events.once(P.Scenes.Events.SHUTDOWN, () => {
                 this.time.removeAllEvents();
                 this.tweens.killAll();
@@ -363,9 +364,17 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
          *
          * The canvas build's `stepShots` is ~130 lines of nested loops that
          * sweep each projectile's box against every mook, then the boss, then
-         * every passenger, with a hand-written `overlap()` AABB helper and a
-         * hand-written swept-box because a fast bullet would otherwise tunnel.
-         * All of it collapses into these seven declarations plus small handlers.
+         * every passenger, with a hand-written `overlap()` AABB helper. All of
+         * it collapses into these seven declarations plus small handlers, and
+         * the broadphase stops it being O(shots x actors).
+         *
+         * One thing the canvas build has that this does not: it sweeps the box
+         * a projectile covered *between* frames, so a point-blank shot cannot
+         * start on the far side of its target. Arcade Physics has no continuous
+         * detection at all — it tests discrete positions — so projectile speeds
+         * here have to stay under about 6px a frame. Nothing in
+         * systems/weapons.ts exceeds that (the Dog Launcher's 300px/s is 5), but
+         * it is a real ceiling the hand-rolled engine does not have.
          */
         private buildColliders() {
             this.physics.add.overlap(this.shots, this.mooks, this.onShotMook, undefined, this);
@@ -375,24 +384,11 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.physics.add.overlap(this.player, this.pickups, this.onPickup, undefined, this);
             this.physics.add.overlap(this.player, this.mooks, this.onMookTouch, this.mookCanTouch, this);
 
-            /**
-             * PHASER: the drinks trolley is *real cover*, expressed as geometry
-             * rather than as a special case.
-             *
-             * A parked trolley is a 22x22 static body on the carpet. Flat shots
-             * are in `this.shots`, which collides with it — they clank off. A
-             * lobbed weapon (bureka, choc milk, slushie) is in the same group
-             * but arcs over the top of a 22px box and lands behind it, so the
-             * physics decides whether cover worked. Melee lives in a separate
-             * group with no trolley collider, so a baguette reaches over.
-             *
-             * The canvas build has to encode all three cases as a predicate
-             * (`behindCover && !(s.kind === 'melee' || s.vy > 30)`), which means
-             * a lob that is still rising counts as blocked and a lob that is
-             * barely falling counts as clear, regardless of where it actually
-             * is. Here it is just where it actually is.
-             */
-            this.physics.add.collider(this.shots, this.trolleys, this.onShotTrolley, undefined, this);
+            // The drinks trolley is real cover, and note that melee is a
+            // separate group with no trolley collider — which is the entire
+            // implementation of "a baguette reaches over the top". See
+            // `onShotTrolley` for what geometry did and did not solve here.
+            this.physics.add.overlap(this.shots, this.trolleys, this.onShotTrolley, undefined, this);
         }
 
         // ==================================================================
@@ -449,9 +445,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 const img = this.trolleys.create(tx, FLOOR_Y, T('trolley')) as Img;
                 img.setOrigin(0.5, 1).setDepth(12);
                 const sb = img.body as unknown as PhaserNS.Physics.Arcade.StaticBody;
-                sb.setSize(22, 22);
-                sb.position.set(tx - 11, FLOOR_Y - 24);
-                sb.updateCenter();
+                // Static bodies live in a separate R-tree that the broadphase
+                // searches. Writing `body.position` directly moves the body but
+                // NOT its entry in that tree, so the collider silently never
+                // fires — the trolley looks solid and stops nothing. Only the
+                // methods that re-insert (`updateFromGameObject`, `setSize`)
+                // are safe. Another quiet one.
+                sb.updateFromGameObject();
+                sb.setSize(22, 22, true);
             }
 
             for (const m of def.mooks) this.spawnMook(m, def.trolleys);
@@ -929,16 +930,44 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // ==================================================================
         // Collision handlers
         // ==================================================================
+        /**
+         * The drinks trolley as cover — and the one place in this port where
+         * physics got me most of the way and not all of it.
+         *
+         * Flat shots and melee fall out of the geometry for free: the trolley is
+         * a 22px static body on the carpet, `this.shots` overlaps it, and
+         * `this.melee` simply is not in this collider, so a baguette reaches
+         * over the top. No predicate, no special case, no "is this weapon a
+         * melee weapon" check in the damage path.
+         *
+         * The third case does not work geometrically, and it is worth being
+         * precise about why: a parabola that passes above a 22px box cannot
+         * also be low enough to hit a 24px man standing 7px behind it. Real
+         * physics says the lob sails over both. So a descending projectile is
+         * waved through here on its velocity — which is the same rule the
+         * canvas build uses, except that build tests `vy` at the moment the
+         * shot overlaps the *mook*, whereas this tests the real velocity at the
+         * real contact point with the *trolley*. Better information, same idea.
+         *
+         * With `arcs` loft at -58 against 300 gravity, "descending" begins about
+         * 60px out, so lobbing over a cart is a ranging skill with a usable
+         * band rather than a pixel-perfect trick.
+         */
         private onShotTrolley = (a: unknown, b: unknown) => {
             const [s] = sort2<Shot, unknown>(a, b, isShot);
             if (!s?.active || !s.sd) return;
+            if (body(s).velocity.y > 30) return;   // came down over the top
             this.float(s.x, s.y - 10, 'CLANK', PAL.dim);
             this.pBoom.emitParticleAt(s.x, s.y, 1);
             // Whichever brother is hiding behind it is delighted.
             const near = (this.mooks.getChildren() as Mook[])
                 .find(m => m.active && m.md.kind === 'trolley' && Math.abs(m.x - s.x) < 26 && m.md.bubbleT <= 0);
             if (near) this.say(near.md, this.rng.pick(CLANK_BARKS), 1200, PAL.warn, near.md.id);
-            if (!s.sd.pierce) this.killShot(s);
+            // Even a piercing weapon stops here: `piercing` means it passes
+            // through *people*, and the trolley is a catering cart. Overlap
+            // rather than collide, so the engine does not also try to separate
+            // the two and bend the projectile's path.
+            this.killShot(s);
         };
 
         private onShotMook = (a: unknown, b: unknown) => {
@@ -1916,7 +1945,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         /** Room clearing: the forward door stays sealed while anyone is up. */
         private stepDoor() {
             const def = SECTIONS[this.sectionIdx];
-            if (def.boss) return;
+            // `moving` is not optional bookkeeping: without it the frame after
+            // the transition starts sees `standing() === 0` again, re-unlocks
+            // the door, re-fires the fade, and the camera restarts its fade
+            // forever without ever completing — the game just stops advancing,
+            // with no error anywhere.
+            if (def.boss || this.moving) return;
             if (!this.doorOpen && this.standing() === 0) {
                 this.doorOpen = true;
                 this.doorLock?.destroy();
@@ -1933,13 +1967,17 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             }
             if (this.doorOpen && this.player.x > def.length - 18) {
                 if (this.sectionIdx + 1 < SECTIONS.length) {
-                    // PHASER: fade out, swap the level, fade back in — the
-                    // camera owns the transition.
+                    // PHASER: fade out, swap the cabin, fade back in — the
+                    // camera owns the transition, and because the HUD is a
+                    // separate scene with its own camera it stays lit through
+                    // the black.
                     const next = this.sectionIdx + 1;
+                    this.moving = true;
                     this.doorOpen = false;
                     this.cameras.main.fadeOut(220, 4, 6, 10);
                     this.cameras.main.once(P.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
                         this.loadSection(next);
+                        this.moving = false;
                         this.cameras.main.fadeIn(260, 4, 6, 10);
                     });
                 }

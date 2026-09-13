@@ -27,6 +27,13 @@ import { rollDigestiveOutcome, attemptBathroom, disasterOutcomes, emergencyHeadl
 import { rollGasIncident, settleGas } from '../systems/digestion/gas';
 import { bathroomsIn } from '../data/bathrooms';
 import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
+import { remember } from '../systems/npc/memory';
+import { reputationSpread } from '../systems/npc/reactions';
+import { seedWorld, advanceWorld, applyTradePressure } from '../systems/market/simulate';
+import { banksIn } from '../data/banks';
+import {
+    deposit, withdraw, repayCredit, openCreditLine, accrueInterest, type BankResult,
+} from '../systems/banking';
 import { MAX_SOFT_STAT } from '../constants';
 
 // Game Actions
@@ -64,6 +71,12 @@ type Action =
     | { type: 'USE_BATHROOM'; payload: { bathroomId: string } }
     | { type: 'EMERGENCY_EXPIRED' }
     | { type: 'GAS_INCIDENT'; payload: { npcId: string } }
+    // --- Money ---
+    | { type: 'RESOLVE_COLLECTOR_DEAL'; payload: { player: Player; log: OutcomeLogEntry[] } }
+    | { type: 'BANK_DEPOSIT'; payload: { amount: number } }
+    | { type: 'BANK_WITHDRAW'; payload: { bankId: string; amount: number } }
+    | { type: 'BANK_REPAY_CREDIT'; payload: { amount: number } }
+    | { type: 'BANK_OPEN_CREDIT_LINE' }
     // --- City happenings ---
     | { type: 'ROLL_CITY_EVENT' }
     | { type: 'ACCEPT_CITY_EVENT' }
@@ -90,60 +103,30 @@ interface GameContextType {
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
-const generateInitialMarkets = (): Record<string, CityMarket> => {
-    const markets: Record<string, CityMarket> = {};
+/**
+ * The world is built once, at new game, and then simulated forward — see
+ * `systems/market/simulate.ts`. It used to be re-rolled from scratch on every
+ * travel, which meant no price the player learned was worth remembering and
+ * every market signal in the game was writing to a variable nobody read.
+ */
+const generateInitialMarkets = (): Record<string, CityMarket> => seedWorld();
 
-    CITIES.forEach(city => {
-        const cityStores = STORES_BY_CITY[city.id] || [];
-        const sneakers: MarketSneaker[] = [];
-
-        cityStores.forEach(storeInfo => {
-            const config = STORE_CONFIGS[storeInfo.id];
-            if (!config) return;
-
-            config.tabs.forEach(tab => {
-                if (tab.id === 'trade' || tab.id === 'consignment') return;
-
-                const isFakeTab = tab.inventoryGroupRef.includes('fakes') || tab.inventoryGroupRef.includes('backroom');
-
-                const numModels = Math.floor(Math.random() * 6) + 3; // 3-8 items per tab
-                const tabModels = [...SNEAKERS].sort(() => 0.5 - Math.random()).slice(0, numModels);
-
-                tabModels.forEach(sneaker => {
-                    const priceVariance = (Math.random() - 0.5) * sneaker.volatility * sneaker.basePrice;
-                    let finalPrice = Math.round(sneaker.basePrice + priceVariance);
-
-                    if (isFakeTab) {
-                        finalPrice = Math.round(finalPrice * 0.15); // 15% of real value
-                    }
-
-                    const quantity = Math.floor(Math.random() * 5) + 1;
-
-                    sneakers.push({
-                        sneakerId: sneaker.id,
-                        price: Math.max(1, finalPrice),
-                        quantity,
-                        group: tab.inventoryGroupRef,
-                        isFake: isFakeTab,
-                    });
-                });
-            });
-        });
-
-        if (sneakers.length === 0) {
-            const storeModels = [...SNEAKERS].sort(() => 0.5 - Math.random()).slice(0, 10);
-            storeModels.forEach(s => sneakers.push({
-                sneakerId: s.id,
-                price: s.basePrice,
-                quantity: 5,
-                group: 'general',
-            }));
-        }
-
-        markets[city.id] = { cityId: city.id, sneakers };
-    });
-    return markets;
-};
+/**
+ * Folds a banking receipt into state. The first line of the log becomes the
+ * toast, because every one of these is a single transaction the player just
+ * asked for and wants confirmed.
+ */
+function withBankResult(state: GameState, result: BankResult): GameState {
+    const headline = result.log[0];
+    return {
+        ...state,
+        player: result.player,
+        outcomeLog: result.log,
+        notification: headline
+            ? { message: headline.text, type: result.ok ? 'success' : 'error' }
+            : state.notification,
+    };
+}
 
 /** Shared helper: fold an ApplyResult back into game state. */
 function withOutcomes(
@@ -195,12 +178,21 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             }
 
             const newDay = state.day + 1;
-            const newMarkets = generateInitialMarkets();
+            // Every city moves overnight, not just the one being flown to: the
+            // deal spotted in Tokyo keeps running while the player is in Paris
+            // deciding whether it is worth going back for.
+            const newMarkets = advanceWorld(state.markets);
             const cityName = CITIES.find(c => c.id === action.payload.cityId)?.name;
 
             // Signals and buffs age out on the day boundary.
             const activeSignals = state.activeMarketSignals.filter(signal => signal.expiresOnDay > newDay);
             let player = expireBuffs(state.player, newDay);
+            // Credit compounds nightly. `accrueInterest` returns a receipt, not
+            // a player, because an over-limit fee is something the player has to
+            // be told about.
+            const interestResult = accrueInterest(player);
+            player = interestResult.player;
+            const interestLog = interestResult.log;
 
             // Overnight the body resets somewhat, and you get grubbier.
             player = {
@@ -239,7 +231,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 markets: newMarkets,
                 activeMarketSignals: activeSignals,
                 pendingTravelEvent: null,
-                outcomeLog: [],
+                outcomeLog: interestLog,
             };
 
             // Bibi gift scenes and the ultra-rare collab outrank ordinary travel chaos.
@@ -347,6 +339,14 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const updatedSneakers = [...currentMarket.sneakers];
             updatedSneakers[sneakerIndex] = { ...sneakerInMarket, quantity: sneakerInMarket.quantity - quantity };
 
+            // Competing for stock moves the local price. Buying out a city is a
+            // one-time trick, not a repeatable loop — and the market heals a
+            // little every day you are somewhere else.
+            const pressured = applyTradePressure(
+                { ...currentMarket, sneakers: updatedSneakers },
+                sneakerId, quantity, 1,
+            );
+
             const sneakerName = SNEAKERS.find(s => s.id === sneakerId)?.name;
 
             return {
@@ -354,7 +354,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 player: newPlayer,
                 markets: {
                     ...state.markets,
-                    [state.currentCityId]: { ...currentMarket, sneakers: updatedSneakers },
+                    [state.currentCityId]: pressured,
                 },
                 notification: {
                     message: quantity > 1 ? `Purchased ${quantity}x ${sneakerName}!` : `Purchased ${sneakerName}!`,
@@ -377,15 +377,28 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 const detectionChance = Math.min(0.95, securityLevel * 0.4 + state.player.heat / 400);
                 if (Math.random() < detectionChance) {
                     const fine = Math.round(price * 0.2);
+                    // Getting caught in a shop is not a private embarrassment.
+                    // The story travels: the store's own clerk remembers it, and
+                    // `reputationSpread` cools everyone allied with them too, so
+                    // a fake sale in Tokyo can close a door in Chicago.
+                    // The store's manager is the one who ran the check, so they
+                    // are the one who remembers your face.
+                    const clerkId = STORE_CONFIGS[state.currentStoreId ?? '']?.npcs?.staff?.managerRef;
+                    let burned = state.player;
+                    if (clerkId) {
+                        burned = remember(burned, clerkId, 'caught-their-fake', state.day, sneakerName);
+                        burned = reputationSpread(burned, clerkId, -18);
+                    }
+
                     return {
                         ...state,
                         player: {
-                            ...state.player,
-                            cash: Math.max(0, state.player.cash - fine),
-                            inventory: state.player.inventory.filter(item => item.instanceId !== instanceId),
-                            heat: Math.min(100, state.player.heat + 15),
-                            streetCred: Math.max(0, state.player.streetCred - 3),
-                            stats: { ...state.player.stats, timesRobbed: state.player.stats.timesRobbed + 1 },
+                            ...burned,
+                            cash: Math.max(0, burned.cash - fine),
+                            inventory: burned.inventory.filter(item => item.instanceId !== instanceId),
+                            heat: Math.min(100, burned.heat + 15),
+                            streetCred: Math.max(0, burned.streetCred - 3),
+                            stats: { ...burned.stats, timesRobbed: burned.stats.timesRobbed + 1 },
                         },
                         notification: {
                             message: `AUTHENTICATION FAILED! They confiscated your fake ${sneakerName} and fined you $${fine}.`,
@@ -399,8 +412,16 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // Big flips build a name for you.
             const credGain = profit > 500 ? 3 : profit > 150 ? 1 : 0;
 
+            // You are the supply now. Dumping into one city walks its price
+            // down, so a fat margin thins as you work it.
+            const sellMarket = state.markets[state.currentCityId];
+            const pressuredMarkets = sellMarket
+                ? { ...state.markets, [state.currentCityId]: applyTradePressure(sellMarket, itemToSell.sneakerId, 1, -1) }
+                : state.markets;
+
             return {
                 ...state,
+                markets: pressuredMarkets,
                 player: {
                     ...state.player,
                     cash: state.player.cash + price,
@@ -677,17 +698,27 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const stripped = outcomes.map(o => ({ ...o, condition: undefined }));
             const next = withOutcomes(state, stripped, req.title);
 
+            // Losing to Gutter Gabe at darts should still be something Gabe
+            // brings up nine days later. `opponentNpcId` is set by every
+            // challenge that comes from a real NPC (see systems/events/cityEvents);
+            // the Arcade's own practice games have none, and correctly leave no
+            // memory behind.
+            const opponentNpcId: string | undefined = req.config?.opponentNpcId;
+            const remembered = opponentNpcId
+                ? remember(next.player, opponentNpcId, won ? 'beat-them' : 'lost-to-them', state.day, req.title)
+                : next.player;
+
             const stats = {
-                ...next.player.stats,
-                minigamesPlayed: next.player.stats.minigamesPlayed + 1,
-                fightsWon: next.player.stats.fightsWon + (req.game === 'street-brawl' && won ? 1 : 0),
-                fightsLost: next.player.stats.fightsLost + (req.game === 'street-brawl' && !won ? 1 : 0),
-                boxesOpened: next.player.stats.boxesOpened + (req.game === 'mystery-box' ? 1 : 0),
+                ...remembered.stats,
+                minigamesPlayed: remembered.stats.minigamesPlayed + 1,
+                fightsWon: remembered.stats.fightsWon + (req.game === 'street-brawl' && won ? 1 : 0),
+                fightsLost: remembered.stats.fightsLost + (req.game === 'street-brawl' && !won ? 1 : 0),
+                boxesOpened: remembered.stats.boxesOpened + (req.game === 'mystery-box' ? 1 : 0),
             };
 
             return {
                 ...next,
-                player: { ...next.player, stats },
+                player: { ...remembered, stats },
                 activeMiniGame: null,
                 notification: {
                     message: action.payload.note ?? (won ? 'You won.' : 'You lost.'),
@@ -844,13 +875,17 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const incident = rollGasIncident(state.player, action.payload.npcId);
             if (!incident) return state;
 
+            // They remember. That is the entire joke: the reaction lands now,
+            // and the callback lands a week later in the middle of a negotiation.
+            const witness = remember(state.player, action.payload.npcId, 'farted-near-them', state.day);
+
             return {
                 ...state,
                 player: {
-                    ...state.player,
+                    ...witness,
                     gas: Math.max(0, state.player.gas - incident.gasRelieved),
                     streetCred: Math.max(0, state.player.streetCred + incident.credChange),
-                    stats: { ...state.player.stats, timesFarted: state.player.stats.timesFarted + 1 },
+                    stats: { ...witness.stats, timesFarted: witness.stats.timesFarted + 1 },
                 },
                 outcomeLog: [
                     ...state.outcomeLog,
@@ -867,6 +902,51 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 markets: generateInitialMarkets(),
                 player: { ...INITIAL_PLAYER, storage: STARTER_STORAGE },
             };
+
+        /**
+         * Banking. All four of these are the same shape: a pure function in
+         * `systems/banking.ts` returns a receipt, and the reducer's only job is
+         * to decide what the player sees. Keeping the arithmetic out here is
+         * what let the daily-interest and over-limit rules be tested without a
+         * reducer at all.
+         */
+        /**
+         * A private sale off the books. `systems/collectors.ts#resolveDeal`
+         * already produced the whole new player — cash, inventory, connections,
+         * heat, cred and Bibi's approval — because the outcome of a collector
+         * deal depends on the negotiation history the screen is holding, not on
+         * anything in state. So this is a hand-off, the same shape as
+         * USE_BATHROOM.
+         */
+        case 'RESOLVE_COLLECTOR_DEAL':
+            return {
+                ...state,
+                player: action.payload.player,
+                outcomeLog: action.payload.log,
+                notification: action.payload.log[0]
+                    ? { message: action.payload.log[0].text, type: action.payload.log[0].tone === 'bad' ? 'error' : 'success' }
+                    : state.notification,
+            };
+
+        case 'BANK_DEPOSIT':
+            return withBankResult(state, deposit(state.player, action.payload.amount));
+
+        case 'BANK_WITHDRAW': {
+            const bank = banksIn(state.currentCityId).find(b => b.id === action.payload.bankId);
+            if (!bank) {
+                return { ...state, notification: { message: 'No such machine in this city.', type: 'error' } };
+            }
+            return withBankResult(
+                state,
+                withdraw(state.player, action.payload.amount, bank, state.day),
+            );
+        }
+
+        case 'BANK_REPAY_CREDIT':
+            return withBankResult(state, repayCredit(state.player, action.payload.amount));
+
+        case 'BANK_OPEN_CREDIT_LINE':
+            return withBankResult(state, openCreditLine(state.player));
 
         case 'ROLL_CITY_EVENT': {
             // Never interrupt something already on screen.

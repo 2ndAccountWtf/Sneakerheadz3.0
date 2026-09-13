@@ -233,9 +233,25 @@ export interface MarketSneaker {
     isFake?: boolean;
 }
 
+/**
+ * A city's running opinion of one model's price, as a multiplier on the
+ * model's base price. Persisted across days — see `systems/market/simulate.ts`
+ * for why a market that forgets everything overnight cannot be traded.
+ */
+export interface PriceIndex {
+    /** Today's multiplier against base price. */
+    value: number;
+    /** Last night's move, carried forward so trends last a few days. */
+    momentum: number;
+    /** Yesterday's value, so the UI can show a delta without a history array. */
+    previous: number;
+}
+
 export interface CityMarket {
     cityId: string;
     sneakers: MarketSneaker[];
+    /** Per-model price index, keyed by sneaker id. */
+    index: Record<string, PriceIndex>;
 }
 
 export interface GameState {
@@ -290,6 +306,8 @@ export enum Screen {
     Quests = 'QUESTS',
     Bathrooms = 'BATHROOMS',
     Venues = 'VENUES',
+    Bank = 'BANK',
+    Collectors = 'COLLECTORS',
     GameOver = 'GAME_OVER',
 }
 

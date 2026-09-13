@@ -12,6 +12,7 @@
 import type { SpriteDef, BakeOptions, BakedSprite } from './types';
 import { spriteSize, validateSprite } from './types';
 import { resolveColor } from './palette';
+import { artOverride } from './registry';
 
 const cache = new Map<string, BakedSprite>();
 
@@ -21,6 +22,7 @@ const cacheKey = (def: SpriteDef, opts: BakeOptions): string =>
         opts.scale ?? 1,
         opts.flip ? 'f' : '',
         opts.outline ?? '',
+        opts.variant ?? '',
         opts.swap ? Object.entries(opts.swap).sort().map(([k, v]) => k + v).join('') : '',
     ].join('|');
 
@@ -32,6 +34,22 @@ export function bakeSprite(def: SpriteDef, opts: BakeOptions = {}): BakedSprite 
     const key = cacheKey(def, opts);
     const hit = cache.get(key);
     if (hit) return hit;
+
+    // Hand-drawn art wins. A PNG sitting in `assets/art` under this sprite's id
+    // replaces the character grid outright — see systems/sprites/registry.ts.
+    // Checked before the cache write so the coded fallback is never the thing
+    // that got cached for an id that has real art.
+    const scale0 = Math.max(1, Math.floor(opts.scale ?? 1));
+    const drawn = (opts.variant ? artOverride(`${def.id}-${opts.variant}`, scale0) : null)
+        ?? artOverride(def.id, scale0);
+    if (drawn) {
+        // Flip is the one option still honoured, since a PNG of a character
+        // facing left still has to be able to face right.
+        if (!opts.flip) return drawn;
+        const flipped = mirror(drawn);
+        cache.set(key, flipped);
+        return flipped;
+    }
 
     const validation = validateSprite(def);
     if (!validation.ok) {
@@ -101,6 +119,27 @@ export function bakeSprite(def: SpriteDef, opts: BakeOptions = {}): BakedSprite 
 
     cache.set(key, baked);
     return baked;
+}
+
+/** Mirrors a baked sheet frame by frame, so frame order survives the flip. */
+function mirror(src: BakedSprite): BakedSprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = src.canvas.width;
+    canvas.height = src.canvas.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < src.frameCount; i++) {
+        ctx.save();
+        ctx.translate((i + 1) * src.frameWidth, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(
+            src.canvas,
+            i * src.frameWidth, 0, src.frameWidth, src.frameHeight,
+            0, 0, src.frameWidth, src.frameHeight,
+        );
+        ctx.restore();
+    }
+    return { ...src, id: `${src.id}:flip`, canvas };
 }
 
 /** Which frame should be showing at this moment. */

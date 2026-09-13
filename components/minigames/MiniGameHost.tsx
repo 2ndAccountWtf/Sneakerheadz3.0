@@ -8,6 +8,7 @@ import LegitCheck from './LegitCheck';
 import HoopsGame from './HoopsGame';
 import CartRace from './CartRace';
 import Flight404 from './Flight404';
+import Flight404Phaser from './phaser/Flight404Phaser';
 import DiceGame from './DiceGame';
 import DartsGame from './DartsGame';
 import PizzaRun from './PizzaRun';
@@ -23,6 +24,24 @@ import type { ScenarioOutcome } from '../../types/interactions';
  * were swapped underneath for the 2D fighter and the arcade hoops game without
  * touching a single line of content.
  */
+/**
+ * Probed once and cached. A failed probe must not be retried per render — and
+ * must never throw, because some privacy modes make the call itself hostile.
+ */
+let webglSupport: boolean | null = null;
+function canUseWebGL(): boolean {
+    if (webglSupport !== null) return webglSupport;
+    try {
+        const canvas = document.createElement('canvas');
+        webglSupport = Boolean(
+            canvas.getContext('webgl2') ?? canvas.getContext('webgl'),
+        );
+    } catch {
+        webglSupport = false;
+    }
+    return webglSupport;
+}
+
 const MiniGameHost: React.FC = () => {
     const { gameState, dispatch } = useGame();
     const req = gameState.activeMiniGame;
@@ -41,6 +60,7 @@ const MiniGameHost: React.FC = () => {
 
     // Bailing out counts as a loss, so running away from The Game still costs
     // you whatever the writers said it should.
+    // (see canUseWebGL below for why Flight 404 branches)
     const quit = () => dispatch({ type: 'RESOLVE_MINIGAME', payload: { won: false, note: 'You backed out.' } });
     // Walking away from a shop-style game costs nothing — there was no wager.
     const walkAway = () => dispatch({ type: 'CLOSE_MINIGAME' });
@@ -55,7 +75,17 @@ const MiniGameHost: React.FC = () => {
         case 'cart-race':
             return <CartRace thief={req.config?.thief} onFinish={finish} onQuit={quit} />;
         case 'flight-404':
-            return <Flight404 onFinish={finish} onQuit={quit} />;
+            // Flight 404 exists twice: a hand-rolled canvas build and a Phaser
+            // one. The Phaser build looks considerably better and costs nothing
+            // until it is opened (Phaser is a separate ~380KB chunk fetched on
+            // mount, and only +5KB in the main bundle), so it is what players
+            // get. The canvas build is the fallback for anything without WebGL
+            // — Phaser cannot start at all there, whereas a 2D context is
+            // essentially guaranteed — and it is the version `tests/` can drive
+            // headlessly, since its world is a pure step function.
+            return canUseWebGL()
+                ? <Flight404Phaser onFinish={finish} onQuit={quit} />
+                : <Flight404 onFinish={finish} onQuit={quit} />;
         case 'street-dice':
             return <DiceGame opponent={req.config?.opponent} onFinish={finish} onQuit={quit} />;
         case 'drunk-darts':
