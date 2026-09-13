@@ -158,15 +158,11 @@ function formatLine(line: string, detail?: string): string {
  * is exactly this table flattened, so a verification script can assert the
  * claim rather than take it on faith.
  *
- * npcIds here follow the bare-id convention already used throughout the
- * systems layer (`systems/opponents.ts`, `systems/digestion/gas.ts`,
- * `data/venues.ts`'s `regulars`) rather than `data/celebrities/index.ts`'s
- * own `.id` fields, two of which carry a `celeb-` prefix nothing else in the
- * codebase uses (`celeb-the-game`, `celeb-donald-drip`) while the other two
- * don't (`bro-jogan`, `yasser-abbasfat`). That mismatch is pre-existing and
- * not this module's to fix; staying consistent with the systems layer is
- * what makes memory, schedule and reputation actually interoperate with the
- * mini-games and venues that already exist.
+ * npcIds here are the bare ids used everywhere — `the-game`, not
+ * `celeb-the-game`. Two of the four celebrities used to carry that prefix and
+ * the other two did not, which meant the same person had two identities and
+ * standing earned on the street never met standing earned at a private sale.
+ * `tests/npc.test.mts` now asserts no such prefix comes back.
  */
 const CALLBACK_LINES: Partial<Record<string, Partial<Record<MemoryKind, string[]>>>> = {
     bibi: {

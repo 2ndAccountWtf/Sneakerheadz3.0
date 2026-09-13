@@ -26,7 +26,7 @@ const compileFullDialoguePool = (
 
 export const SOLE_NET_CELEBRITIES: SoleNetNpcProfile[] = [
     {
-        id: 'celeb-donald-drip',
+        id: 'donald-drip',
         handle: '@TheRealDrip',
         avatarUrl: 'https://picsum.photos/seed/donald-drip/100',
         type: 'influencer',
@@ -37,7 +37,7 @@ export const SOLE_NET_CELEBRITIES: SoleNetNpcProfile[] = [
         },
     },
     {
-        id: 'celeb-the-game',
+        id: 'the-game',
         handle: '@TheGame',
         avatarUrl: 'https://picsum.photos/seed/the-game/100',
         type: 'chaos-agent',
@@ -51,7 +51,7 @@ export const SOLE_NET_CELEBRITIES: SoleNetNpcProfile[] = [
         },
     },
     {
-        id: 'celeb-yasser-abbasfat',
+        id: 'yasser-abbasfat',
         handle: '@FreeFalafelsteen',
         avatarUrl: 'https://picsum.photos/seed/yasser-abbasfat/100',
         type: 'chaos-agent',
@@ -65,7 +65,7 @@ export const SOLE_NET_CELEBRITIES: SoleNetNpcProfile[] = [
         },
     },
     {
-        id: 'celeb-bro-jogan',
+        id: 'bro-jogan',
         handle: '@BroJoganEXP',
         avatarUrl: 'https://picsum.photos/seed/bro-jogan/100',
         type: 'influencer',

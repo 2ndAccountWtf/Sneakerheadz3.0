@@ -256,7 +256,7 @@ export const COLLECTORS: Collector[] = [
     // --- CELEBRITIES: THE HIGH-END CHANNEL ---
     {
         id: 'collector-donald-drip',
-        npcId: 'celeb-donald-drip',
+        npcId: 'donald-drip',
         name: 'Donald Drip',
         kind: 'celebrity',
         cities: ['new-york', 'los-angeles'],
@@ -281,7 +281,7 @@ export const COLLECTORS: Collector[] = [
     },
     {
         id: 'collector-the-game',
-        npcId: 'celeb-the-game',
+        npcId: 'the-game',
         name: 'The Game',
         kind: 'celebrity',
         cities: ['los-angeles'],

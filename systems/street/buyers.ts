@@ -29,14 +29,9 @@
  *
  * A note on ids: this module's `npcId` values (`donald-drip`, `the-game`,
  * `bro-jogan`, `yasser-abbasfat`) match `systems/npc/schedule.ts`'s
- * `SCHEDULABLE_NPC_IDS` exactly, because `isNpcInCity` requires it. Two of
- * those four (`donald-drip`, `the-game`) are keyed in `data/collectors.ts`
- * under a *different* string (`celeb-donald-drip`, `celeb-the-game`) for the
- * same people. That mismatch already exists between those two files; this
- * module does not introduce it, and does not read `data/collectors.ts` at
- * all, but it does mean standing built on the street and standing built at a
- * private sale are tracked separately for those two celebrities until
- * someone reconciles the two id schemes.
+ * `SCHEDULABLE_NPC_IDS`, because `isNpcInCity` requires it — and now also
+ * match `data/collectors.ts`, so the standing you build selling to somebody on
+ * a pavement is the same standing you bring to a private sale with them.
  *
  * `HypeEvent` (from `types/hype.ts`) is a real, already-final type, and
  * `activeHypeEvent(day, cityId)` already exists in

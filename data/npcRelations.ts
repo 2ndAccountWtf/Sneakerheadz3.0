@@ -14,15 +14,8 @@
  * for `blames`, `a` is the one doing the blaming. `allies`, `rivals` and
  * `feud` are symmetric — order is cosmetic for those three.
  *
- * npcIds here use the bare-id convention already established throughout the
- * systems layer (systems/opponents.ts, systems/digestion/gas.ts,
- * data/venues.ts's `regulars`) rather than data/celebrities/index.ts's own
- * `.id` fields, which are inconsistent between celebrities: 'celeb-the-game'
- * and 'celeb-donald-drip' carry a prefix nothing else in the codebase uses,
- * while 'bro-jogan' and 'yasser-abbasfat' don't. That mismatch predates this
- * file and isn't fixed here — but it does mean this module's ids match what
- * `whereIs`/`opponentsFor`/gas reactions already use, not what
- * `ALL_CELEBRITIES[i].id` says.
+ * npcIds here are the bare ids used throughout — and, since the celebrity
+ * profiles were reconciled, the same ids `ALL_CELEBRITIES[i].id` reports.
  */
 
 export type RelationKind = 'allies' | 'rivals' | 'feud' | 'oblivious-fan' | 'blames';

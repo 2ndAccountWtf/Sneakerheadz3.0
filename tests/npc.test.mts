@@ -20,6 +20,8 @@ import { whereIs, isNpcInCity, SCHEDULABLE_NPC_IDS } from '../systems/npc/schedu
 import { remember, memoriesOf, attitudeOf, callback } from '../systems/npc/memory.ts';
 import { greetingFor, refusesYou, reputationSpread, coPresenceEvent } from '../systems/npc/reactions.ts';
 import { NPC_RELATIONS } from '../data/npcRelations.ts';
+import { ALL_CELEBRITIES } from '../data/celebrities/index.ts';
+import { COLLECTORS } from '../data/collectors.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -217,6 +219,52 @@ t('a scene between the same two people varies across days', () => {
     const r = NPC_RELATIONS[0];
     const bodies = new Set(Array.from({ length: 14 }, (_, d) => coPresenceEvent(r.a, r.b, d + 1)?.body));
     assert.ok(bodies.size > 1, `${r.a} + ${r.b} say the exact same thing every single day`);
+});
+
+/* ---------------- one person, one id ---------------- */
+
+t('nobody in the game has two identities', () => {
+    // Donald Drip and The Game used to be `celeb-donald-drip` and
+    // `celeb-the-game` in their own profiles and in the collectors list, while
+    // the other two celebrities and the entire systems layer used bare ids. The
+    // same person therefore had two identities: standing earned selling to him
+    // on a pavement never met standing earned at a private sale with him, and
+    // a grudge recorded against one id was invisible to the other.
+    const prefixed = ALL_CELEBRITIES.filter(c => c.id.startsWith('celeb-'));
+    assert.equal(prefixed.length, 0, `still prefixed: ${prefixed.map(c => c.id).join(', ')}`);
+
+    for (const c of COLLECTORS) {
+        assert.ok(!c.npcId.startsWith('celeb-'), `collector ${c.npcId} still carries the prefix`);
+    }
+});
+
+t('every celebrity a collector names is a real, schedulable person', () => {
+    // The check that would have caught the split: the two id schemes have to
+    // resolve to the same roster, or one half of the game is talking to
+    // somebody the other half has never heard of.
+    const known = new Set<string>([
+        ...ALL_CELEBRITIES.map(c => c.id),
+        ...SCHEDULABLE_NPC_IDS,
+    ]);
+    for (const c of COLLECTORS) {
+        if (c.kind !== 'celebrity') continue;
+        assert.ok(known.has(c.npcId), `collector references unknown celebrity "${c.npcId}"`);
+    }
+});
+
+t('standing follows the person, not the channel they were met through', () => {
+    // Sell to Donald Drip on the street, then again as a collector: both should
+    // land on the same connection rather than opening a second one.
+    const celeb = COLLECTORS.find(c => c.kind === 'celebrity' && SCHEDULABLE_NPC_IDS.includes(c.npcId));
+    assert.ok(celeb, 'no celebrity collector is schedulable — the two rosters do not overlap at all');
+
+    const p = remember(P(), celeb!.npcId, 'did-business', 3);
+    assert.equal(memoriesOf(p, celeb!.npcId).length, 1);
+    // And the profile for that same id exists, so a scene can be rendered.
+    assert.ok(
+        ALL_CELEBRITIES.some(c => c.id === celeb!.npcId),
+        `${celeb!.npcId} is schedulable and sells, but has no celebrity profile`,
+    );
 });
 
 console.log(`\n${pass} npc checks passed.`);

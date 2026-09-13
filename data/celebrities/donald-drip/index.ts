@@ -3,7 +3,7 @@ import { DONALD_DRIP_DIALOGUE } from './dialogue';
 import { DONALD_DRIP_INTERACTIONS } from './interactions';
 
 export const DONALD_DRIP_PROFILE: CelebrityProfile = {
-    id: 'celeb-donald-drip',
+    id: 'donald-drip',
     name: 'Donald Drip',
     bio: 'A real estate mogul turned hypebeast icon, known for his towering golden sneakers and even more towering ego. Claims to have the best collection, the biggest collection. Everyone agrees.',
     portraitUrl: 'https://picsum.photos/seed/donald-drip/200',

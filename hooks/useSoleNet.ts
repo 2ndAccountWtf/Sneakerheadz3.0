@@ -49,7 +49,7 @@ export function useSoleNet(postCount: number = 30, dmCount: number = 10) {
                  contentPool = author.messagePool.chatter;
                  if (author.type === 'chaos-agent') type = 'chaos';
                  // Celebrities are often influencers but post chaotic content
-                 if (['celeb-donald-drip', 'celeb-bro-jogan'].includes(author.id)) type = 'chatter';
+                 if (['donald-drip', 'bro-jogan'].includes(author.id)) type = 'chatter';
             }
 
             if (contentPool.length > 0) {
