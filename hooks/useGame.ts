@@ -28,11 +28,13 @@ import { rollGasIncident, settleGas } from '../systems/digestion/gas';
 import { bathroomsIn } from '../data/bathrooms';
 import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
+import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { reputationSpread } from '../systems/npc/reactions';
 import { seedWorld, advanceWorld, applyTradePressure } from '../systems/market/simulate';
 import { banksIn } from '../data/banks';
 import {
-    deposit, withdraw, repayCredit, openCreditLine, accrueInterest, type BankResult,
+    deposit, withdraw, repayCredit, openCreditLine, accrueInterest,
+    blockCard, cardUsable, rollCardLossEvent, type BankResult,
 } from '../systems/banking';
 import { MAX_SOFT_STAT } from '../constants';
 
@@ -192,7 +194,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // be told about.
             const interestResult = accrueInterest(player);
             player = interestResult.player;
-            const interestLog = interestResult.log;
+            const interestLog = [...interestResult.log];
 
             // Overnight the body resets somewhat, and you get grubbier.
             player = {
@@ -222,6 +224,16 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 toCity: action.payload.cityId,
                 timeOfDay,
             };
+
+            // Carrying cash has a price now. Rolled before the day's scripted
+            // chaos so that arriving broke can itself be the story, and so the
+            // bank screen's promise — under the floor, nobody bothers you —
+            // holds on the only screen where it could be broken.
+            const mugged = rollStreetRobbery(player, newDay, timeOfDay);
+            if (mugged) {
+                player = mugged.player;
+                interestLog.push(...mugged.robbery.log);
+            }
 
             const baseNextState: GameState = {
                 ...state,
@@ -863,10 +875,25 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             if (!state.player.emergency) return state;
             const disaster = disasterOutcomes();
             const after = withOutcomes({ ...state, player: { ...state.player, emergency: null } }, disaster.outcomes, 'Gravity');
+
+            // The dignity cost of losing that race is the joke. The practical
+            // cost is that a card left in a gas-station bathroom is a card you
+            // do not have tomorrow — which is the worst possible timing, and is
+            // exactly the point.
+            const log: OutcomeLogEntry[] = [{ icon: '💀', text: disaster.line, tone: 'bad' }];
+            let ruined = { ...after.player, emergency: null, cleanliness: 0, gas: 0 };
+            const cardEvent = cardUsable(ruined, state.day) && Math.random() < 0.3
+                ? rollCardLossEvent('bathroom')
+                : undefined;
+            if (cardEvent) {
+                ruined = blockCard(ruined, state.day, cardEvent.reason, cardEvent.days);
+                log.push({ icon: '💳', text: cardEvent.line, tone: 'bad' });
+            }
+
             return {
                 ...after,
-                player: { ...after.player, emergency: null, cleanliness: 0, gas: 0 },
-                outcomeLog: [{ icon: '💀', text: disaster.line, tone: 'bad' }, ...after.outcomeLog],
+                player: ruined,
+                outcomeLog: [...log, ...after.outcomeLog],
                 notification: { message: disaster.line, type: 'error' },
             };
         }
