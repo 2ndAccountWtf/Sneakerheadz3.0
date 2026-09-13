@@ -26,7 +26,15 @@ const ScreenHeader: React.FC<ScreenHeaderProps> = ({
         <div className="flex items-start justify-between gap-3 mb-4 sm:mb-6">
             <div className="min-w-0">
                 <h1 className="screen-title truncate">{title}</h1>
-                {subtitle && <p className="label mt-1 truncate">{subtitle}</p>}
+                {/* Wraps rather than truncating. Most subtitles are short
+                    status lines ("5/10 · Day 3") that never reach the edge,
+                    but four screens use theirs for a joke — "A card is safe
+                    until it isn't", "Ways to make money your accountant would
+                    not approve of" — and `truncate` was cutting every one of
+                    them off before the punchline at phone width. Clamped at
+                    two lines so a long dynamic subtitle still cannot push the
+                    page around. */}
+                {subtitle && <p className="label mt-1 leading-snug line-clamp-2">{subtitle}</p>}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
                 {actions}
