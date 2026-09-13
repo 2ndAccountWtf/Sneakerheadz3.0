@@ -9,6 +9,8 @@ import { useStoreNPCs } from '../../hooks/useStoreNPCs';
 import { useCelebrityCameos } from '../../hooks/useCelebrityCameos';
 import { Screen } from '../../types';
 import { getStoreSkin } from '../../data/storeSkins';
+import { STORE_LAYOUTS } from './layouts';
+import GalleryLayout from './layouts/GalleryLayout';
 import { MAX_INVENTORY_SIZE } from '../../constants';
 import { CITIES } from '../../data/cities';
 import type { AmbientNpcProfile, Scenario } from '../../types/interactions';
@@ -16,20 +18,22 @@ import type { CelebrityProfile } from '../../types/npcs';
 
 const SECURITY_COPY = ['No legit check — fakes pass freely', 'Casual legit check', 'Full authentication on every sale'];
 
-const OVERLAY_CLASS: Record<string, string> = {
-    scanlines: 'scanlines opacity-50',
-    grid: 'grid-bg opacity-50',
-    rain: 'opacity-30',
-    grain: 'opacity-[0.07]',
-};
-
 /**
- * One store layout, many skins.
+ * The store, split in two.
  *
- * The five bespoke theme components this replaced each rebuilt the header,
- * tabs, grid and footer from scratch — which is why the store never lined up
- * with the rest of the game and why buying was buried. Now the layout is fixed
- * and tested, and `data/storeSkins.ts` supplies the personality.
+ * This file is the machinery: inventory, NPCs, cameos, the shady-store raid
+ * roll, which counter a tab routes to, and the chips that describe your standing
+ * in the room. It renders none of that itself. It hands the finished data and
+ * finished nodes to one of the layouts in `./layouts`, chosen by the store's
+ * skin, and the layout decides what kind of room you are standing in — a
+ * cabinet, a gallery, a vending wall, a taped-together stall.
+ *
+ * Why the split: the old bespoke-per-store components each rebuilt the header,
+ * tabs and grid and each got the fitting wrong (viewport-pinned rails over the
+ * HUD, `min-h-screen` inside a padded column). Collapsing them to one layout
+ * fixed the fit and lost the personality. Now the fit lives here and in
+ * `layouts/kit.tsx` — one stage that clips its own decoration, one content
+ * column — and the personality lives in twelve layouts that cannot break it.
  */
 const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
     const { gameState, startInteraction, changeScreen, viewMarketAnalysis, launchMiniGame } = useGame();
@@ -39,7 +43,8 @@ const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
     const activeTab = store.tabs.find(t => t.id === activeTabId) ?? store.tabs[0];
     const inventory = useInventory({ groupRef: activeTab.inventoryGroupRef });
     const { ambient } = useStoreNPCs(store.id, store.npcs, store.behavior);
-    const skin = useMemo(() => getStoreSkin(store.brandKey), [store.brandKey]);
+    // Store id first so two shops on the same brand key can be different rooms.
+    const skin = useMemo(() => getStoreSkin(store.brandKey, store.id), [store.brandKey, store.id]);
 
     const { cameoNow } = useCelebrityCameos(
         gameState.currentCityId,
@@ -86,102 +91,52 @@ const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
         }
     };
 
-    const titleClass = skin.titleFont === 'pixel'
-        ? 'font-pixel text-[10px] sm:text-sm'
-        : skin.titleFont === 'mono'
-            ? 'font-mono text-base sm:text-xl font-bold tracking-wide'
-            : 'font-display text-base sm:text-2xl';
+    // --- STATUS: your standing in this room, as chips a layout can drop anywhere ---
+    const statusChips = (
+        <>
+            <span className="chip">📍 {cityName}</span>
+            <span className="chip chip-accent">💵 ${gameState.player.cash.toLocaleString()}</span>
+            <span className="chip">📦 {gameState.player.inventory.length}/{MAX_INVENTORY_SIZE}</span>
+            <span className={`chip ${store.behavior.securityLevel === 2 ? 'chip-bad' : store.behavior.securityLevel === 0 ? 'chip-accent' : ''}`}>
+                🔍 {SECURITY_COPY[store.behavior.securityLevel]}
+            </span>
+            {hasFakes && <span className="chip chip-warn">⚠ Replicas on shelf</span>}
+            {isShady && <span className="chip chip-bad">🚔 Raid risk {Math.round(18 + gameState.player.heat / 5)}%</span>}
+            {store.brandKey === 'arcade' && (
+                <button
+                    className="chip chip-accent hover:text-white"
+                    onClick={() => launchMiniGame({
+                        game: 'street-ball',
+                        title: 'Arcade Hoops Cabinet',
+                        config: { opponent: 'The High Score' },
+                        onWin: [
+                            { type: 'inventoryChange', add: [{ kind: 'currency', value: 'cash', qty: 220 }], description: 'The cabinet pays out in tokens you sell on.' },
+                            { type: 'streetCred', change: 4, description: 'Your initials are on the machine now.' },
+                        ],
+                        onLose: [{ type: 'inventoryChange', remove: [{ kind: 'currency', value: 'cash', qty: 60 }], description: 'You fed the machine everything you had.' }],
+                    })}
+                >
+                    🕹 Play the cabinet
+                </button>
+            )}
+        </>
+    );
 
-    return (
-        <div
-            className="relative min-h-[70vh]"
-            style={{ ['--skin' as any]: skin.accent, ['--skin2' as any]: skin.accent2 }}
-        >
-            {/* Stage backdrop — sits behind the store only */}
-            <div className="absolute inset-0 -z-10" style={{ background: skin.stage }}>
-                {skin.overlay && <div className={`absolute inset-0 ${OVERLAY_CLASS[skin.overlay]}`} />}
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[var(--bg)]" />
-            </div>
-
-            <div className="max-w-6xl mx-auto px-3 sm:px-5 py-4 sm:py-6">
-                {/* STORE HEADER */}
-                <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <span className="label" style={{ color: skin.accent }}>{skin.label}</span>
-                            <span className="w-1 h-1 rounded-full bg-[var(--ink-faint)]" />
-                            <span className="label">{cityName}</span>
-                        </div>
-                        <h1 className={`${titleClass} uppercase leading-tight`} style={{ color: skin.accent }}>
-                            {store.name}
-                        </h1>
-                        <p className="text-xs text-[var(--ink-dim)] italic mt-1">{skin.tagline}</p>
-                    </div>
-                    <button className="btn btn-ghost btn-sm flex-shrink-0" onClick={() => changeScreen(Screen.CityStores)}>
-                        ← Exit
-                    </button>
-                </div>
-
-                {/* STATUS STRIP */}
-                <div className="flex flex-wrap items-center gap-1.5 mb-4">
-                    <span className="chip chip-accent">💵 ${gameState.player.cash.toLocaleString()}</span>
-                    <span className="chip">📦 {gameState.player.inventory.length}/{MAX_INVENTORY_SIZE}</span>
-                    <span className={`chip ${store.behavior.securityLevel === 2 ? 'chip-bad' : store.behavior.securityLevel === 0 ? 'chip-accent' : ''}`}>
-                        🔍 {SECURITY_COPY[store.behavior.securityLevel]}
-                    </span>
-                    {hasFakes && <span className="chip chip-warn">⚠ Replicas on shelf</span>}
-                    {isShady && <span className="chip chip-bad">🚔 Raid risk {Math.round(18 + gameState.player.heat / 5)}%</span>}
-                    {store.brandKey === 'arcade' && (
-                        <button
-                            className="chip chip-accent hover:text-white"
-                            onClick={() => launchMiniGame({
-                                game: 'street-ball',
-                                title: 'Arcade Hoops Cabinet',
-                                config: { opponent: 'The High Score' },
-                                onWin: [
-                                    { type: 'inventoryChange', add: [{ kind: 'currency', value: 'cash', qty: 220 }], description: 'The cabinet pays out in tokens you sell on.' },
-                                    { type: 'streetCred', change: 4, description: 'Your initials are on the machine now.' },
-                                ],
-                                onLose: [{ type: 'inventoryChange', remove: [{ kind: 'currency', value: 'cash', qty: 60 }], description: 'You fed the machine everything you had.' }],
-                            })}
-                        >
-                            🕹 Play the cabinet
-                        </button>
-                    )}
-                </div>
-
-                {/* TABS */}
-                {store.tabs.length > 1 && (
-                    <div className="flex flex-wrap gap-1.5 mb-4 pb-3 border-b" style={{ borderColor: 'var(--line)' }}>
-                        {store.tabs.map(tab => {
-                            const active = activeTab.id === tab.id;
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTabId(tab.id)}
-                                    className="btn btn-sm"
-                                    style={active
-                                        ? { background: skin.accent, borderColor: skin.accent, color: '#04120f' }
-                                        : undefined}
-                                >
-                                    {tab.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-                )}
-
-                {/* COUNTERS AND GRID */}
-                {activeTab.id === 'trade' || activeTab.id === 'consignment' ? (
-                    <TradeInCounter store={store} />
-                ) : activeTab.id === 'raffle' ? (
-                    <RaffleCounter store={store} groupRef={activeTab.inventoryGroupRef} />
-                ) : inventory.items.length === 0 ? (
+    // --- BODY: the counters, the empty shelf, or the plain grid a layout may ---
+    // choose to ignore in favour of its own presentation of `items`.
+    const isCounterTab = activeTab.id === 'trade' || activeTab.id === 'consignment' || activeTab.id === 'raffle';
+    const body = activeTab.id === 'trade' || activeTab.id === 'consignment'
+        ? <TradeInCounter store={store} />
+        : activeTab.id === 'raffle'
+            ? <RaffleCounter store={store} groupRef={activeTab.inventoryGroupRef} />
+            : inventory.items.length === 0
+                ? (
                     <div className="panel p-10 text-center">
                         <div className="text-3xl mb-2">🕸</div>
                         <p className="text-[var(--ink-dim)] font-mono text-sm">Shelves are bare. Come back another day.</p>
                     </div>
-                ) : (
+                )
+                : (
                     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                         {inventory.items.map(item => (
                             <StoreSneakerCard
@@ -194,16 +149,24 @@ const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
                             />
                         ))}
                     </div>
-                )}
+                );
 
-                {/* WHO'S IN HERE */}
-                <InStoreNpcRail ambient={ambient} cameo={cameoNow} onNpcClick={handleNpcClick} />
+    const Layout = STORE_LAYOUTS[skin.layout] ?? GalleryLayout;
 
-                {store.copy?.tips?.length ? (
-                    <p className="label mt-5 text-center">💡 {store.copy.tips[0]}</p>
-                ) : null}
-            </div>
-        </div>
+    return (
+        <Layout
+            store={store}
+            skin={skin}
+            items={inventory.items}
+            activeTab={activeTab}
+            setActiveTabId={setActiveTabId}
+            onAnalyse={viewMarketAnalysis}
+            onExit={() => changeScreen(Screen.CityStores)}
+            body={body}
+            npcRail={<InStoreNpcRail ambient={ambient} cameo={cameoNow} onNpcClick={handleNpcClick} />}
+            statusChips={statusChips}
+            usePlainBody={isCounterTab || inventory.items.length === 0}
+        />
     );
 };
 

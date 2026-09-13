@@ -205,6 +205,7 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         tabs: [
             { id: 'new', label: 'Chill Kicks', inventoryGroupRef: 'la.lofi.new' },
             { id: 'used', label: 'Good Vibes', inventoryGroupRef: 'la.lofi.used' },
+            { id: 'trade', label: 'Trade At The Deck', inventoryGroupRef: 'trade' },
         ],
         pricing: { taxPct: 9.5, roundingMode: 'round' },
         policies: { returns: '14d-exchange' },
@@ -224,6 +225,8 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         layout: { headerVariant: 'bar', tabsVariant: 'pills', gridColumns: 4, density: 'compact' },
         tabs: [
             { id: 'used', label: 'Crate Digs', inventoryGroupRef: 'telaviv.retro.used' },
+            { id: 'new', label: 'Just Landed', inventoryGroupRef: 'telaviv.retro.new' },
+            { id: 'trade', label: 'Sell To Shimon', inventoryGroupRef: 'trade' },
         ],
         pricing: { taxPct: 17, roundingMode: 'floor' },
         policies: { returns: 'none' },
@@ -241,7 +244,11 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         themeOverrides: {},
         scene: { backgroundRef: 'paris-boutique', camera: 'front', lighting: 'gallery' },
         layout: { headerVariant: 'stacked', tabsVariant: 'underline', gridColumns: 3, density: 'spacious' },
-        tabs: [ { id: 'grails', label: 'The Archives', inventoryGroupRef: 'paris.gallery.grails' } ],
+        tabs: [
+            { id: 'grails', label: 'The Archives', inventoryGroupRef: 'paris.gallery.grails' },
+            { id: 'used', label: 'Salle 2 · Portés', inventoryGroupRef: 'paris.gallery.used' },
+            { id: 'consignment', label: 'Dépôt-Vente', inventoryGroupRef: 'consignment' },
+        ],
         pricing: { taxPct: 20, roundingMode: 'ceil' },
         policies: { returns: 'none' },
         behavior: { queueLength: [0, 2], securityLevel: 1, cleanliness: 'gallery', toutStyle: 'quiet' },
@@ -258,7 +265,12 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         themeOverrides: {},
         scene: { backgroundRef: 'chicago-store', camera: 'isometric', lighting: 'bright-white' },
         layout: { headerVariant: 'bar', tabsVariant: 'pills', gridColumns: 4, density: 'cozy' },
-        tabs: [ { id: 'new', label: 'Fresh Drops', inventoryGroupRef: 'chicago.retro.new' }, { id: 'used', label: 'Classics', inventoryGroupRef: 'chicago.retro.used' } ],
+        tabs: [
+            { id: 'new', label: 'Fresh Drops', inventoryGroupRef: 'chicago.retro.new' },
+            { id: 'used', label: 'Classics', inventoryGroupRef: 'chicago.retro.used' },
+            { id: 'grails', label: 'Hardwood Grails', inventoryGroupRef: 'chicago.retro.grails' },
+            { id: 'trade', label: 'Counter Offer', inventoryGroupRef: 'trade' },
+        ],
         pricing: { taxPct: 10.25, roundingMode: 'round' },
         policies: { returns: '7d-store-credit' },
         behavior: { queueLength: [0, 5], securityLevel: 1, cleanliness: 'standard', toutStyle: 'suggestive' },
@@ -278,6 +290,8 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         layout: { headerVariant: 'bar', tabsVariant: 'cards', gridColumns: 2, density: 'compact' },
         tabs: [
             { id: 'fakes', label: 'Back of the Truck', inventoryGroupRef: 'la.shady.fakes' },
+            { id: 'used', label: 'Whatever Is Loose', inventoryGroupRef: 'la.shady.used' },
+            { id: 'trade', label: 'Gabe Buys', inventoryGroupRef: 'trade' },
         ],
         pricing: { taxPct: 0, roundingMode: 'floor' }, // No tax, black market
         policies: { returns: 'none', legitCheck: { enabled: false } },
@@ -297,6 +311,7 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
         layout: { headerVariant: 'bar', tabsVariant: 'cards', gridColumns: 3, density: 'compact' },
         tabs: [
             { id: 'fakes', label: 'Super Perfects', inventoryGroupRef: 'ny.shady.fakes' },
+            { id: 'backroom', label: 'Second Table', inventoryGroupRef: 'ny.shady.backroom' },
         ],
         pricing: { taxPct: 0, roundingMode: 'floor' },
         policies: { returns: 'none', legitCheck: { enabled: false } },
@@ -306,5 +321,133 @@ export const STORE_CONFIGS: Record<string, StoreConfig> = {
             interactionWeights: { celebrityCameo: 0.4 } // Boosted to 40%
         },
         risk: { paymentFraudOdds: { cash: 0.2, card: 0.8, app: 0.5 }, counterfeitOnShelfOdds: 1.0, securityInterventionOdds: 0.25 },
+    },
+    // --- NEW ROOMS ------------------------------------------------------
+    // Each of these exists to give a layout in `components/shoestore/layouts/`
+    // a home, and each needs its own `inventoryGroupRef` strings or the market
+    // generator in useGame has nothing to stock them with.
+    'shibuya-vending-annex': {
+        id: 'shibuya-vending-annex',
+        name: 'Shibuya Vending Annex',
+        brandKey: 'outlet',
+        themeOverrides: {},
+        scene: { backgroundRef: 'shibuya-underpass', camera: 'front', lighting: 'neon' },
+        layout: { headerVariant: 'bar', tabsVariant: 'cards', gridColumns: 3, density: 'compact' },
+        tabs: [
+            { id: 'new', label: 'Row A · Sealed', inventoryGroupRef: 'tokyo.vending.new' },
+            { id: 'grails', label: 'Row B · Rare Slots', inventoryGroupRef: 'tokyo.vending.grails' },
+            { id: 'trade', label: 'Buy-Back Machine', inventoryGroupRef: 'trade' },
+        ],
+        pricing: { taxPct: 10, buybackDiscountPct: 55, roundingMode: 'floor', dynamicSignals: ['shortage'] },
+        // No staff means no judgement: the machine takes the note either way.
+        policies: { returns: 'none', legitCheck: { enabled: false } },
+        behavior: { queueLength: [0, 3], securityLevel: 0, cleanliness: 'standard', toutStyle: 'quiet', queueStyle: 'ghost' },
+        npcs: {
+            staff: { managerRef: 'clerk-tokyo' },
+            ambient: { min: 0, max: 3, spawnProfiles: [{ profileRef: 'clerk-tokyo', weight: 2 }, { profileRef: 'wiz-k', weight: 1 }] },
+            interactionWeights: { celebrityCameo: 0.2 },
+        },
+        risk: { paymentFraudOdds: { cash: 0.01, card: 0.02, app: 0.04 }, counterfeitOnShelfOdds: 0.08, auditOdds: 0.05 },
+        trade: { buybackEnabled: true, baseOfferPctOfMarket: 0.45, haggle: { enable: false, sweetSpotRange: [0.4, 0.5], triggerPct: 0 } },
+        copy: { tips: ['Row B jams about once a week. It keeps the shoe and the money.'] },
+    },
+    'bed-stuy-bodega-backroom': {
+        id: 'bed-stuy-bodega-backroom',
+        name: 'Bed-Stuy Bodega Back Room',
+        brandKey: 'plug',
+        themeOverrides: {},
+        scene: { backgroundRef: 'bodega-backroom', camera: 'counter', lighting: 'bright-white' },
+        layout: { headerVariant: 'bar', tabsVariant: 'pills', gridColumns: 3, density: 'compact' },
+        tabs: [
+            { id: 'new', label: 'On The Shelf', inventoryGroupRef: 'ny.bodega.new' },
+            { id: 'used', label: 'Traded In', inventoryGroupRef: 'ny.bodega.used' },
+            { id: 'fakes', label: 'Behind The Curtain', inventoryGroupRef: 'ny.bodega.backroom' },
+            { id: 'trade', label: 'He Buys Too', inventoryGroupRef: 'trade' },
+        ],
+        pricing: { taxPct: 8.875, buybackDiscountPct: 45, roundingMode: 'floor' },
+        policies: { returns: 'none', legitCheck: { enabled: false } },
+        behavior: { queueLength: [1, 6], securityLevel: 0, cleanliness: 'grimy', toutStyle: 'suggestive', queueStyle: 'avatars' },
+        npcs: {
+            staff: { managerRef: 'clerk-new-york' },
+            ambient: { min: 1, max: 3, spawnProfiles: [{ profileRef: 'clerk-new-york', weight: 2 }, { profileRef: 'grandma-laces', weight: 1 }, { profileRef: 'scalper-sid', weight: 1 }] },
+            interactionWeights: { backroomWhisper: 0.5, celebrityCameo: 0.3 },
+        },
+        risk: { paymentFraudOdds: { cash: 0.06, card: 0.15, app: 0.1 }, counterfeitOnShelfOdds: 0.35, backdoorOdds: 0.4 },
+        trade: { buybackEnabled: true, baseOfferPctOfMarket: 0.55, haggle: { enable: true, sweetSpotRange: [0.6, 0.8], triggerPct: 0.5 } },
+        copy: { tips: ['Buy a sandwich first. The curtain opens faster.'] },
+    },
+    'florentin-rooftop-souk': {
+        id: 'florentin-rooftop-souk',
+        name: 'Florentin Rooftop Souk',
+        brandKey: 'outlet',
+        themeOverrides: {},
+        scene: { backgroundRef: 'tlv-rooftop', camera: 'floor-wall', lighting: 'warm' },
+        layout: { headerVariant: 'stacked', tabsVariant: 'pills', gridColumns: 3, density: 'cozy' },
+        tabs: [
+            { id: 'new', label: 'Fresh Off The Van', inventoryGroupRef: 'telaviv.souk.new' },
+            { id: 'used', label: 'Sun-Faded', inventoryGroupRef: 'telaviv.souk.used' },
+            { id: 'trade', label: 'Swap At The Cooler', inventoryGroupRef: 'trade' },
+        ],
+        pricing: { taxPct: 17, buybackDiscountPct: 35, roundingMode: 'round', dynamicSignals: ['event-bonus'] },
+        policies: { returns: '7d-store-credit', legitCheck: { enabled: true, fee: 0 } },
+        behavior: { queueLength: [2, 9], securityLevel: 1, cleanliness: 'standard', toutStyle: 'pushy', queueStyle: 'avatars' },
+        npcs: {
+            staff: { managerRef: 'clerk-tel-aviv' },
+            ambient: { min: 2, max: 4, spawnProfiles: [{ profileRef: 'clerk-tel-aviv', weight: 2 }, { profileRef: 'clerk-israeli', weight: 1 }, { profileRef: 'bibi', weight: 1 }] },
+            interactionWeights: { haggleInvite: 0.6, tradePitch: 0.4, celebrityCameo: 0.35 },
+        },
+        risk: { paymentFraudOdds: { cash: 0.04, card: 0.09, app: 0.06 }, counterfeitOnShelfOdds: 0.18, securityInterventionOdds: 0.05 },
+        trade: { buybackEnabled: true, baseOfferPctOfMarket: 0.65, haggle: { enable: true, sweetSpotRange: [0.7, 0.9], triggerPct: 0.6 }, fastCashBonusPct: 5 },
+        copy: { tips: ['Everything costs less after the sun is fully down. So does everyone.'] },
+    },
+    'southside-boiler-room': {
+        id: 'southside-boiler-room',
+        name: 'South Side Boiler Room',
+        brandKey: 'consignment',
+        themeOverrides: {},
+        scene: { backgroundRef: 'chicago-basement', camera: 'floor-wall', lighting: 'moody' },
+        layout: { headerVariant: 'overhang', tabsVariant: 'cards', gridColumns: 3, density: 'compact' },
+        tabs: [
+            { id: 'grails', label: 'Locker Bank B', inventoryGroupRef: 'chicago.boiler.grails' },
+            { id: 'used', label: 'Game-Worn', inventoryGroupRef: 'chicago.boiler.used' },
+            { id: 'consignment', label: 'Leave A Pair', inventoryGroupRef: 'consignment' },
+        ],
+        pricing: { taxPct: 10.25, consignmentFeePct: 12, buybackDiscountPct: 30, roundingMode: 'ceil', dynamicSignals: ['shortage'] },
+        policies: { returns: 'none', legitCheck: { enabled: true, fee: 25, accuracyBoost: 0.2 }, holds: { allow: true, maxHours: 24, depositPct: 20 } },
+        behavior: { queueLength: [0, 2], securityLevel: 2, cleanliness: 'grimy', toutStyle: 'quiet', queueStyle: 'invisible' },
+        npcs: {
+            staff: { managerRef: 'clerk-chicago', legitCheckerRef: 'clerk-chicago' },
+            ambient: { min: 0, max: 2, spawnProfiles: [{ profileRef: 'clerk-chicago', weight: 2 }, { profileRef: 'scalper-sid', weight: 1 }] },
+            interactionWeights: { tradePitch: 0.5, celebrityCameo: 0.3 },
+        },
+        risk: { paymentFraudOdds: { cash: 0.01, card: 0.03, app: 0.02 }, counterfeitIntakeOdds: 0.05, counterfeitOnShelfOdds: 0.02, auditOdds: 0.15 },
+        trade: { buybackEnabled: true, baseOfferPctOfMarket: 0.7, haggle: { enable: true, sweetSpotRange: [0.75, 0.9], triggerPct: 0.5 }, legitCheckOnTrade: true },
+        copy: { tips: ['Locker 07 has been locked since 1998 and everyone has a theory.'] },
+    },
+    'atelier-rue-norvins': {
+        id: 'atelier-rue-norvins',
+        name: 'Atelier Rue Norvins',
+        brandKey: 'boutique',
+        themeOverrides: {},
+        scene: { backgroundRef: 'paris-atelier', camera: 'counter', lighting: 'gallery' },
+        layout: { headerVariant: 'stacked', tabsVariant: 'underline', gridColumns: 2, density: 'spacious' },
+        tabs: [
+            { id: 'new', label: 'Pièces Neuves', inventoryGroupRef: 'paris.atelier.new' },
+            { id: 'grails', label: 'Sur Mesure', inventoryGroupRef: 'paris.atelier.grails' },
+            { id: 'trade', label: 'Restauration', inventoryGroupRef: 'trade' },
+        ],
+        pricing: { taxPct: 20, buybackDiscountPct: 25, roundingMode: 'ceil' },
+        // They authenticate because they can tell by the stitching, not a scanner.
+        policies: { returns: '14d-exchange', legitCheck: { enabled: true, fee: 0, accuracyBoost: 0.3 }, appointments: { enableTryOn: true, slotMinutes: 45 } },
+        behavior: { queueLength: [0, 2], securityLevel: 2, cleanliness: 'gallery', toutStyle: 'quiet', queueStyle: 'invisible' },
+        npcs: {
+            staff: { managerRef: 'clerk-paris', legitCheckerRef: 'clerk-paris' },
+            ambient: { min: 0, max: 2, spawnProfiles: [{ profileRef: 'clerk-paris', weight: 3 }, { profileRef: 'grandma-laces', weight: 1 }] },
+            interactionWeights: { tradePitch: 0.3, celebrityCameo: 0.35 },
+        },
+        risk: { paymentFraudOdds: { cash: 0.005, card: 0.01, app: 0.005 }, counterfeitIntakeOdds: 0.02, counterfeitOnShelfOdds: 0.005 },
+        trade: { buybackEnabled: true, baseOfferPctOfMarket: 0.75, haggle: { enable: false, sweetSpotRange: [0.7, 0.8], triggerPct: 0 }, legitCheckOnTrade: true },
+        copy: { tips: ['Ask about the last. They will talk for forty minutes and knock nothing off.'] },
     }
 };
+

@@ -37,12 +37,14 @@ const VaporwaveLayout: React.FC<StoreLayoutProps> = ({
                 }}
             />
             <div
-                className="vw-grid absolute -inset-x-1/4 bottom-0 h-[130px] opacity-60"
+                className="vw-grid absolute -inset-x-1/4 bottom-0 h-[150px] opacity-60"
                 style={{
                     backgroundImage: `repeating-linear-gradient(to right, ${alpha(skin.accent2, 0.5)} 0 1px, transparent 1px 46px),
                                       repeating-linear-gradient(to bottom, ${alpha(skin.accent2, 0.45)} 0 1px, transparent 1px 26px)`,
                     transform: 'perspective(220px) rotateX(64deg)',
                     transformOrigin: 'bottom',
+                    maskImage: 'linear-gradient(180deg, transparent, #000 45%)',
+                    WebkitMaskImage: 'linear-gradient(180deg, transparent, #000 45%)',
                 }}
             />
         </div>

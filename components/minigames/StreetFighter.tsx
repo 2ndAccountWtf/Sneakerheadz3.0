@@ -267,12 +267,14 @@ export interface AiBrain {
     plan: 'neutral' | 'approach' | 'retreat' | 'block' | 'attack' | 'taunt' | 'jump';
     /** Frames until it is allowed to re-decide. */
     think: number;
-    /** Committed attack for this decision, if any. */
-    queued: MoveId | null;
+    /** Committed attack for this decision. 'jumpin' means "jump at them first". */
+    queued: MoveId | 'jumpin' | null;
     /** 0..1, climbs as its health drops. Drives how often it commits. */
     aggr: number;
     /** Frames of reaction delay left before it can respond to what it sees. */
     react: number;
+    /** Whether the current guard is a crouch block. */
+    guardLow: boolean;
 }
 
 export interface FightInput {
@@ -361,7 +363,7 @@ export function createFight(cfg: FightConfig): FightState {
         hitstop: 0, shake: 0, elapsed: 0,
         credEdge: Math.max(0, Math.min(0.2, cfg.credEdge ?? 0)),
         rng,
-        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0 },
+        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false },
         stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0 },
     };
     return s;
@@ -402,13 +404,16 @@ export function hitbox(f: Fighter): Box | null {
     if (f.frame < m.startup || f.frame >= m.startup + m.active) return null;
     const front = f.x + f.facing * (BODY_W / 2);
     const x = f.facing === 1 ? front : front - m.reach;
-    // Vertical band by attack height — this is what block height is checked against.
-    const topByHeight =
+    // Vertical band by attack height. 'overhead' is measured DOWNWARD from the
+    // attacker's feet because the only overhead is an air attack: the box has to
+    // hang below a jumping fighter to land on a grounded one, which is also why
+    // it is the answer to a crouch block.
+    const top =
         m.height === 'low' ? f.y - 12 :
-        m.height === 'overhead' ? f.y - 42 :
+        m.height === 'overhead' ? f.y - 6 :
         f.y - 27;
-    const hByHeight = m.height === 'low' ? 11 : m.height === 'overhead' ? 17 : 15;
-    return { x, y: topByHeight, w: m.reach, h: hByHeight };
+    const h = m.height === 'low' ? 11 : m.height === 'overhead' ? 20 : 15;
+    return { x, y: top, w: m.reach, h };
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +430,9 @@ export function hitbox(f: Fighter): Box | null {
  * which keeps the AI from being able to just hold back forever and keeps the
  * player from doing the same.
  */
+/** You cannot hit someone who is already on the floor — wait for the getup. */
+const hittable = (f: Fighter) => f.state !== 'down' && f.state !== 'ko';
+
 function blockSucceeds(def: Fighter, m: MoveDef): boolean {
     if (!def.blockHeld) return false;
     if (def.state === 'attack' || def.state === 'hitstun' || def.state === 'down' || def.state === 'air') return false;
@@ -494,8 +502,8 @@ function applyHit(s: FightState, atk: Fighter, def: Fighter, m: MoveDef, at: Box
     // Combo bookkeeping. A knockdown ends the string by definition.
     if (chaining) s.combo.count++;
     else { s.combo.count = 1; s.combo.byPlayer = atk.isPlayer; }
+    // A knockdown ends the string by definition — there is nothing to cancel into.
     s.combo.t = m.knockdown ? 0 : 48;
-    if (m.knockdown) s.combo.count = s.combo.count; // string is over, count stays for display
 
     // Cancel window: landing a light attack lets the attacker skip its own
     // recovery and start another move. This is the combo system, in one line.
@@ -613,7 +621,9 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
 
     if (f.blockstun > 0) f.blockstun -= df;
 
-    const locked = f.state === 'hitstun' || f.state === 'down' || f.blockstun > 0;
+    // 'ko' counts as locked: otherwise the movement branch below would set the
+    // state back to 'idle' and the loser would stand up during their own K.O.
+    const locked = f.state === 'hitstun' || f.state === 'down' || f.state === 'ko' || f.blockstun > 0;
 
     // --- intent from input ---
     const toward = other.x >= f.x ? 1 : -1;
@@ -730,3 +740,806 @@ function separate(a: Fighter, b: Fighter) {
     a.x = Math.max(STAGE_L, Math.min(STAGE_R, a.x));
     b.x = Math.max(STAGE_L, Math.min(STAGE_R, b.x));
 }
+
+// ---------------------------------------------------------------------------
+// Projectiles — the AM/PM thrown weapons
+// ---------------------------------------------------------------------------
+
+/** Synthetic move data so a flying bureka goes through the same block check. */
+const PROJECTILE_MOVE = (dmg: number): MoveDef => ({
+    label: 'Thrown', startup: 0, active: 1, recovery: 0,
+    damage: dmg, reach: 0, height: 'mid',
+    knock: 92, hitstun: 16, hitstop: 5, shake: 3, chip: 0.15, cancel: 0,
+});
+
+const RETURN_DIST = 120;
+
+function stepProjectiles(s: FightState, dt: number) {
+    for (const pr of s.projectiles) {
+        if (pr.dead) continue;
+        pr.x += pr.vx * dt;
+        pr.travelled += Math.abs(pr.vx) * dt;
+        pr.spin += dt * 13;
+
+        const owner = pr.fromPlayer ? s.p : s.f;
+        const target = pr.fromPlayer ? s.f : s.p;
+
+        // A returning weapon turns around on its own. The chancla has always
+        // been a homing weapon and this is the part where that pays off.
+        if (pr.returns && !pr.returning && (pr.travelled > RETURN_DIST || pr.x < STAGE_L - 6 || pr.x > STAGE_R + 6)) {
+            pr.returning = true;
+            pr.vx *= -1;
+            pr.hitOnce = false; // it gets to hit you again on the way home
+        }
+
+        if (pr.returning && Math.abs(pr.x - owner.x) < 11) {
+            // Caught. A returning weapon costs nothing in the long run, it is
+            // just slow — you have to wait for your flip-flop to come back.
+            pr.dead = true;
+            if (owner.ammo !== Infinity) owner.ammo += 1;
+            continue;
+        }
+
+        if (!pr.returns && (pr.x < STAGE_L - 12 || pr.x > STAGE_R + 12)) { pr.dead = true; continue; }
+        if (pr.travelled > 900) { pr.dead = true; continue; }
+
+        if (!pr.hitOnce && hittable(target)) {
+            const box: Box = { x: pr.x - 5, y: pr.y - 5, w: 10, h: 10 };
+            if (overlaps(box, hurtbox(target))) {
+                applyHit(s, owner, target, PROJECTILE_MOVE(pr.dmg), box);
+                pr.hitOnce = true;
+                if (pr.slows) target.slow = 100;
+                // Piercing keeps flying (the frisbee "cuts through a whole row
+                // of people"); anything else stops dead — or starts coming back.
+                if (!pr.piercing) {
+                    if (pr.returns && !pr.returning) { pr.returning = true; pr.vx *= -1; pr.hitOnce = false; }
+                    else pr.dead = true;
+                }
+            }
+        }
+    }
+    s.projectiles = s.projectiles.filter(pr => !pr.dead);
+}
+
+// ---------------------------------------------------------------------------
+// AI
+// ---------------------------------------------------------------------------
+/**
+ * The opponent is a small state machine with a reaction delay.
+ *
+ *   approach — walk in until he is at his own range
+ *   attack   — commit to a move chosen from what he can SEE you doing
+ *   block    — hold back (blocking is the same "hold away" input the player uses)
+ *   retreat  — walk out of range, which also means he is guarding
+ *   taunt    — stand there talking, because he is a washed-up rapper
+ *
+ * Two things stop him being a punching bag: he watches for the recovery frames
+ * of your whiffed attacks and punishes them, and he reads your guard height —
+ * hold a standing block and he will sweep you, crouch and he will jump on you.
+ * Two things stop him being unfair: `react` frames of delay before he can
+ * respond to anything, and `aggr` rising only as his own health drops, so the
+ * fight gets more desperate rather than starting that way.
+ */
+function aiInput(s: FightState, dt: number): FightInput {
+    const cmd = blankInput();
+    const ai = s.ai;
+    const f = s.f;
+    const p = s.p;
+    const df = dt * FPS;
+
+    ai.think -= df;
+    ai.react -= df;
+    // Ramps as he loses; the player's street cred takes a little off the top.
+    ai.aggr = Math.max(0.15, Math.min(0.95, 0.32 + (1 - f.hp / f.maxHp) * 0.55 - s.credEdge * 0.5));
+
+    const toward: 1 | -1 = p.x >= f.x ? 1 : -1;
+    const dist = Math.abs(p.x - f.x);
+    const pm = p.move ? p.moves[p.move] : null;
+    const playerAttacking = p.state === 'attack' && !!pm && !pm.throws;
+    const playerRecovering = playerAttacking && !!pm && p.frame >= pm.startup + pm.active;
+    const incoming = s.projectiles.find(pr =>
+        !pr.dead && pr.fromPlayer && Math.sign(pr.vx) === (f.x > p.x ? 1 : -1) && Math.abs(pr.x - f.x) < 80);
+
+    // --- decide ---
+    if (ai.think <= 0 && ai.react <= 0) {
+        const r = s.rng();
+        ai.queued = null;
+        const reach = f.moves.heavy.reach;
+
+        if (incoming && r < 0.72) {
+            ai.plan = 'block';
+            ai.guardLow = s.rng() < 0.35;
+            ai.think = 16;
+        } else if (playerRecovering && dist < reach + 12) {
+            // Whiff punish: this is the single thing that makes him feel alive.
+            ai.plan = 'attack';
+            ai.queued = dist > 24 ? 'heavy' : 'jab';
+            ai.think = 16;
+        } else if (playerAttacking && dist < reach + 18 && r < 0.5 + ai.aggr * 0.2) {
+            ai.plan = 'block';
+            // Guess the height. He is wrong often enough to be beatable.
+            ai.guardLow = pm!.height === 'low' ? s.rng() < 0.7 : s.rng() < 0.3;
+            ai.think = 14;
+        } else if (f.hype >= 100 && dist < 34 && r < 0.55) {
+            ai.plan = 'attack';
+            ai.queued = 'special';
+            ai.think = 22;
+        } else if (dist > 62) {
+            if (r < 0.12 && f.hp > f.maxHp * 0.6) { ai.plan = 'taunt'; ai.think = 40; }
+            else { ai.plan = 'approach'; ai.think = 14; }
+        } else if (dist > 38) {
+            if (r < ai.aggr) { ai.plan = 'approach'; ai.think = 12; }
+            else { ai.plan = r < 0.6 ? 'neutral' : 'retreat'; ai.think = 18; }
+        } else if (dist > 16) {
+            if (r < ai.aggr + 0.18) {
+                ai.plan = 'attack';
+                // Read the guard: sweep a stander, stomp a croucher.
+                if (p.blockHeld && !p.crouch) ai.queued = 'sweep';
+                else if (p.blockHeld && p.crouch) ai.queued = s.rng() < 0.55 ? 'jumpin' : 'heavy';
+                else ai.queued = s.rng() < 0.45 ? 'jab' : dist > 26 ? 'heavy' : s.rng() < 0.3 ? 'sweep' : 'jab';
+                ai.think = 14;
+            } else { ai.plan = r < 0.5 ? 'block' : 'neutral'; ai.guardLow = s.rng() < 0.4; ai.think = 16; }
+        } else {
+            if (r < 0.62) { ai.plan = 'attack'; ai.queued = 'jab'; ai.think = 12; }
+            else { ai.plan = 'retreat'; ai.think = 14; }
+        }
+        // Reaction delay before the NEXT read — an opening stays open for a beat.
+        ai.react = 4 + Math.floor(s.rng() * 7);
+    }
+
+    // --- execute ---
+    switch (ai.plan) {
+        case 'approach': if (toward === 1) cmd.right = true; else cmd.left = true; break;
+        case 'retreat': if (toward === 1) cmd.left = true; else cmd.right = true; break;
+        case 'block':
+            if (toward === 1) cmd.left = true; else cmd.right = true;
+            if (ai.guardLow) cmd.down = true;
+            break;
+        case 'jump':
+            cmd.upPressed = true; cmd.up = true;
+            if (toward === 1) cmd.right = true; else cmd.left = true;
+            ai.plan = 'neutral';
+            break;
+        default: break;
+    }
+
+    if (ai.plan === 'attack' && ai.queued) {
+        if (ai.queued === 'jumpin') {
+            // Jump-in on a crouching turtle — an overhead beats a low guard.
+            if (f.y >= GROUND - 0.5) {
+                cmd.upPressed = true; cmd.up = true;
+                if (toward === 1) cmd.right = true; else cmd.left = true;
+            } else if (dist < 30) {
+                cmd.aPressed = true; cmd.a = true;
+                ai.queued = null; ai.plan = 'neutral';
+            }
+        } else {
+            // Walk into range first; commit once the move can actually reach.
+            const want = f.moves[ai.queued];
+            if (dist <= want.reach + BODY_W + 2) {
+                if (ai.queued === 'jab' || ai.queued === 'special') { cmd.aPressed = true; cmd.a = true; }
+                else { cmd.bPressed = true; cmd.b = true; }
+                // Sweep and special are both "down + button" inputs, same as the player's.
+                if (ai.queued === 'sweep' || ai.queued === 'special') cmd.down = true;
+                ai.queued = null;
+                ai.plan = 'neutral';
+            } else if (toward === 1) cmd.right = true;
+            else cmd.left = true;
+        }
+    }
+
+    return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// Round flow
+// ---------------------------------------------------------------------------
+
+function resetRound(s: FightState) {
+    const keepHype = (f: Fighter) => Math.min(60, f.hype * 0.5);
+    const reset = (f: Fighter, x: number, facing: 1 | -1) => {
+        const hype = keepHype(f);
+        f.x = x; f.y = GROUND; f.vx = 0; f.vy = 0; f.facing = facing;
+        f.hp = f.maxHp;                     // health resets PER ROUND, by design
+        f.state = 'idle'; f.move = null; f.frame = 0; f.hasHit = false;
+        f.hitstun = 0; f.blockstun = 0; f.blockHeld = false; f.crouch = false;
+        f.downTimer = 0; f.invuln = 0; f.cancel = 0; f.slow = 0;
+        f.flash = 0; f.blockFlash = 0; f.dealt = 0;
+        f.hype = hype;                      // ammo deliberately NOT reset: uses are per game
+    };
+    reset(s.p, 108, 1);
+    reset(s.f, 212, -1);
+    s.projectiles = [];
+    s.sparks = [];
+    s.combo = { count: 0, byPlayer: true, t: 0 };
+    s.roundClock = ROUND_SECONDS;
+    s.hitstop = 0;
+    s.shake = 0;
+    s.ai = { plan: 'approach', think: 24, queued: null, aggr: 0.32, react: 0, guardLow: false };
+}
+
+function endRound(s: FightState, playerWon: boolean | null, byKo: boolean) {
+    s.phase = 'ko';
+    s.phaseT = 2.7;
+    if (playerWon === true) s.wins++;
+    else if (playerWon === false) s.losses++;
+
+    const loser = playerWon === true ? s.f : playerWon === false ? s.p : null;
+    if (loser && byKo) { loser.state = 'ko'; loser.downTimer = 999; }
+
+    s.banner = byKo
+        ? { text: 'K.O.!', t: 2.7, color: PAL.bad }
+        : { text: 'TIME UP', t: 2.7, color: PAL.warn };
+    s.shake = Math.max(s.shake, byKo ? 7 : 2);
+    s.talk = playerWon === false
+        ? { text: TRASH_TALK[Math.floor(s.rng() * TRASH_TALK.length)], t: 2.4 }
+        : { text: 'Yo that was a warm-up. WARM-UP!', t: 2.4 };
+}
+
+function advanceAfterKo(s: FightState) {
+    if (s.wins >= ROUNDS_TO_WIN || s.losses >= ROUNDS_TO_WIN) {
+        s.matchWon = s.wins >= ROUNDS_TO_WIN;
+        s.phase = 'over';
+        // Hold the final banner for a beat before the result card appears.
+        s.phaseT = 1.9;
+        s.banner = s.matchWon
+            ? { text: 'YOU WIN', t: 1.9, color: PAL.ok }
+            : { text: 'YOU LOSE', t: 1.9, color: PAL.bad };
+        return;
+    }
+    s.round++;
+    resetRound(s);
+    s.phase = 'intro';
+    s.phaseT = 2.3;
+    s.banner = { text: `ROUND ${s.round} — FIGHT!`, t: 2.3, color: PAL.warn };
+    s.talk = { text: TRASH_TALK[Math.floor(s.rng() * TRASH_TALK.length)], t: 2.3 };
+}
+
+// ---------------------------------------------------------------------------
+// The step
+// ---------------------------------------------------------------------------
+
+/**
+ * One fixed 1/60s tick of the whole fight. Pure: same state + same inputs +
+ * same RNG => same result, which is what lets the test script run 3000 frames
+ * headless and assert the invariants.
+ */
+export function stepFight(s: FightState, cmd: FightInput, dt: number) {
+    const df = dt * FPS;
+    s.elapsed += dt;
+
+    // Cosmetics tick even during hit-stop, so sparks still animate while the
+    // fighters are frozen — that contrast is what sells the impact.
+    if (s.shake > 0) s.shake = Math.max(0, s.shake - 14 * dt);
+    for (const sp of s.sparks) sp.t -= df;
+    s.sparks = s.sparks.filter(sp => sp.t > 0);
+    if (s.banner) { s.banner.t -= dt; if (s.banner.t <= 0) s.banner = null; }
+    if (s.talk) { s.talk.t -= dt; if (s.talk.t <= 0) s.talk = null; }
+    // Runs negative on purpose: the counter lingers on screen for a beat after
+    // the string ends, then clears.
+    s.combo.t -= df;
+    if (s.combo.count > 0 && s.combo.t < -40) s.combo.count = 0;
+
+    /**
+     * Hit-stop: on impact both fighters freeze for a few frames. Nothing about
+     * the simulation advances — not physics, not frame counters — so a heavy
+     * hit reads as a heavy hit instead of a number going down.
+     */
+    if (s.hitstop > 0) { s.hitstop -= df; return; }
+
+    if (s.phase === 'intro') {
+        s.phaseT -= dt;
+        // Both fighters idle during the announce; keeps them from pre-swinging.
+        stepFighter(s, s.p, s.f, blankInput(), dt);
+        stepFighter(s, s.f, s.p, blankInput(), dt);
+        separate(s.p, s.f);
+        if (s.phaseT <= 0) { s.phase = 'fight'; s.banner = null; }
+        return;
+    }
+
+    if (s.phase === 'ko') {
+        s.phaseT -= dt;
+        const idle = blankInput();
+        stepFighter(s, s.p, s.f, idle, dt);
+        stepFighter(s, s.f, s.p, idle, dt);
+        separate(s.p, s.f);
+        stepProjectiles(s, dt);
+        if (s.phaseT <= 0) advanceAfterKo(s);
+        return;
+    }
+
+    if (s.phase === 'over') { s.phaseT -= dt; return; }
+
+    // --- live round ---
+    s.roundClock = Math.max(0, s.roundClock - dt);
+
+    const foeCmd = aiInput(s, dt);
+    stepFighter(s, s.p, s.f, cmd, dt);
+    stepFighter(s, s.f, s.p, foeCmd, dt);
+    separate(s.p, s.f);
+
+    // Attacks resolve after both fighters have moved, so trades are symmetric:
+    // if both hitboxes are live on the same frame, both land. The move defs are
+    // captured first because the first hit may cancel the other fighter's move
+    // out from under us.
+    const pBox = hitbox(s.p);
+    const fBox = hitbox(s.f);
+    const pMove = s.p.move ? s.p.moves[s.p.move] : null;
+    const fMove = s.f.move ? s.f.moves[s.f.move] : null;
+    if (pBox && pMove && !s.p.hasHit && hittable(s.f) && overlaps(pBox, hurtbox(s.f))) {
+        applyHit(s, s.p, s.f, pMove, pBox);
+    }
+    if (fBox && fMove && !s.f.hasHit && hittable(s.p) && overlaps(fBox, hurtbox(s.p))) {
+        applyHit(s, s.f, s.p, fMove, fBox);
+    }
+
+    stepProjectiles(s, dt);
+
+    if (s.f.hp <= 0 && s.p.hp <= 0) endRound(s, null, true);
+    else if (s.f.hp <= 0) endRound(s, true, true);
+    else if (s.p.hp <= 0) endRound(s, false, true);
+    else if (s.roundClock <= 0) {
+        // Timeout is decided on remaining health, like every fighter ever.
+        const pPct = s.p.hp / s.p.maxHp;
+        const fPct = s.f.hp / s.f.maxHp;
+        endRound(s, Math.abs(pPct - fPct) < 0.01 ? null : pPct > fPct, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering — procedural, no assets
+// ---------------------------------------------------------------------------
+
+/** Deterministic alley crowd. Built once so they don't twitch between frames. */
+const CROWD = Array.from({ length: 10 }, (_, i) => ({
+    x: 62 + i * 21 + (i % 3) * 4,
+    c: ['#4b3f5c', '#5c4436', '#36445c', '#3f5040', '#5c5236'][i % 5],
+    skin: i % 2 ? PAL.skinDark : PAL.skin,
+    p: i * 0.83,
+}));
+
+/** Deterministic skyline, same reason. */
+const SKYLINE = Array.from({ length: 14 }, (_, i) => ({
+    x: i * 24,
+    w: 16 + (i % 4) * 5,
+    h: 10 + ((i * 37) % 23),
+}));
+
+const STARS = Array.from({ length: 22 }, (_, i) => ({ x: (i * 61) % W, y: (i * 29) % 44 }));
+
+function drawBackdrop(ctx: CanvasRenderingContext2D, s: FightState) {
+    // Night sky over the AM/PM parking lot.
+    rect(ctx, 0, 0, W, 56, '#0a0e1c');
+    for (const st of STARS) rect(ctx, st.x, st.y, 1, 1, 'rgba(230,237,243,0.55)');
+    circle(ctx, 272, 16, 7, '#e9e4c9');
+    circle(ctx, 269, 14, 6, '#0a0e1c');
+
+    for (const b of SKYLINE) {
+        rect(ctx, b.x, 56 - b.h, b.w, b.h, '#0f1424');
+        // A couple of lit windows each, always the same ones.
+        for (let wy = 56 - b.h + 3; wy < 54; wy += 5) {
+            if ((b.x + wy) % 3 === 0) rect(ctx, b.x + 3, wy, 2, 2, 'rgba(255,180,0,0.35)');
+        }
+    }
+
+    // Brick wall.
+    rect(ctx, 0, 56, W, GROUND - 58, '#1b1218');
+    ctx.globalAlpha = 0.5;
+    for (let y = 58; y < GROUND - 2; y += 6) {
+        line(ctx, 0, y, W, y, '#241a20');
+        const off = ((y / 6) | 0) % 2 ? 0 : 7;
+        for (let x = off; x < W; x += 14) line(ctx, x, y, x, y + 6, '#241a20');
+    }
+    ctx.globalAlpha = 1;
+
+    // Graffiti. The wall has opinions.
+    text(ctx, 'AM/PM 4 LIFE', 8, 66, { size: 9, color: 'rgba(255,46,136,0.5)', mono: false, bold: true });
+    text(ctx, 'FREE THE SHOELACE', 196, 64, { size: 6, color: 'rgba(0,229,192,0.4)' });
+    text(ctx, 'HE STILL OWES ME', 200, 74, { size: 6, color: 'rgba(255,180,0,0.3)' });
+
+    // Dumpster + bags, stage left.
+    rect(ctx, 2, 122, 42, 28, '#25402f');
+    rect(ctx, 2, 120, 42, 4, '#2f5039');
+    outline(ctx, 2, 122, 42, 28, '#16281e');
+    rect(ctx, 8, 128, 8, 3, '#1b3024');
+    circle(ctx, 50, 146, 5, '#161a1e');
+    circle(ctx, 57, 147, 4, '#161a1e');
+
+    // Streetlight, stage right, doing the heavy lifting on the mood.
+    rect(ctx, 296, 58, 3, 92, '#232a31');
+    rect(ctx, 286, 58, 14, 4, '#232a31');
+    circle(ctx, 292, 62, 3, PAL.warn);
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = PAL.warn;
+    ctx.beginPath();
+    ctx.moveTo(292, 62);
+    ctx.lineTo(250, GROUND);
+    ctx.lineTo(W, GROUND);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Crowd behind the rail. Everybody is filming. Of course they are.
+    for (const c of CROWD) {
+        const bob = Math.sin(s.elapsed * 3.4 + c.p) * 1.4;
+        const y = 139 + bob;
+        rect(ctx, c.x - 4, y - 11, 8, 11, c.c);          // torso
+        rect(ctx, c.x - 3, y - 17, 6, 6, c.skin);        // head
+        rect(ctx, c.x - 3.5, y - 18, 7, 2, '#12151a');   // cap
+        // One in three is holding a phone up.
+        if ((c.x | 0) % 3 === 0) {
+            rect(ctx, c.x + 3, y - 20, 3, 5, '#0c0f13');
+            rect(ctx, c.x + 3.5, y - 19.5, 2, 4, 'rgba(140,82,255,0.75)');
+        }
+    }
+    // Rail
+    line(ctx, 52, 141, 288, 141, '#2b333c');
+    for (let x = 56; x < 288; x += 26) line(ctx, x, 141, x, GROUND - 2, '#232a31');
+
+    // Asphalt.
+    rect(ctx, 0, GROUND - 2, W, H - GROUND + 2, '#15181d');
+    line(ctx, 0, GROUND - 2, W, GROUND - 2, '#232a31');
+    ctx.globalAlpha = 0.5;
+    band(ctx, GROUND + 6, 1, W, 0, 37, '#1d2126', (c, x, y) => rect(c, x, y, 18, 1, '#1d2126'));
+    ctx.globalAlpha = 1;
+    // A puddle, because it is always just after rain in a fighting game.
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = PAL.accent;
+    ctx.beginPath();
+    ctx.ellipse(92, 170, 26, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
+    const kit = f.isPlayer ? KIT.player : KIT.rival;
+    const airborne = f.y < GROUND - 0.5;
+    const hurt = f.flash > 0;
+
+    // Knocked down / K.O. — tip the whole figure over.
+    if (f.state === 'down' || f.state === 'ko') {
+        shadow(ctx, f.x, GROUND + 1, 16, 4, 0.4);
+        ctx.save();
+        ctx.translate(f.x + f.facing * 6, GROUND);
+        ctx.rotate((-f.facing * Math.PI) / 2);
+        figure(ctx, 0, 0, FIG_H, { kit, facing: 1, stride: 0, hurt });
+        ctx.restore();
+        if (f.state === 'ko') glyph(ctx, '💫', f.x, GROUND - 38 + Math.sin(s.elapsed * 4) * 2, 9);
+        return;
+    }
+
+    const m = f.state === 'attack' && f.move ? f.moves[f.move] : null;
+    const phase: 'startup' | 'active' | 'recovery' | null = !m ? null
+        : f.frame < m.startup ? 'startup'
+        : f.frame < m.startup + m.active ? 'active'
+        : 'recovery';
+    const ext = phase === 'active' ? 1 : phase === 'startup' ? 0.3 : 0.55;
+
+    // Walk cycle is driven by position, so the legs match the actual movement.
+    const walking = f.state === 'walk';
+    const stride = walking ? ((f.x * 0.055) % 1) : airborne ? 0.25 : Math.sin(s.elapsed * 2) * 0.02;
+    const armUp = m ? (m.height === 'low' ? 0 : f.move === 'special' ? 1.3 : f.move === 'toss' ? 1.1 : 0.85) * (phase === 'startup' ? 0.6 : 1) : 0;
+
+    ctx.save();
+    if (f.invuln > 0 && Math.floor(s.elapsed * 30) % 2 === 0) ctx.globalAlpha = 0.55;
+
+    // Hype aura at full meter: you can see the special is available.
+    if (f.hype >= 100) {
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(s.elapsed * 9) * 0.15;
+        circle(ctx, f.x, f.y - 17, 20, f.isPlayer ? 'rgba(0,229,192,0.25)' : 'rgba(255,46,136,0.25)');
+        ctx.restore();
+    }
+
+    figure(ctx, f.x, f.y, FIG_H, {
+        kit, facing: f.facing, stride, armUp,
+        crouch: f.crouch || f.state === 'crouch', hurt,
+    });
+
+    const fwd = f.facing;
+    const front = f.x + fwd * (BODY_W / 2);
+    const skin = hurt ? PAL.white : kit.skin;
+
+    // Guard pose — a forearm across the face, low or high.
+    if (f.blockHeld || f.blockstun > 0) {
+        const gy = f.crouch ? f.y - 18 : f.y - 26;
+        rect(ctx, front - (fwd === 1 ? 0 : 4), gy, 4, 11, skin);
+        if (f.blockFlash > 0) {
+            ctx.save();
+            ctx.globalAlpha = 0.7;
+            for (let i = 0; i < 3; i++) {
+                line(ctx, front + fwd * 4, gy + i * 4, front + fwd * 9, gy + 1 + i * 4, PAL.ink);
+            }
+            ctx.restore();
+        }
+    }
+
+    // Attack limbs. Length tracks the real hitbox, so what you see is what hits.
+    if (m && phase) {
+        const len = m.reach * ext;
+        if (f.move === 'sweep') {
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 7, len, 5, kit.trim);
+            rect(ctx, fwd === 1 ? front + len - 5 : front - len, f.y - 8, 5, 4, PAL.white);
+        } else if (f.move === 'air') {
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 14, len, 5, kit.trim);
+            rect(ctx, fwd === 1 ? front + len - 5 : front - len, f.y - 15, 5, 4, PAL.white);
+        } else if (f.move === 'special') {
+            // Rising uppercut: an arc of knuckles going up and through.
+            for (let i = 0; i < 4; i++) {
+                const t = i / 3;
+                circle(ctx, front + fwd * (6 + t * 16), f.y - 24 - t * 18, 3.4 - t, i % 2 ? PAL.warn : (f.isPlayer ? PAL.accent : PAL.accent2));
+            }
+            rect(ctx, fwd === 1 ? front : front - 10, f.y - 34, 10, 5, skin);
+            glyph(ctx, '👟', front + fwd * 16, f.y - 44, 9, fwd * 0.6);
+        } else if (f.move === 'toss') {
+            rect(ctx, fwd === 1 ? front - 2 : front - 4, f.y - 32, 6, 4, skin);
+            if (phase === 'startup') glyph(ctx, f.weapon.glyph, front + fwd * 3, f.y - 35, 9);
+        } else if (f.move === 'heavy' && f.weapon.klass === 'melee' && f.weapon.id !== FISTS.id) {
+            // Swinging an actual object: arm, then the object at the far end.
+            rect(ctx, fwd === 1 ? front : front - len * 0.6, f.y - 25, len * 0.6, 4, skin);
+            glyph(ctx, f.weapon.glyph, front + fwd * len * 0.85, f.y - 24, 13, fwd * (phase === 'active' ? 0.2 : -0.9));
+        } else if (f.move === 'heavy') {
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 18, len, 6, kit.trim);
+            rect(ctx, fwd === 1 ? front + len - 6 : front - len, f.y - 19, 6, 5, PAL.white);
+        } else {
+            // Jab.
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 26, len, 4, skin);
+            rect(ctx, fwd === 1 ? front + len - 4 : front - len, f.y - 27, 4, 5, kit.main);
+        }
+    }
+    ctx.restore();
+}
+
+function drawProjectiles(ctx: CanvasRenderingContext2D, s: FightState) {
+    for (const pr of s.projectiles) {
+        // A returning weapon gets a little trail so you can see it coming back.
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        glyph(ctx, pr.glyph, pr.x - Math.sign(pr.vx) * 7, pr.y, 9, -pr.spin * 0.6);
+        ctx.restore();
+        glyph(ctx, pr.glyph, pr.x, pr.y, 12, pr.spin * (pr.returning ? -1 : 1));
+    }
+}
+
+function drawSparks(ctx: CanvasRenderingContext2D, s: FightState) {
+    for (const sp of s.sparks) {
+        const t = Math.max(0, sp.t) / (sp.big ? 12 : 8);
+        if (sp.big) {
+            for (let i = 0; i < 6; i++) {
+                const a = (i / 6) * Math.PI * 2 + (1 - t) * 0.8;
+                const r = 5 + (1 - t) * 12;
+                line(ctx, sp.x, sp.y, sp.x + Math.cos(a) * r, sp.y + Math.sin(a) * r, i % 2 ? PAL.warn : PAL.white, 1.5);
+            }
+            circle(ctx, sp.x, sp.y, 3 + t * 4, PAL.white);
+        } else {
+            circle(ctx, sp.x, sp.y, 1.5 + t * 3, t > 0.5 ? PAL.white : PAL.warn);
+        }
+    }
+}
+
+function hpColor(pct: number) {
+    return pct > 0.5 ? PAL.ok : pct > 0.25 ? PAL.warn : PAL.bad;
+}
+
+function drawHud(ctx: CanvasRenderingContext2D, s: FightState) {
+    const BW = 118;
+    // Player, top-left.
+    text(ctx, 'YOU', 6, 3, { size: 6, color: PAL.dim });
+    bar(ctx, 6, 11, BW, 8, s.p.hp / s.p.maxHp, hpColor(s.p.hp / s.p.maxHp));
+    // Opponent, top-right — bar drains toward the outside edge.
+    text(ctx, s.f.name.toUpperCase().slice(0, 22), W - 6, 3, { size: 6, color: PAL.dim, align: 'right' });
+    bar(ctx, W - 6 - BW, 11, BW, 8, s.f.hp / s.f.maxHp, hpColor(s.f.hp / s.f.maxHp), PAL.panel, true);
+
+    // Round pips.
+    for (let i = 0; i < ROUNDS_TO_WIN; i++) {
+        rect(ctx, 6 + i * 7, 22, 5, 5, s.wins > i ? PAL.legend : PAL.panel);
+        outline(ctx, 6 + i * 7, 22, 5, 5, PAL.line);
+        rect(ctx, W - 11 - i * 7, 22, 5, 5, s.losses > i ? PAL.legend : PAL.panel);
+        outline(ctx, W - 11 - i * 7, 22, 5, 5, PAL.line);
+    }
+
+    // Clock.
+    const secs = Math.ceil(s.roundClock);
+    text(ctx, String(secs).padStart(2, '0'), W / 2, 4, {
+        size: 15, bold: true, align: 'center',
+        color: secs <= 10 ? PAL.bad : PAL.ink,
+    });
+
+    // Hype meter + the special prompt, so the input is discoverable.
+    const full = s.p.hype >= 100;
+    text(ctx, 'HYPE', 6, 31, { size: 5, color: PAL.faint });
+    bar(ctx, 26, 31, 56, 4, s.p.hype / 100, full ? PAL.legend : PAL.accent2);
+    if (full && Math.floor(s.elapsed * 4) % 2 === 0) {
+        text(ctx, '▼ + PUNCH = UPPERCUT', 86, 30, { size: 6, color: PAL.legend });
+    }
+
+    // Weapon in hand + remaining uses.
+    glyph(ctx, s.p.weapon.glyph, 11, 44, 10);
+    const ammoTxt = s.p.ammo === Infinity ? '∞' : `x${Math.max(0, s.p.ammo)}`;
+    text(ctx, `${s.p.weapon.short} ${ammoTxt}`, 19, 41, {
+        size: 6, color: s.p.ammo === 0 ? PAL.bad : PAL.dim,
+    });
+
+    // Combo counter.
+    if (s.combo.count > 1) {
+        const x = s.combo.byPlayer ? 8 : W - 8;
+        text(ctx, `${s.combo.count} HIT COMBO`, x, 54, {
+            size: 8, bold: true, align: s.combo.byPlayer ? 'left' : 'right',
+            color: s.combo.byPlayer ? PAL.accent : PAL.accent2,
+        });
+    }
+
+    // Trash talk, from the mouth of a man who had one song.
+    if (s.talk) {
+        const tw = s.talk.text.length * 3.5 + 10;
+        const bx = Math.min(W - 6 - tw, 168);
+        rect(ctx, bx, 84, tw, 14, 'rgba(7,9,12,0.85)');
+        outline(ctx, bx, 84, tw, 14, PAL.accent2);
+        text(ctx, s.talk.text, bx + 5, 88, { size: 6, color: PAL.ink });
+        rect(ctx, bx + tw - 14, 98, 4, 4, PAL.accent2);
+    }
+
+    if (s.banner) {
+        const size = s.banner.text.length > 14 ? 15 : 22;
+        banner(ctx, s.banner.text, W, 70, s.banner.color, size);
+    }
+}
+
+/** Draw one frame of the fight. Reads state, mutates nothing. */
+export function renderFight(ctx: CanvasRenderingContext2D, s: FightState) {
+    clear(ctx, W, H, PAL.void);
+    ctx.save();
+    // Screen shake moves the world but never the HUD — shaking the health bars
+    // reads as a bug rather than as impact.
+    const [sx, sy] = shakeOffset(s.shake);
+    ctx.translate(sx, sy);
+    drawBackdrop(ctx, s);
+    // Back fighter first so the front one overlaps correctly.
+    const order = s.p.x <= s.f.x ? [s.f, s.p] : [s.p, s.f];
+    drawFighter(ctx, s, order[0]);
+    drawFighter(ctx, s, order[1]);
+    drawProjectiles(ctx, s);
+    drawSparks(ctx, s);
+    ctx.restore();
+    drawHud(ctx, s);
+}
+
+// ---------------------------------------------------------------------------
+// The component
+// ---------------------------------------------------------------------------
+
+const RESULT_WIN = [
+    'jogs off holding his ribs, still talking. Somebody films it. Of course they do.',
+    'concedes the shoelace. He says it was never about the shoelace.',
+    'asks if you want to be on the mixtape. You are already on the mixtape.',
+];
+const RESULT_LOSS = [
+    'stands over you explaining his release schedule. Your phone is fine. Your pride is not.',
+    'takes the sandwich. Half the sandwich. He only ever wanted half.',
+    'helps you up, then takes your shoelace anyway.',
+];
+
+/**
+ * Street Fighter — best of 3, 60 second rounds, one-on-one in the AM/PM lot.
+ *
+ * All per-frame state lives in `fight` (a ref). React state is only the two
+ * things that change rarely: which AM/PM weapon is selected, and whether the
+ * match is over. Re-rendering React at 60Hz would stall the frame, so the
+ * canvas is the only thing that updates during play.
+ */
+const StreetFighter: React.FC<{
+    opponent?: string;
+    onFinish: (won: boolean, note: string) => void;
+    onQuit: () => void;
+}> = ({ opponent = 'Some Guy', onFinish, onQuit }) => {
+    const { gameState } = useGame();
+    const { player } = gameState;
+
+    // Everything the player is carrying that works in a brawl, fists first so
+    // there is always something on the rail to switch back to.
+    const loadout = useMemo(
+        () => [FISTS, ...armsFor(player, 'street-brawl')],
+        [player.storage],
+    );
+    const [weaponId, setWeaponId] = useState(FISTS.id);
+    const weapon = loadout.find(w => w.id === weaponId) ?? FISTS;
+
+    const fight = useRef<FightState | null>(null);
+    if (!fight.current) {
+        fight.current = createFight({
+            opponent,
+            weapon,
+            // Health carries in: showing up at 30hp means a shorter round 1.
+            playerHp: Math.round(72 + player.health * 0.38),
+            foeHp: 100,
+            // Street cred is a modest real edge, exactly as the text version did.
+            credEdge: Math.min(0.2, player.streetCred / 1000),
+        });
+    }
+
+    const { input, set, consume } = useInput(true);
+    const [done, setDone] = useState<boolean | null>(null);
+    const settled = useRef(false);   // guards the single setState at match end
+    const finished = useRef(false);  // guards onFinish against double-firing
+
+    const selectWeapon = useCallback((id: string) => {
+        const w = loadout.find(x => x.id === id) ?? FISTS;
+        setWeaponId(w.id);
+        if (fight.current) setPlayerWeapon(fight.current, w);
+    }, [loadout]);
+
+    const onFrame = useCallback((ctx: CanvasRenderingContext2D, dt: number) => {
+        const s = fight.current!;
+        const i = input.current;
+        // Edge-triggered buttons are consumed every frame so a press fires once
+        // even if several simulation steps run inside one animation frame.
+        const cmd: FightInput = {
+            left: i.left, right: i.right, up: i.up, down: i.down, a: i.a, b: i.b,
+            aPressed: consume('a'), bPressed: consume('b'), upPressed: consume('up'),
+        };
+        stepFight(s, cmd, dt);
+        renderFight(ctx, s);
+
+        if (s.phase === 'over' && s.phaseT <= 0 && !settled.current) {
+            settled.current = true;
+            setDone(!!s.matchWon);
+        }
+    }, [input, consume]);
+
+    const onInput = useCallback((btn: Btn, down: boolean) => set(btn, down), [set]);
+
+    const s = fight.current;
+    const won = done === true;
+    // Picked once and kept in a ref so a re-render cannot reshuffle the end card.
+    const flavorIdx = useRef(Math.floor(Math.random() * 3));
+    const flavor = (won ? RESULT_WIN : RESULT_LOSS)[flavorIdx.current];
+
+    const heavyLabel = weapon.klass === 'thrown' ? 'Throw' : weapon.id === FISTS.id ? 'Kick' : weapon.short;
+
+    return (
+        <ArcadeShell
+            title={`Street Fight — ${opponent}`}
+            subtitle={weapon.id === FISTS.id ? 'Best of 3 · 60s rounds' : `Best of 3 · armed with a ${weapon.short.toLowerCase()}`}
+            width={W}
+            height={H}
+            running={done === null}
+            onFrame={onFrame}
+            onInput={onInput}
+            actions={['Punch', heavyLabel]}
+            vertical
+            onQuit={done === null ? onQuit : undefined}
+            quitLabel="Run Away"
+            loadout={loadout}
+            selectedWeapon={weaponId}
+            onSelectWeapon={selectWeapon}
+            help={
+                '◀ ▶ walk · ▲ jump · ▼ crouch · hold BACK (away from him) to block — ' +
+                'standing block stops highs, crouch block stops lows. ' +
+                'PUNCH is fast and combos into itself; ' + heavyLabel.toUpperCase() + ' is slow, long and hurts. ' +
+                '▼ + ' + heavyLabel.toUpperCase() + ' sweeps low (goes under a standing block); jump + PUNCH comes down over a crouch block. ' +
+                'Fill the HYPE bar then ▼ + PUNCH for the Shoelace Uppercut. Thrown AM/PM weapons use the ' + heavyLabel.toUpperCase() + ' button.'
+            }
+            overlay={done !== null && s ? (
+                <MiniGameResult
+                    won={won}
+                    headline={won ? 'You Won The Fight' : 'You Got Dropped'}
+                    detail={`${s.wins}–${s.losses}. ${opponent} ${flavor}`}
+                    onClose={() => {
+                        if (finished.current) return;
+                        finished.current = true;
+                        onFinish(
+                            won,
+                            won
+                                ? `You beat ${opponent} ${s.wins}–${s.losses} in the AM/PM lot.`
+                                : `${opponent} beat you ${s.losses}–${s.wins}. There is footage.`,
+                        );
+                    }}
+                />
+            ) : undefined}
+        />
+    );
+};
+
+export default StreetFighter;

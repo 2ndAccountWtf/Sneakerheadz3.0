@@ -234,7 +234,12 @@ const ArcadeCabinetLayout: React.FC<StoreLayoutProps> = ({
                                 />
                                 <span
                                     className="uppercase arc-blink"
-                                    style={{ fontFamily: 'var(--skin-title)', fontSize: '8px', color: skin.accent3 ?? skin.accent }}
+                                    style={{
+                                        fontFamily: 'var(--skin-title)',
+                                        fontSize: '10px',
+                                        color: skin.accent3 ?? skin.accent,
+                                        textShadow: `0 0 12px ${alpha(skin.accent3 ?? skin.accent, 0.9)}`,
+                                    }}
                                 >
                                     {knobs.coinPrompt ?? 'INSERT COIN'}
                                 </span>
