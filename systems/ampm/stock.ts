@@ -55,6 +55,51 @@ const BUDGET = {
     weapons: 2,
 };
 
+/* ------------------------------------------------------------------------- *
+ * How the shop is walked
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The nine aisles are good data — an item knows it is bakery rather than
+ * snacks, and the item cards say so. They are a bad way to *walk* a shop this
+ * size. A branch carries around seventeen things, so offering a pill per aisle
+ * meant Bakery was one pastry, Frozen was one tub, and Personal Care was one
+ * bottle of hair gel: eleven pills wrapping to three rows above the shelf, most
+ * of them leading to a single row.
+ *
+ * So browsing collapses to the four groups a person actually shops by. This
+ * lives here rather than in the screen because it is a claim about the
+ * catalogue — every aisle has a home, and an item has exactly one — and claims
+ * about the catalogue are the kind that should fail in a test rather than
+ * quietly put a new aisle somewhere nobody looks.
+ */
+export type ShelfSection = 'food' | 'drinks' | 'weapons' | 'odds';
+
+export const SECTION_ORDER: ShelfSection[] = ['food', 'drinks', 'weapons', 'odds'];
+
+/** Every aisle in `AMPM_AISLE_ORDER` must appear here. A test enforces it. */
+export const AISLE_SECTION: Record<AmpmAisle, ShelfSection> = {
+    food: 'food',
+    bakery: 'food',
+    snacks: 'food',
+    frozen: 'food',
+    drinks: 'drinks',
+    household: 'odds',
+    'personal-care': 'odds',
+    specialty: 'odds',
+    questionable: 'odds',
+};
+
+/**
+ * Which single group an item is browsed under. Being swingable beats whatever
+ * aisle a chancla is filed under: if you can hit somebody with it, that is the
+ * fact about it you walked in for.
+ */
+export const sectionOf = (id: string, aisle: AmpmAisle | undefined): ShelfSection => {
+    if (isWeaponItem(id)) return 'weapons';
+    return (aisle && AISLE_SECTION[aisle]) || 'odds';
+};
+
 /** How many days a rotation holds before the shelf changes. */
 const ROTATION_DAYS = 3;
 

@@ -10,7 +10,8 @@
 import assert from 'node:assert/strict';
 import { CITIES } from '../data/cities.ts';
 import { AMPM_ITEMS } from '../data/ampmItems.ts';
-import { shelfFor, availableAt, isWeaponItem } from '../systems/ampm/stock.ts';
+import { shelfFor, availableAt, isWeaponItem, sectionOf, SECTION_ORDER, AISLE_SECTION } from '../systems/ampm/stock.ts';
+import { AMPM_AISLE_ORDER } from '../data/ampmItems.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -97,6 +98,56 @@ t('two cities do not stock the same shop', () => {
             const smaller = Math.min(shelves[i].size, shelves[j].size);
             assert.ok(shared / smaller < 0.8,
                 `${CITIES[i].id} and ${CITIES[j].id} share ${shared} of ${smaller} items`);
+        }
+    }
+});
+
+
+console.log('\nampm — how the shop is walked');
+
+t('every aisle in the catalogue has a group to be browsed under', () => {
+    for (const aisle of AMPM_AISLE_ORDER) {
+        assert.ok(AISLE_SECTION[aisle], `aisle "${aisle}" has no section — it would fall into Odds & Ends unannounced`);
+        assert.ok(SECTION_ORDER.includes(AISLE_SECTION[aisle]), `aisle "${aisle}" maps to an unknown section`);
+    }
+});
+
+t('every item on every shelf lands in exactly one group', () => {
+    for (const c of CITIES) {
+        for (const day of [1, 4, 9, 17, 26]) {
+            const shelf = shelfFor(c.id, day);
+            const counts = new Map<string, number>();
+            for (const e of shelf) {
+                const k = sectionOf(e.item.id, e.item.aisle);
+                assert.ok(SECTION_ORDER.includes(k), `${e.item.id} -> unknown group "${k}"`);
+                counts.set(k, (counts.get(k) ?? 0) + 1);
+            }
+            const summed = [...counts.values()].reduce((a, b) => a + b, 0);
+            assert.equal(summed, shelf.length,
+                `${c.id} day ${day}: groups hold ${summed} of ${shelf.length} items`);
+        }
+    }
+});
+
+t('a weapon is browsed as a weapon, whatever aisle it is filed under', () => {
+    for (const c of CITIES) {
+        for (const e of shelfFor(c.id, 1)) {
+            if (isWeaponItem(e.item.id)) {
+                assert.equal(sectionOf(e.item.id, e.item.aisle), 'weapons',
+                    `${e.item.id} is swingable but browses as ${sectionOf(e.item.id, e.item.aisle)}`);
+            }
+        }
+    }
+});
+
+t('no group is offered as a pill with nothing behind it', () => {
+    // The screen only renders a pill for a group present on today's shelf, and
+    // the shelf always has at least food and a weapon, so the row is never bare.
+    for (const c of CITIES) {
+        for (const day of [1, 6, 13, 22, 30]) {
+            const present = new Set(shelfFor(c.id, day).map(e => sectionOf(e.item.id, e.item.aisle)));
+            assert.ok(present.size >= 2, `${c.id} day ${day}: only ${present.size} group(s) to browse`);
+            assert.ok(present.has('food'), `${c.id} day ${day}: nothing to eat`);
         }
     }
 });

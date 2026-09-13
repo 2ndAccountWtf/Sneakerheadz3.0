@@ -8,16 +8,25 @@ import { useAmpmWorker } from '../hooks/useAmpmWorker';
 import { ampmGreeting, ampmChatter, ampmWeaponsTalk, ampmAfterPurchase } from '../data/ampm/dialogue';
 import { isPartyMode, rollAmpmEvent, AMPM_EVENT_CHANCE, AMPM_PARTY_EVENT_CHANCE } from '../systems/events/ampmEvents';
 import { priceFor, paymentBlocked, type PaymentMethod } from '../systems/payment';
-import { shelfFor, isWeaponItem } from '../systems/ampm/stock';
-import { AMPM_AISLE_ORDER, AMPM_AISLE_LABEL } from '../data/ampmItems';
+import { shelfFor, isWeaponItem, sectionOf, SECTION_ORDER, type ShelfSection } from '../systems/ampm/stock';
 import type { AmpmAisle } from '../types';
 
-/** Filter pills: the nine real aisles, plus Weapons and an All. */
-const FILTER_LABEL: Record<string, string> = { all: 'Everything', weapons: 'Weapons', ...AMPM_AISLE_LABEL };
-const FILTER_ICON: Record<string, string> = {
-    all: '\u{1F6D2}', weapons: '\u{1FA83}', food: '\u{1F957}', drinks: '\u{1F964}',
-    bakery: '\u{1F956}', snacks: '\u{1F36B}', frozen: '\u{1F366}', household: '\u{1F9F4}',
-    'personal-care': '\u{1F9FB}', specialty: '\u2728', questionable: '\u{1F440}',
+/**
+ * Filter pills. The grouping itself lives in `systems/ampm/stock.ts`, because
+ * which aisle belongs to which group is a fact about the catalogue rather than
+ * about this screen; all that is left here is what each pill is called and
+ * which emoji sits on it.
+ */
+type FilterKey = 'all' | ShelfSection;
+
+const FILTER_LABEL: Record<FilterKey, string> = {
+    all: 'Everything', food: 'Food', drinks: 'Drinks',
+    weapons: 'Weapons', odds: 'Odds & Ends',
+};
+
+const FILTER_ICON: Record<FilterKey, string> = {
+    all: '\u{1F6D2}', food: '\u{1F957}', drinks: '\u{1F964}',
+    weapons: '\u{1FA83}', odds: '\u2728',
 };
 import { cardUsable } from '../systems/banking';
 import { CASH_DISCOUNT, CARD_SURCHARGE } from '../constants';
@@ -31,7 +40,7 @@ import { CASH_DISCOUNT, CARD_SURCHARGE } from '../constants';
 const AmpmScreen: React.FC = () => {
     const { gameState, startInteraction, buyStorageItem, dispatch } = useGame();
     const { player, currentCityId, day } = gameState;
-    const [selectedFilter, setSelectedFilter] = useState<AmpmAisle | 'all' | 'weapons'>('all');
+    const [selectedFilter, setSelectedFilter] = useState<FilterKey>('all');
 
     const worker = useAmpmWorker();
     const partyMode = useMemo(() => isPartyMode(currentCityId, day), [currentCityId, day]);
@@ -77,23 +86,21 @@ const AmpmScreen: React.FC = () => {
     // day, is not a shop.
     const shelf = useMemo(() => shelfFor(currentCityId, gameState.day), [currentCityId, gameState.day]);
 
-    // Filters are the real aisles, plus a Weapons pill derived from the weapons
-    // registry rather than re-tagged by hand — an item is a weapon if you can
-    // swing it at somebody, and `systems/weapons.ts` already knows.
-    const filters = useMemo(() => {
-        const present = new Set(shelf.map(e => e.item.aisle).filter(Boolean) as AmpmAisle[]);
-        const aisles = AMPM_AISLE_ORDER.filter(a => present.has(a));
-        const hasWeapons = shelf.some(e => isWeaponItem(e.item.id));
-        return ['all' as const, ...(hasWeapons ? ['weapons' as const] : []), ...aisles];
+    // A pill is offered only if today's shelf has something behind it, so the
+    // filter row can never send you to an empty aisle. The Weapons group is
+    // derived from the weapons registry rather than re-tagged by hand — an item
+    // is a weapon if you can swing it at somebody, and `systems/weapons.ts`
+    // already knows which ones those are.
+    const filters = useMemo<FilterKey[]>(() => {
+        const present = new Set(shelf.map(e => sectionOf(e.item.id, e.item.aisle)));
+        return ['all', ...SECTION_ORDER.filter(k => present.has(k))];
     }, [shelf]);
 
     const activeFilter = filters.includes(selectedFilter) ? selectedFilter : 'all';
 
-    const shown = useMemo(() => shelf.filter(e => {
-        if (activeFilter === 'all') return true;
-        if (activeFilter === 'weapons') return isWeaponItem(e.item.id);
-        return e.item.aisle === activeFilter;
-    }), [shelf, activeFilter]);
+    const shown = useMemo(() => shelf.filter(e =>
+        activeFilter === 'all' || sectionOf(e.item.id, e.item.aisle) === activeFilter
+    ), [shelf, activeFilter]);
 
 
     const handleBuy = (item: AmpmItem) => {
@@ -188,7 +195,7 @@ const AmpmScreen: React.FC = () => {
                     </div>
                 )}
 
-                {/* Aisles. Only aisles with something on them today are offered,
+                {/* Aisles. Only groups with something on them today are offered,
                     so the filter row never sends you to an empty shelf. */}
                 <div className="flex flex-wrap gap-1.5 mb-4">
                     {filters.map(f => (
@@ -197,7 +204,7 @@ const AmpmScreen: React.FC = () => {
                             onClick={() => setSelectedFilter(f)}
                             className={`btn btn-sm ${activeFilter === f ? 'btn-primary' : 'btn-ghost'}`}
                         >
-                            {FILTER_ICON[f] ?? '•'} {FILTER_LABEL[f] ?? f}
+                            {FILTER_ICON[f]} {FILTER_LABEL[f]}
                         </button>
                     ))}
                 </div>
