@@ -32,6 +32,24 @@ const TravelScreen: React.FC = () => {
     const cityData = useMemo(() => {
         const out: Record<string, { trend: Trend; delta: number; stores: number; volatility: number; rumor?: RumorWithContext }> = {};
 
+        // Plenty of rumour templates are generic — they are eligible in every
+        // city — so two cards independently picking "the Intel Drop, else the
+        // first one" landed on the same sentence about a quarter of the time.
+        // On the one screen whose entire job is telling six cities apart, two
+        // of them quoting the same line word for word reads as a bug. So each
+        // card takes the best line nobody else has already used, and only
+        // falls back to a repeat if this city genuinely has nothing else.
+        const spoken = new Set<string>();
+        const headlineRumor = (rumors: RumorWithContext[]): RumorWithContext | undefined => {
+            const ranked = [
+                ...rumors.filter(r => r.type === 'Intel Drop'),
+                ...rumors.filter(r => r.type !== 'Intel Drop'),
+            ];
+            const pick = ranked.find(r => !spoken.has(r.text)) ?? ranked[0];
+            if (pick) spoken.add(pick.text);
+            return pick;
+        };
+
         for (const city of CITIES) {
             const market = gameState.markets[city.id];
             let totalDelta = 0;
@@ -55,7 +73,7 @@ const TravelScreen: React.FC = () => {
                 delta: avg,
                 stores: STORES_BY_CITY[city.id]?.length ?? 0,
                 volatility: count ? totalVol / count : 0,
-                rumor: rumors.find(r => r.type === 'Intel Drop') ?? rumors[0],
+                rumor: headlineRumor(rumors),
             };
         }
         return out;

@@ -52,6 +52,13 @@ const TONE_STYLES: Record<string, string> = {
     neutral: 'text-[var(--ink-dim)] border-[var(--line)]',
 };
 
+/**
+ * The one placeholder authored dialogue may contain. Exported so
+ * `tests/content.test.mts` checks against the literal this file actually
+ * resolves, rather than against a copy of it that could drift.
+ */
+export const GREETING_TOKEN = '{{random_greeting}}';
+
 const InteractionView: React.FC = () => {
     const { gameState, dispatch } = useGame();
     const { activeInteraction, outcomeLog, activeMiniGame } = gameState;
@@ -75,7 +82,14 @@ const InteractionView: React.FC = () => {
             return;
         }
         let line = node.npcLine;
-        if (line === '{{random_greeting}}') {
+        // Matched as a token anywhere in the line, not by whole-string
+        // equality. The equality check worked only while every author wrote
+        // the placeholder completely bare — one line reading
+        // "{{random_greeting}} Long time." or carrying a stray trailing space
+        // would have shipped the raw braces to the player with nothing to
+        // catch it. `tests/content.test.mts` now also fails the build if any
+        // authored line contains a {{token}} nothing knows how to resolve.
+        if (line.includes(GREETING_TOKEN)) {
             // The authored pool stays the base, because that is where the
             // character's actual voice lives — a generic attitude tier would
             // flatten Bro Jogan and ADC into the same person. What memory adds
@@ -91,11 +105,12 @@ const InteractionView: React.FC = () => {
 
             const memory = callback(gameState.player, npcId);
             const refusal = refusesYou(gameState.player, npcId);
-            line = [
+            const greeting = [
                 base,
                 memory,
                 refusal.refuses && refusal.reason !== memory ? refusal.reason : null,
             ].filter(Boolean).join(' ');
+            line = line.split(GREETING_TOKEN).join(greeting).trim();
         }
         setResolvedLine(line);
         // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -29,6 +29,7 @@ import { bathroomsIn } from '../data/bathrooms';
 import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
 import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
+import { clearRumorCache } from '../systems/rumorEngine';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { reputationSpread } from '../systems/npc/reactions';
@@ -982,6 +983,9 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // replaying a thirty-day game against a calendar you have already
             // memorised is not a new game.
             reseedHypeCalendar();
+            // Rumours are memoised by city+day. Day 1 of the new run must not
+            // be served day 1 of the old one out of that cache.
+            clearRumorCache();
             // Fresh markets too — otherwise the new run inherits the old
             // world's prices and the first day is not a fresh read.
             return {
