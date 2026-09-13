@@ -129,7 +129,7 @@ const SHIFT_TIME = 78;    // ...and so does the clock, whichever comes first.
 const RENT = 900;         // score needed to make rent. Everything else is tips.
 const START_AMMO = 12;
 const CRATE_AMMO = 6;
-const START_LIVES = 3;
+const START_LIVES = 4;
 /** Seconds of grace when the last box leaves your hands. Find a crate. */
 const DRY_GRACE = 11;
 
@@ -308,10 +308,10 @@ const OBS: ObsDef[] = [
     { kind: 'taxi', glyph: '🚕', label: 'an oncoming taxi', len: 16, wide: 0.44, clear: 'none', where: 'road', weight: 11, vx: -120 },
     { kind: 'door', glyph: '🚪', label: 'a car door', len: 11, wide: 0.4, clear: 'none', where: 'kerb', weight: 10, cycle: 2.4 },
     { kind: 'bin', glyph: '🗑️', label: 'a wheelie bin', len: 8, wide: 0.36, clear: 'hop', where: 'kerb', weight: 13 },
-    { kind: 'skater', glyph: '🛹', label: 'a slower skater', len: 8, wide: 0.36, clear: 'none', where: 'road', weight: 9, vx: 48, drift: 0.5 },
-    { kind: 'dog', glyph: '🐕', label: 'a loose dog', len: 7, wide: 0.34, clear: 'hop', where: 'road', weight: 10, drift: 1.1 },
+    { kind: 'skater', glyph: '🛹', label: 'a slower skater', len: 8, wide: 0.36, clear: 'none', where: 'road', weight: 9, vx: 48, drift: 0.34 },
+    { kind: 'dog', glyph: '🐕', label: 'a loose dog', len: 7, wide: 0.34, clear: 'hop', where: 'road', weight: 10, drift: 0.85 },
     { kind: 'works', glyph: '🚧', label: 'roadworks', len: 13, wide: 0.42, clear: 'ollie', where: 'road', weight: 12 },
-    { kind: 'trolley', glyph: '🛒', label: 'a runaway AM/PM trolley', len: 9, wide: 0.38, clear: 'ollie', where: 'road', weight: 8, drift: 1.6 },
+    { kind: 'trolley', glyph: '🛒', label: 'a runaway AM/PM trolley', len: 9, wide: 0.38, clear: 'ollie', where: 'road', weight: 8, drift: 1.0 },
     { kind: 'hydrant', glyph: '🚰', label: 'a hydrant', len: 6, wide: 0.3, clear: 'hop', where: 'kerb', weight: 6 },
     { kind: 'sprink', glyph: '💦', label: 'a sprinkler', len: 9, wide: 0.5, clear: 'ollie', where: 'walk', weight: 9, cycle: 1.8 },
     { kind: 'hedge', glyph: '🪴', label: 'somebody’s planter', len: 8, wide: 0.5, clear: 'ollie', where: 'walk', weight: 7 },
@@ -606,7 +606,7 @@ function spawnTraffic(s: RunState) {
         const lane = laneFor(s, def);
         spawnObstacle(s, def, s.nextObsX, lane);
 
-        if (def.where === 'road' && rnd(s) < 0.34) {
+        if (def.where === 'road' && rnd(s) < 0.26) {
             const other = rollDef(s);
             if (other.where === 'road') {
                 // Two lanes clear of the first, so the pair can never block more
@@ -617,8 +617,10 @@ function spawnTraffic(s: RunState) {
             }
         }
 
-        const squeeze = Math.min(44, s.t * 0.7);
-        s.nextObsX += 104 - squeeze + rnd(s) * 96;
+        // Spacing was set headlessly: a competent dodger that never throws has
+        // to survive the whole street, because the player is also busy aiming.
+        const squeeze = Math.min(30, s.t * 0.5);
+        s.nextObsX += 132 - squeeze + rnd(s) * 90;
     }
 }
 

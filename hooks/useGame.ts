@@ -14,7 +14,7 @@ import { CITIES } from '../data/cities';
 import { SNEAKERS } from '../data/sneakers';
 import { rollTravelEvent, TravelContext } from '../systems/events/travelEngine';
 import { resolveEventStub } from '../systems/events/eventResolver';
-import { storageMock } from '../data/storage.mock';
+import { storageMock, STARTER_STORAGE } from '../data/storage.mock';
 import { STORE_CONFIGS } from '../data/storeConfigs';
 import { STORES_BY_CITY } from '../data/stores';
 import { applyOutcomes, expireBuffs, buffMultiplier } from '../systems/outcomes/outcomeEngine';
@@ -888,7 +888,10 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 const initialState: GameState = {
     player: {
         ...INITIAL_PLAYER,
-        storage: storageMock,
+        // A new game starts with a small starter kit, not the entire
+        // 102-item catalogue — storageMock is the master list the shop reads
+        // from, not the player's opening bag.
+        storage: STARTER_STORAGE,
     },
     currentCityId: INITIAL_CITY_ID,
     day: INITIAL_DAY,

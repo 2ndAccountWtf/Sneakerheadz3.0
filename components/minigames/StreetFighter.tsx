@@ -258,6 +258,11 @@ export interface FightState {
     credEdge: number;
     rng: () => number;
     ai: AiBrain;
+    /**
+     * Remaining uses per weapon id, so swapping on the rail mid-fight cannot
+     * refill a half-spent bag of slushies. `uses` is per game, not per round.
+     */
+    ammoBank: Record<string, number>;
     /** Diagnostics the test script leans on. */
     stats: { hitsBlocked: number; hitsLanded: number; throwsMade: number };
 }
@@ -364,6 +369,7 @@ export function createFight(cfg: FightConfig): FightState {
         credEdge: Math.max(0, Math.min(0.2, cfg.credEdge ?? 0)),
         rng,
         ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false },
+        ammoBank: { [cfg.weapon.id]: cfg.weapon.uses ?? Infinity },
         stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0 },
     };
     return s;
@@ -372,9 +378,11 @@ export function createFight(cfg: FightConfig): FightState {
 /** Swap the player's AM/PM weapon mid-fight (the rail above the D-pad). */
 export function setPlayerWeapon(s: FightState, weapon: Weapon) {
     if (s.p.weapon.id === weapon.id) return;
+    s.ammoBank[s.p.weapon.id] = s.p.ammo;                       // bank what is left
     s.p.weapon = weapon;
     s.p.moves = movesFor(weapon);
-    s.p.ammo = weapon.uses ?? Infinity;
+    if (!(weapon.id in s.ammoBank)) s.ammoBank[weapon.id] = weapon.uses ?? Infinity;
+    s.p.ammo = s.ammoBank[weapon.id];                           // and pick up where you left off
 }
 
 // ---------------------------------------------------------------------------
@@ -977,8 +985,12 @@ function endRound(s: FightState, playerWon: boolean | null, byKo: boolean) {
 }
 
 function advanceAfterKo(s: FightState) {
-    if (s.wins >= ROUNDS_TO_WIN || s.losses >= ROUNDS_TO_WIN) {
-        s.matchWon = s.wins >= ROUNDS_TO_WIN;
+    // A dead-even timeout awards the round to nobody, which in theory could run
+    // a best-of-3 forever. After five rounds the bystanders call it, the way
+    // they always do, and whoever has more rounds (ties to the player) takes it.
+    const exhausted = s.round >= 5;
+    if (exhausted || s.wins >= ROUNDS_TO_WIN || s.losses >= ROUNDS_TO_WIN) {
+        s.matchWon = exhausted ? s.wins >= s.losses : s.wins >= ROUNDS_TO_WIN;
         s.phase = 'over';
         // Hold the final banner for a beat before the result card appears.
         s.phaseT = 1.9;
@@ -1074,6 +1086,7 @@ export function stepFight(s: FightState, cmd: FightInput, dt: number) {
     }
 
     stepProjectiles(s, dt);
+    s.ammoBank[s.p.weapon.id] = s.p.ammo;   // keep the bank in step with the hand
 
     if (s.f.hp <= 0 && s.p.hp <= 0) endRound(s, null, true);
     else if (s.f.hp <= 0) endRound(s, true, true);
@@ -1125,10 +1138,13 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, s: FightState) {
     // Brick wall.
     rect(ctx, 0, 56, W, GROUND - 58, '#1b1218');
     ctx.globalAlpha = 0.5;
-    for (let y = 58; y < GROUND - 2; y += 6) {
+    // Courses every 6px, vertical joints on alternate rows only — it reads as
+    // brick from two feet away and halves the stroke count per frame.
+    let course = 0;
+    for (let y = 58; y < GROUND - 2; y += 6, course++) {
         line(ctx, 0, y, W, y, '#241a20');
-        const off = ((y / 6) | 0) % 2 ? 0 : 7;
-        for (let x = off; x < W; x += 14) line(ctx, x, y, x, y + 6, '#241a20');
+        if (course % 2) continue;
+        for (let x = 7; x < W; x += 14) line(ctx, x, y, x, y + 6, '#241a20');
     }
     ctx.globalAlpha = 1;
 

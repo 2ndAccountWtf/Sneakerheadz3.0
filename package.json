@@ -10,6 +10,7 @@
     "test": "tsx tests/engine.test.mts && tsx tests/digestion.test.mts"
   },
   "dependencies": {
+    "phaser": "^4.2.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

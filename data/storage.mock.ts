@@ -1920,6 +1920,10 @@ export const storageMock: StorageItem[] = [
   // effect you find out by buying it. The randomness lives entirely in
   // `effects[]`, so the reveal happens on use, not on purchase — you own the
   // mystery for a while first.
+  //
+  // Note that these are the only items with no `chance: 1.0` line. When the
+  // table rolls nothing, the reducer falls back to "Nothing eventful happens",
+  // which for a sealed unlabelled product is a legitimate reveal and not a gap.
   // =======================================================================
   {
     id: "itm-soup-seasoning",

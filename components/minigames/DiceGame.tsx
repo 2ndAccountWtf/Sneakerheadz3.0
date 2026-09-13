@@ -12,7 +12,6 @@ import {
     circle,
     line,
     text,
-    glyph,
     shadow,
     figure,
     shakeOffset,

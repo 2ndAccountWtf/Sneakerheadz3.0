@@ -1102,8 +1102,8 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             const c = w.players[j];
             if (a.dunkT > 0 || c.dunkT > 0) continue;
             const d = dist2d(a.x, a.z, c.x, c.z);
-            if (d > 0.001 && d < 9) {
-                const push = (9 - d) / 2;
+            if (d > 0.001 && d < 12) {
+                const push = (12 - d) / 2;
                 const ux = (a.x - c.x) / d;
                 const uz = ((a.z - c.z) * Z_PX) / d / Z_PX;
                 a.x += ux * push; c.x -= ux * push;
@@ -1215,7 +1215,7 @@ const drawCourt = (ctx: CanvasRenderingContext2D, w: World) => {
         ctx.stroke();
         // Three point arc, rendered as the ellipse it looks like from here.
         ctx.beginPath();
-        ctx.ellipse(screenX(h.x, h.z), floorY(h.z), THREE_DIST * 0.92, 34, 0, 0, Math.PI * 2);
+        ctx.ellipse(screenX(h.x, h.z), floorY(h.z), THREE_DIST * 0.78, 30, 0, 0, Math.PI * 2);
         ctx.stroke();
     }
     ctx.restore();
@@ -1262,7 +1262,7 @@ const drawHoop = (ctx: CanvasRenderingContext2D, w: World, idx: 0 | 1) => {
 const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     const x = screenX(p.x, p.z);
     const feet = floorY(p.z) - p.y * sc(p.z);
-    const h = 26 * sc(p.z);
+    const h = 29 * sc(p.z);
     const isShooting = p.charge >= 0 || p.dunkT > 0;
     const armUp = p.dunkT > 0 ? 1.35 : p.charge >= 0 ? clamp(p.charge, 0, 1) : p.y > 6 ? 1 : 0;
 
@@ -1353,14 +1353,12 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
         }
     }
 
-    // Painter's algorithm on depth so near bodies overlap far ones.
-    const order = [...w.players].sort((a, b) => a.z - b.z);
-    let ballDrawn = false;
-    for (const p of order) {
-        if (!ballDrawn && w.ball.z < p.z) { drawBall(ctx, w); ballDrawn = true; }
-        drawPlayer(ctx, w, p);
-    }
-    if (!ballDrawn) drawBall(ctx, w);
+    // Painter's algorithm on depth so near bodies overlap far ones. The ball
+    // is the exception and is drawn last, on top of everybody: at 3px across it
+    // vanishes behind a body in a scramble, and a ball you cannot find is the
+    // one thing this game is not allowed to do.
+    for (const p of [...w.players].sort((a, b) => a.z - b.z)) drawPlayer(ctx, w, p);
+    drawBall(ctx, w);
 
     /* --- on-canvas furniture ------------------------------------------ */
     rect(ctx, 0, 0, VW, 13, 'rgba(4,6,10,0.72)');

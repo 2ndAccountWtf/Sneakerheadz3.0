@@ -60,7 +60,7 @@ const laneScale = (lane: number) => 0.80 + lane * 0.07;
 // ---------------------------------------------------------------------------
 const START_GAP = 100;      // metres of hill between you and him at the drop-in
 const LOSE_GAP = 220;       // he's over the horizon; chase over
-const HILL_LENGTH = 2000;   // the hill flattens out here. Out of hill = out of luck.
+const HILL_LENGTH = 1900;   // the hill flattens out here. Out of hill = out of luck.
 
 /** Constant downhill pull. You are always accelerating unless something stops you. */
 const HILL_ACCEL = 9;
@@ -71,7 +71,7 @@ const TUCK_GAIN = 1.34;
 const THIEF_BASE = 30;
 /**
  * The rubber band. He paces *you* rather than holding an absolute speed —
- * a chase where he just drives off at a fixed 36 m/s isn't a game, it's a
+ * a chase where he just drives off at a fixed speed isn't a game, it's a
  * cutscene. His target speed is your rolling average, shifted by how far ahead
  * he is: well clear, he relaxes and gloats; on your wheel, he panics.
  *
@@ -144,7 +144,7 @@ const BOARD: Rig = {
 const TROLLEY: Rig = {
     id: 'trolley', label: 'The Other Trolley', glyph: '🛒',
     cruise: 29, tuckTop: 34, steer: 3.1, carve: 4.6, wobbleAt: 28,
-    canOllie: false, rampBoost: 2.5, hitKeep: -0.06, hitDmg: 1.15, plough: 0.3, ploughDmg: 0.45,
+    canOllie: false, rampBoost: 1.6, hitKeep: -0.06, hitDmg: 1.15, plough: 0.3, ploughDmg: 0.45,
     note: 'No board. You took the other trolley. It steers like a fridge.',
 };
 
@@ -340,6 +340,8 @@ export interface RaceState {
     hits: number;
     airs: number;
     cleanLandings: number;
+    /** Total m/s handed back by ramp landings — the longboard's other payoff. */
+    rampGain: number;
     thiefHits: number;
     thrown: number;
 }
@@ -405,7 +407,7 @@ export function createRaceState(opts: {
         weapons, ammo, cool: 0,
         shake: 0, sparks: [], introT: 2.6, flash: '', flashT: 0,
         outcome: null, endT: 0, wipe: 0,
-        hits: 0, airs: 0, cleanLandings: 0, thiefHits: 0, thrown: 0,
+        hits: 0, airs: 0, cleanLandings: 0, rampGain: 0, thiefHits: 0, thrown: 0,
     };
     fillStreet(s);
     return s;
@@ -494,13 +496,23 @@ function land(s: RaceState) {
         return;
     }
     if (s.airFromRamp) {
-        // Landing clean off a ramp is the biggest free speed in the game, and
-        // it's most of why the longboard wins: a wobbling trolley barely gets
-        // any of it, and a wobbling anything gets a third.
+        // Landing clean off a ramp is the biggest free speed in the game and
+        // most of why the longboard wins. Note the wobble check: come into the
+        // ramp flat out and you land sketchy and get a third of it, so ramps
+        // are a reason to come *out* of the tuck.
         const clean = s.wob < 0.6;
-        s.speed += s.rig.rampBoost * (clean ? 1 : 0.35);
+        const gain = s.rig.rampBoost * (clean ? 1 : 0.35);
+        s.speed += gain;
+        s.rampGain += gain;
         if (clean) s.cleanLandings++;
-        s.flash = clean ? 'CLEAN LANDING' : 'sketchy landing';
+        // A trolley does not land. It arrives. The axles take it every time.
+        if (!s.rig.canOllie) {
+            s.health -= 4;
+            s.shake = Math.max(s.shake, 4);
+            s.flash = 'the trolley bottoms out';
+        } else {
+            s.flash = clean ? 'CLEAN LANDING' : 'sketchy landing';
+        }
         s.flashT = 0.8;
         addSpark(s, PLAYER_X, laneY(s.laneF), '💨');
     }
@@ -563,7 +575,8 @@ function fire(s: RaceState, id: string) {
         for (const o of s.obstacles) {
             const ahead = o.z - s.z;
             if (ahead > 1 && ahead < 16 && Math.abs(o.lane - s.laneF) < o.def.wide + 0.3 && o.def.clear === 'none') {
-                stopAt = Math.min(stopAt, ahead * 1.6);
+                // Converted into gap-metres so the bonk lands on the drawn car.
+                stopAt = Math.min(stopAt, (ahead * PX_PER_M) / GAP_PX);
             }
         }
     }
@@ -601,7 +614,11 @@ function stepShots(s: RaceState, dt: number) {
             // `returns && !piercing` is the chancla: ancient guidance system,
             // zero latency, does not need you to pick the right lane.
             const homing = !!w.returns && !w.piercing;
-            const onTarget = homing || Math.abs(s.thiefLane - sh.lane) < 0.95;
+            // A frisbee cuts a line across the street, so it forgives a bad
+            // read of his weave; everything else has to be thrown at the lane
+            // he'll actually be in by the time it lands.
+            const window = w.piercing ? 1.7 : 1.2;
+            const onTarget = homing || Math.abs(s.thiefLane - sh.lane) < window;
             if (onTarget) hitThief(s, w);
             if (w.returns) { sh.back = true; sh.travel = s.gap; } else s.shots.splice(i, 1);
         }
@@ -611,7 +628,7 @@ function stepShots(s: RaceState, dt: number) {
 function stepThief(s: RaceState, dt: number) {
     // He weaves because he cannot steer, not because he's evasive. Two sines of
     // different periods read as "drunk" rather than "patterned".
-    s.thiefLane = clamp(1.5 + Math.sin(s.t * 1.55) * 1.35 + Math.sin(s.t * 0.61) * 0.5, 0, LANES - 1);
+    s.thiefLane = clamp(1.5 + Math.sin(s.t * 1.2) * 1.35 + Math.sin(s.t * 0.47) * 0.5, 0, LANES - 1);
 
     // Rolling average rather than instantaneous speed, so he reacts to how the
     // run is going and not to every single carve and pothole.
@@ -1064,8 +1081,6 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     });
 
     bar(ctx, W - 42, 3, 38, 5, s.health / 100, s.health > 35 ? PAL.ok : PAL.bad);
-    const wid = defaultWeaponId(s);
-    void wid;
     text(ctx, `HP ${Math.max(0, Math.round(s.health))}`, W - 42, 12, { size: 6, color: PAL.dim });
 
     if (s.wob > 0.55) text(ctx, 'SPEED WOBBLE', W / 2, 26, { size: 7, color: PAL.bad, align: 'center' });

@@ -1449,14 +1449,31 @@ const drawCabin = (ctx: CanvasRenderingContext2D, w: World) => {
         });
     }
 
-    // Seat rows behind the aisle. Crouching drops you below the headrests,
-    // which is what "take cover behind a seat row" means here.
-    band(ctx, 104, 60, VIEW_W, cam, SEAT_PITCH, PAL.raised, (c, x) => {
-        rect(c, x + 6, 130, 32, 34, PAL.raised);
-        rect(c, x + 6, 124, 32, 8, def.boss ? PAL.violet : PAL.denimDark);
-        outline(c, x + 6, 124, 32, 40, PAL.line);
-        rect(c, x + 38, 140, 3, 24, PAL.panel);
-    });
+    if (def.boss) {
+        // Flight deck: two pilot seats facing the windscreen, a jump seat, and
+        // the crew rest bunk Yasser ends the game strapped into.
+        for (const [sx2, w2] of [[196, 30], [240, 30]] as [number, number][]) {
+            rect(ctx, sx2, 128, w2, 36, PAL.raised);
+            rect(ctx, sx2, 122, w2, 8, PAL.violet);
+            outline(ctx, sx2, 122, w2, 42, PAL.line);
+        }
+        rect(ctx, 24, 132, 22, 32, PAL.raised);
+        outline(ctx, 24, 132, 22, 32, PAL.warn);
+        text(ctx, 'JUMP', 26, 124, { size: 4, color: PAL.warn });
+        // The cabin door he came through.
+        rect(ctx, 96, 66, 30, 98, PAL.panel);
+        outline(ctx, 96, 66, 30, 98, PAL.line);
+        glyph(ctx, '🚪', 111, 116, 12);
+    } else {
+        // Seat rows behind the aisle. Crouching drops you below the headrests,
+        // which is what "take cover behind a seat row" means here.
+        band(ctx, 104, 60, VIEW_W, cam, SEAT_PITCH, PAL.raised, (c, x) => {
+            rect(c, x + 6, 130, 32, 34, PAL.raised);
+            rect(c, x + 6, 124, 32, 8, PAL.denimDark);
+            outline(c, x + 6, 124, 32, 40, PAL.line);
+            rect(c, x + 38, 140, 3, 24, PAL.panel);
+        });
+    }
 
     // Carpet + floor path lighting
     rect(ctx, 0, FLOOR_Y, VIEW_W, VIEW_H - FLOOR_Y, PAL.panel);
@@ -1493,13 +1510,16 @@ const drawCabin = (ctx: CanvasRenderingContext2D, w: World) => {
     }
 };
 
-const bubble = (ctx: CanvasRenderingContext2D, str: string, x: number, y: number, color: string = PAL.ink) => {
+const bubble = (ctx: CanvasRenderingContext2D, str: string, x: number, y: number, color: string = PAL.ink, lane = 0) => {
     const size = 5;
-    const wide = Math.min(150, str.length * 2.9 + 6);
+    // `lane` staggers bubbles vertically: three mooks shouting at once in the
+    // same row would otherwise print one unreadable line across the cabin.
+    y -= (lane % 3) * 9;
+    const wide = Math.min(132, str.length * 2.9 + 6);
     const bx = clampN(x - wide / 2, 2, VIEW_W - wide - 2);
     rect(ctx, bx, y - 9, wide, 11, 'rgba(4,6,10,0.88)');
     outline(ctx, bx, y - 9, wide, 11, PAL.line);
-    text(ctx, str.length > 50 ? `${str.slice(0, 49)}…` : str, bx + 3, y - 6, { size, color });
+    text(ctx, str.length > 44 ? `${str.slice(0, 43)}…` : str, bx + 3, y - 6, { size, color });
 };
 
 const drawMook = (ctx: CanvasRenderingContext2D, w: World, m: Mook) => {
@@ -1558,7 +1578,7 @@ const drawMook = (ctx: CanvasRenderingContext2D, w: World, m: Mook) => {
 
     // Health pip, only once he has been hit — keeps the picture clean.
     if (m.hp < m.maxHp && m.hp > 0) bar(ctx, sx - 9, m.y - h - 12, 18, 2, m.hp / m.maxHp, PAL.bad, PAL.panel);
-    if (m.sayT > 0) bubble(ctx, m.say, sx, m.y - h - 15, PAL.warn);
+    if (m.sayT > 0) bubble(ctx, m.say, sx, m.y - h - 15, PAL.warn, m.id);
 };
 
 const drawBoss = (ctx: CanvasRenderingContext2D, w: World, b: Boss) => {
