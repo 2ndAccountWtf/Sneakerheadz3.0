@@ -23,7 +23,7 @@
 import assert from 'node:assert/strict';
 import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
-    TURBO_MULT, SAY, BANNER,
+    TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
     COURT_L, COURT_R, BASE_SPEED,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
@@ -502,6 +502,76 @@ t('a basket never prints the same words twice in two sizes', () => {
             );
         }
     }
+});
+
+
+t('the camera never loses a player or the rim it is attacking', () => {
+    // The follow-cam punches in to about 1.5x so four sprites on a 284px court
+    // fill the frame instead of huddling in a corner of it. Everything that
+    // can go wrong with that is off-screen: a player who leaves the frame is a
+    // player you cannot react to, and a rim that leaves it is a basketball
+    // game you cannot aim. Both are invisible to every other check here.
+    let frames = 0, lostPlayer = 0, lostRim = 0, rimFrames = 0;
+    let minZoom = Infinity, maxZoom = 0;
+
+    for (let g = 0; g < 6; g++) {
+        let x = ((g + 7) * 2654435761) >>> 0;
+        const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+        const w = createWorld(7700 + g, 'Camera Test');
+        let f = 0;
+        // A turnover flips which rim matters to the far end of the court, and
+        // the camera eases rather than cutting — so for about half a second
+        // afterwards it is legitimately still travelling. Judge settled play,
+        // not the trip.
+        let lastPoss = w.possession;
+        let settledAt = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        while (w.phase !== 'over' && f < cap) {
+            stepWorld(w, DT, bot(w, rng, 1));
+            f++;
+            if (w.possession !== lastPoss) { lastPoss = w.possession; settledAt = f; }
+            if (w.phase !== 'play' || f % 6) continue;
+            if (f - settledAt < 40) continue;
+            // Where the eased camera actually puts things on the canvas.
+            const onScreen = (sx: number) => (sx - w.cam.fx) * w.cam.zoom + VW / 2;
+            frames++;
+            minZoom = Math.min(minZoom, w.cam.zoom);
+            maxZoom = Math.max(maxZoom, w.cam.zoom);
+            for (const p of w.players) {
+                const px = onScreen(screenX(p.x, p.z));
+                if (px < -10 || px > VW + 10) { lostPlayer++; break; }
+            }
+            // Only judge the rim once they are actually attacking it. A team
+            // bringing the ball up the other end is 280px from their own
+            // basket and does not need to see it yet — no zoom that frames
+            // four players can also hold a hoop most of a court away.
+            if (w.possession !== null) {
+                const handler = w.players[w.possession];
+                const rim = HOOPS[attackHoop(handler.team)];
+                if (hoopDist(handler, rim) < 130) {
+                    rimFrames++;
+                    const rx = onScreen(screenX(rim.x, rim.z));
+                    if (rx < -10 || rx > VW + 10) lostRim++;
+                }
+            }
+        }
+    }
+
+    assert.ok(frames > 500, `only sampled ${frames} frames — the games did not run`);
+    assert.ok(
+        lostPlayer / frames < 0.02,
+        `somebody was off the edge of the screen in ${(100 * lostPlayer / frames).toFixed(1)}% of frames`,
+    );
+    assert.ok(rimFrames > 200, `only ${rimFrames} frames of actual offence to judge`);
+    assert.ok(
+        lostRim / rimFrames < 0.05,
+        `the rim was off screen in ${(100 * lostRim / rimFrames).toFixed(1)}% of the frames `
+        + 'where somebody was attacking it — that is a basketball game you cannot aim',
+    );
+    // A camera pinned at 1.0 means the follow logic stopped working and the
+    // game quietly went back to showing three-quarters empty floor.
+    assert.ok(maxZoom > 1.2, `camera never punched in past ${maxZoom.toFixed(2)}`);
+    assert.ok(minZoom > 0.8 && maxZoom < 2.6, `zoom ranged ${minZoom.toFixed(2)}-${maxZoom.toFixed(2)}`);
 });
 
 console.log(`\n${pass} hoops checks passed.`);

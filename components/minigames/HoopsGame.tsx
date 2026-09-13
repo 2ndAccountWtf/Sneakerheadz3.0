@@ -45,8 +45,8 @@ import {
 /* Geometry                                                            */
 /* ------------------------------------------------------------------ */
 
-const VW = 352;
-const VH = 198;
+export const VW = 352;
+export const VH = 198;
 
 /** Player x bounds. The fence is at the very edge; this is the playable floor. */
 export const COURT_L = 34;
@@ -67,7 +67,7 @@ const floorY = (z: number) => FLOOR_BACK_Y + z * (FLOOR_FRONT_Y - FLOOR_BACK_Y);
  * and figure sizes keeps the cheat consistent.
  */
 const sc = (z: number) => 0.86 + 0.14 * z;
-const screenX = (x: number, z: number) => CENTER_X + (x - CENTER_X) * sc(z);
+export const screenX = (x: number, z: number) => CENTER_X + (x - CENTER_X) * sc(z);
 const screenY = (z: number, height: number) => floorY(z) - height * sc(z);
 
 /**
@@ -625,6 +625,23 @@ const CAM_PIVOT_X = CENTER_X;
 const CAM_PIVOT_Y = 118;
 
 /**
+ * Follow-cam limits.
+ *
+ * `FOLLOW_MAX_ZOOM` is the ceiling on punching in. Too high and a fast break
+ * whips the camera across the floor and a player is off-screen before you can
+ * react to him; 1.3 is about as close as a game where all four bodies matter
+ * can sit without losing one of them off an edge.
+ *
+ * `FOLLOW_MIN_SPAN` stops the camera slamming to maximum zoom in the one
+ * moment the bodies genuinely are on top of each other — a jump ball, a
+ * rebound scrum — where the closest framing is also the most disorienting.
+ */
+const FOLLOW_MAX_ZOOM = 1.75;
+const FOLLOW_MIN_SPAN = 150;
+/** Breathing room either side of the outermost player, in screen px. */
+const FOLLOW_MARGIN = 26;
+
+/**
  * Where the camera wants to be *this instant*, before `stepWorld` eases `w.cam`
  * toward it. A pure function of world state, called once a frame — nothing
  * here mutates anything, so it is safe to call from a test harness too.
@@ -636,27 +653,78 @@ const CAM_PIVOT_Y = 118;
  *    sprinting into open floor) so the break reads as open, not just fast.
  */
 const cameraTarget = (w: World): { zoom: number; fx: number; fy: number } => {
+    // Frame the players, not the architecture. Measured across twenty games,
+    // the four of them spread across about 70px of a 284px court — a quarter
+    // of its width — for most of a game, so a camera showing the whole court
+    // spent most of its time showing three-quarters empty floor with the game
+    // happening in a corner of it.
+    //
+    // The obvious suspect was the AI bunching up, and it is not: an off-ball
+    // spacing rule moved the mean gap between the two attackers by two pixels,
+    // because the off-ball man runs at the same top speed as the handler
+    // driving away from him and never arrives anywhere. The spread is
+    // structural — a full-court game on a 284px floor puts the action at one
+    // end — so the fix is to go and look at that end rather than to make four
+    // sprites stand further apart than the court has room for.
+    //
+    // So: zoom to fit the bodies, ease toward them, and never past the point
+    // where the floor runs out.
+    const xs = w.players.map(p => screenX(p.x, p.z));
+    // The rim being attacked is part of the shot. Framing the bodies alone
+    // punched in far enough that the basket left the screen, which is a
+    // basketball game you cannot aim: you could see four players beautifully
+    // and not the thing all four of them were running at. So the hoop joins
+    // the group the camera has to keep in view.
+    if (w.possession !== null) {
+        const target = HOOPS[attackHoop(w.players[w.possession].team)];
+        xs.push(screenX(target.x, target.z));
+    }
+    const left = Math.min(...xs);
+    const right = Math.max(...xs);
+    const span = Math.max(right - left, FOLLOW_MIN_SPAN) + FOLLOW_MARGIN * 2;
+
+    let zoom = clamp(VW / span, 1, FOLLOW_MAX_ZOOM);
+    // The existing fast-break pull-back wins over the follow: a break should
+    // read as open floor, which is the one moment the empty court is the point.
+    let breaking = false;
+    if (w.possession !== null) {
+        const p = w.players[w.possession];
+        if (speedMag(p) > BASE_SPEED * 1.2 && openness(w, p) > 55) { zoom = 0.93; breaking = true; }
+    }
+
+    // Focus between the middle of the bodies and the ball, so attention still
+    // leads toward the play rather than sitting on the group's centroid.
+    const ballX = screenX(w.ball.x, w.ball.z);
+    const mid = (left + right) / 2;
+    let fx = breaking
+        ? CAM_PIVOT_X + (ballX - CAM_PIVOT_X) * 0.22
+        : mid + (ballX - mid) * 0.35;
+
+    let fy = CAM_PIVOT_Y;
+
+    // The dunk punch rides on top of the follow framing rather than replacing
+    // it. It used to return an absolute zoom of 1.0-1.24, which was a punch in
+    // when the camera sat at 1.0 and — once the camera started following the
+    // play at about 1.5 — a pull *back* at the exact moment the game most
+    // wants to lean in. Layered as a multiplier, a slam reads as a slam at any
+    // framing the follow-cam happens to be holding.
     const dunker = w.players.find(p => p.dunkT > 0);
     if (dunker) {
         const t = clamp(dunker.dunkT / dunker.dunkDur, 0, 1);
         const h = HOOPS[dunker.dunkHoop];
-        const hx = screenX(h.x, h.z);
-        const hy = screenY(h.z, h.h * 0.5);
         const punch = t < 0.62 ? t / 0.62 : Math.max(0, 1 - (t - 0.62) / 0.38);
-        return {
-            zoom: 1 + 0.24 * punch,
-            fx: CAM_PIVOT_X + (hx - CAM_PIVOT_X) * (0.55 * punch),
-            fy: CAM_PIVOT_Y + (hy - CAM_PIVOT_Y) * (0.4 * punch),
-        };
+        zoom *= 1 + 0.24 * punch;
+        fx += (screenX(h.x, h.z) - fx) * (0.55 * punch);
+        fy += (screenY(h.z, h.h * 0.5) - fy) * (0.4 * punch);
     }
 
-    const fx = CAM_PIVOT_X + (screenX(w.ball.x, w.ball.z) - CAM_PIVOT_X) * 0.22;
-    let zoom = 1;
-    if (w.possession !== null) {
-        const p = w.players[w.possession];
-        if (speedMag(p) > BASE_SPEED * 1.2 && openness(w, p) > 55) zoom = 0.93;
-    }
-    return { zoom, fx, fy: CAM_PIVOT_Y };
+    // Never show past the edge of the world: at zoom z about the pivot the
+    // visible strip is fx ± VW/(2z), so keep that inside [0, VW].
+    const half = VW / (2 * zoom);
+    if (half < VW / 2) fx = clamp(fx, half, VW - half);
+    else fx = CAM_PIVOT_X;
+
+    return { zoom, fx, fy };
 };
 
 /* ------------------------------------------------------------------ */
