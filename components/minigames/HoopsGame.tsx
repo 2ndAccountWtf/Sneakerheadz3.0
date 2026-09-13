@@ -135,6 +135,26 @@ const SHOT_CLOCK = 15;
 const FIRE_STREAK = 3;          // classic: three straight makes and you ignite
 const FIRE_SECONDS = 22;        // hard ceiling so a hot run can't last forever
 
+/**
+ * A shot this bad does not get a normal rebound — it gets to be a brick.
+ * `shotChance` already folds in distance, contest and release quality, so
+ * this reads directly off the number the miss roll used: a heave is always
+ * one (it is a prayer by definition), anything else only qualifies if the
+ * player who took it basically had no business shooting. Tuned by measuring
+ * what share of *misses* this produces in the headless season — see the
+ * report for the actual number; the target was roughly one in six.
+ */
+const BRICK_CHANCE = 0.24;
+
+/** How many seconds of game clock count as "the final seconds" for the
+ * buzzer-beater slow-motion and the grace that lets a released shot finish
+ * instead of the game ending mid-flight. */
+const BUZZER_WINDOW = 6;
+/** Time-scale applied to ball flight, dunks and player motion while a shot
+ * is live inside that window — the world does not freeze (hitstop already
+ * owns that), it just visibly slows down. */
+const SLOWMO_FACTOR = 0.42;
+
 /* ------------------------------------------------------------------ */
 /* Commentary                                                          */
 /* ------------------------------------------------------------------ */
@@ -163,6 +183,15 @@ const SAY = {
         'Bricklayer. Union card and everything.',
         'He blames the shoes. The shoes are fine.',
         'That was a pass. That was definitely a pass.',
+    ],
+    // Not a generic miss — the shot was bad enough to actually become a
+    // brick (see BRICK_CHANCE). The joke is the visual; these just narrate it.
+    brick: [
+        'That is a brick. An actual brick.',
+        'Building code violation.',
+        'He just remodelled the rim with that one.',
+        'Somebody call a mason.',
+        'That was not going in with a stepladder.',
     ],
     steal: [
         'Pickpocket!',
@@ -193,6 +222,19 @@ const SAY = {
     fire: ['HE IS ON FIRE!', 'CALL THE FIRE DEPARTMENT!'],
     cold: ['The fire is out. Order restored.', 'They put him out. Barely.'],
     tip: ['Check it up. Make it take it.', 'Shoes on the line. Let us begin.'],
+    // Said only when a shot beats the game clock and goes in — see the
+    // buzzerLive handling in stepWorld. A buzzer-beater that misses gets no
+    // extra line of its own; the brick/miss line that already fired a
+    // moment earlier stays the last word, which reads better than two lines
+    // stepping on each other.
+    buzzer: [
+        'AT THE BUZZER!!',
+        'RIGHT AS TIME EXPIRED!',
+        'HE WILL BE TALKING ABOUT THAT ONE.',
+    ],
+    // Said only for a routine time-out ending (ball dead, clock hits zero) —
+    // there is no fresher line to step on, so this one gets to exist.
+    final: ['That is the ballgame.', 'And that, as they say, is that.'],
 };
 
 /* ------------------------------------------------------------------ */
@@ -274,9 +316,28 @@ export interface Ball {
     target: number;
     looseT: number;
     pickCool: number;
+    /**
+     * Decided the instant the shot is launched (see `launchShot`), from the
+     * same `shotChance` a miss already rolled against — a genuinely bad look
+     * bricks, a shot that was merely unlucky does not. Only means anything
+     * once the shot has actually missed; drives both the "does not bounce"
+     * physics and the brick-instead-of-ball render in `drawBall`.
+     */
+    brick: boolean;
 }
 
-interface Particle { x: number; z: number; y: number; vx: number; vy: number; life: number; max: number; kind: 'fire' | 'spark' }
+interface Particle {
+    x: number; z: number; y: number; vx: number; vy: number; life: number; max: number;
+    kind: 'fire' | 'spark' | 'dust';
+}
+
+/** A point popup — "+2" / "+3" floating off the scorer, independent of the
+ * big centre-screen banner so a bucket reads at the basket, not just up top. */
+interface Popup { x: number; z: number; y: number; text: string; color: string; life: number; max: number }
+
+/** How the game actually ended, so the final banner and the post-game card
+ * can tell a routine finish from a real buzzer-beater. */
+export type EndReason = 'target' | 'time' | 'buzzer-make' | 'buzzer-miss';
 
 export interface World {
     seed: number;
@@ -302,9 +363,34 @@ export interface World {
     /** Backboard-shatter flash timer per hoop — a fire dunk earns this. */
     shatter: [number, number];
     parts: Particle[];
+    popups: Popup[];
     /** Last team to score, used to drive the inbound. */
     lastScorer: 0 | 1;
     winner: 0 | 1 | null;
+    /** Freeze-frame timer: a handful of seconds' worth of frames where nothing
+     * in the world advances except the cosmetic decay (shake, banners, the
+     * particles/popups that made the moment). Scaled to how big the hit was —
+     * see the hitstop check at the top of `stepWorld`. */
+    hitstop: number;
+    /**
+     * Eased camera focus + zoom, in screen space, updated once a frame in
+     * `stepWorld` (see `cameraTarget`) and simply read back in `drawWorld`.
+     * Punches in on a dunk, drifts toward the ball otherwise, and pulls back
+     * on a fast break — a render-only transform, so nothing that measures
+     * against world coordinates (rim height, dunk range, the alley-oop
+     * window) needs to know it exists.
+     */
+    cam: { zoom: number; fx: number; fy: number };
+    /** Set the instant the game clock hits 0 with a shot (or dunk) still
+     * live, so that attempt gets to resolve instead of the game ending
+     * mid-flight. See the clock check in `stepWorld`. */
+    buzzerLive: boolean;
+    /** Grace beat after a missed buzzer-beater — long enough for the clang to
+     * read — before the game actually ends. See the live-play block. */
+    endHoldT: number;
+    /** How the game actually ended; drives the final banner and the
+     * post-game stat line. */
+    endReason: EndReason;
     /** Diagnostics the headless simulation asserts on. */
     stats: {
         shots: number; makes: number; dunks: number; steals: number; blocks: number;
@@ -315,6 +401,8 @@ export interface World {
         alleyOops: number; turboDunks: number;
         /** Every time any player ignites, across the whole game. */
         fires: number;
+        /** Misses ugly enough to render as an actual brick. See `launchShot`. */
+        bricks: number;
     };
 }
 
@@ -350,6 +438,20 @@ const pick = <T,>(w: World, arr: readonly T[]): T => arr[Math.floor(rng(w) * arr
 const say = (w: World, s: string) => { w.say = s; w.sayT = 3.4; };
 const shout = (w: World, s: string, color: string, hold = 1.4) => {
     w.bannerText = s; w.bannerT = hold; w.bannerColor = color;
+};
+
+/**
+ * Audio hook. There is no sound in this project yet and this file is not the
+ * place to build one — but every moment that will obviously want a cue
+ * (a dunk landing, a swish, a shove, a brick, the fire ignition, a
+ * buzzer-beater) already calls this with a name for it. Wiring in real audio
+ * later is filling in this one function, not hunting the file for triggers.
+ */
+const sfx = (
+    _id: 'swish' | 'three' | 'dunk' | 'brick' | 'block' | 'shove' | 'steal'
+        | 'intercept' | 'alley' | 'fire' | 'buzzer' | 'whistle',
+): void => {
+    // no-op — see the note above.
 };
 
 export const teammateOf = (w: World, p: Player) => w.players.find(o => o.team === p.team && o.id !== p.id)!;
@@ -394,6 +496,56 @@ export const dunkRangeFor = (p: Player): number => {
 /** Sprinting hard enough that a dunk from here should look and feel bigger. */
 export const isPoweringIn = (p: Player): boolean => speedMag(p) > BASE_SPEED * 1.15;
 
+/** True while a shot (or a dunk drive) is still being decided — the ball is
+ * in the air as a shot/heave, or somebody is mid-slam. A pass in flight does
+ * not count: only an actual attempt earns the buzzer-beater grace period and
+ * the final-seconds slow-motion. */
+const shotIsLive = (w: World): boolean =>
+    (w.ball.mode === 'flight' && w.ball.kind !== 'pass') || w.players.some(p => p.dunkT > 0);
+
+/**
+ * Camera pivot: the screen point that stays put while the camera zooms — level
+ * with the rim and centred on the court, so punching in or pulling back never
+ * drifts the floor out from under the fixed HUD above it.
+ */
+const CAM_PIVOT_X = CENTER_X;
+const CAM_PIVOT_Y = 118;
+
+/**
+ * Where the camera wants to be *this instant*, before `stepWorld` eases `w.cam`
+ * toward it. A pure function of world state, called once a frame — nothing
+ * here mutates anything, so it is safe to call from a test harness too.
+ *
+ *  - A dunk in progress punches in on the rim, peaking right at the slam and
+ *    easing back out through the landing.
+ *  - Otherwise the focus drifts a little toward the ball — attention, not a
+ *    hard lock — and pulls back on a genuine fast break (the ball carrier
+ *    sprinting into open floor) so the break reads as open, not just fast.
+ */
+const cameraTarget = (w: World): { zoom: number; fx: number; fy: number } => {
+    const dunker = w.players.find(p => p.dunkT > 0);
+    if (dunker) {
+        const t = clamp(dunker.dunkT / dunker.dunkDur, 0, 1);
+        const h = HOOPS[dunker.dunkHoop];
+        const hx = screenX(h.x, h.z);
+        const hy = screenY(h.z, h.h * 0.5);
+        const punch = t < 0.62 ? t / 0.62 : Math.max(0, 1 - (t - 0.62) / 0.38);
+        return {
+            zoom: 1 + 0.24 * punch,
+            fx: CAM_PIVOT_X + (hx - CAM_PIVOT_X) * (0.55 * punch),
+            fy: CAM_PIVOT_Y + (hy - CAM_PIVOT_Y) * (0.4 * punch),
+        };
+    }
+
+    const fx = CAM_PIVOT_X + (screenX(w.ball.x, w.ball.z) - CAM_PIVOT_X) * 0.22;
+    let zoom = 1;
+    if (w.possession !== null) {
+        const p = w.players[w.possession];
+        if (speedMag(p) > BASE_SPEED * 1.2 && openness(w, p) > 55) zoom = 0.93;
+    }
+    return { zoom, fx, fy: CAM_PIVOT_Y };
+};
+
 /* ------------------------------------------------------------------ */
 /* World construction                                                  */
 /* ------------------------------------------------------------------ */
@@ -416,7 +568,7 @@ const mkBall = (): Ball => ({
     mode: 'held', spin: 0,
     t: 0, dur: 1, sx: 0, sz: 0, sy: 0, tx: 0, tz: 0, ty: 0, arc: 0,
     kind: 'pass', made: false, pts: 2, shooter: 0, target: 0,
-    looseT: 0, pickCool: 0,
+    looseT: 0, pickCool: 0, brick: false,
 });
 
 /**
@@ -474,12 +626,18 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
         rimFlash: [0, 0],
         shatter: [0, 0],
         parts: [],
+        popups: [],
         lastScorer: 1,
         winner: null,
+        hitstop: 0,
+        cam: { zoom: 1, fx: CAM_PIVOT_X, fy: CAM_PIVOT_Y },
+        buzzerLive: false,
+        endHoldT: 0,
+        endReason: 'target',
         stats: {
             shots: 0, makes: 0, dunks: 0, steals: 0, blocks: 0,
             passes: 0, interceptions: 0, shoves: 0, shovesLanded: 0,
-            alleyOops: 0, turboDunks: 0, fires: 0,
+            alleyOops: 0, turboDunks: 0, fires: 0, bricks: 0,
         },
     };
     say(w, pick(w, SAY.tip));
@@ -495,6 +653,7 @@ const giveBall = (w: World, id: number) => {
     w.players[id].touchT = 0;
     w.ball.mode = 'held';
     w.ball.pickCool = 0.25;
+    w.ball.brick = false;         // caught clean — whatever it was, it isn't one anymore
     w.shotClock = SHOT_CLOCK;
 };
 
@@ -506,6 +665,9 @@ const looseBall = (w: World, x: number, z: number, y: number, vx: number, vy: nu
     b.vx = vx; b.vy = vy; b.vz = vz;
     b.looseT = 0;
     b.pickCool = 0.18;
+    // Default to "not a brick" — the one call site that wants it (a bad miss,
+    // in stepBall) sets it back to true right after calling this.
+    b.brick = false;
 };
 
 /**
@@ -577,7 +739,13 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
     const b = w.ball;
     const h = HOOPS[attackHoop(p.team)];
     const d = hoopDist(p, h);
-    const made = rng(w) < (heave ? 0.08 : shotChance(w, p, q, skill));
+    const chance = heave ? 0.08 : shotChance(w, p, q, skill);
+    const made = rng(w) < chance;
+    // A brick is decided off the exact same number the miss just rolled
+    // against: a heave is always one (it is a prayer by definition), and
+    // anything else only qualifies if this was a genuinely bad look — a shot
+    // that was merely unlucky does not turn into a joke on the rebound.
+    const brick = !made && (heave || chance < BRICK_CHANCE);
 
     w.stats.shots++;
     p.charge = -1;
@@ -594,6 +762,8 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
             shout(w, 'REJECTED!', PAL.bad, 1.1);
             say(w, pick(w, SAY.block));
             w.shake = Math.max(w.shake, 5);
+            w.hitstop = Math.max(w.hitstop, 0.07);
+            sfx('block');
             looseBall(w, p.x + o.facing * 10, p.z, 24, o.facing * 70 + (rng(w) - 0.5) * 20, -40, (rng(w) - 0.5) * 0.4);
             return;
         }
@@ -603,6 +773,7 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
     b.kind = heave ? 'heave' : 'shot';
     b.shooter = p.id;
     b.made = made;
+    b.brick = brick;
     b.pts = d > THREE_DIST ? 3 : 2;
     b.t = 0;
     // Longer shots hang longer and arc higher; you can watch it and hope.
@@ -714,6 +885,8 @@ const attemptShove = (w: World, defender: Player, handler: Player) => {
     shout(w, 'KNOCKED DOWN!', PAL.bad, 1);
     say(w, pick(w, SAY.shove));
     w.shake = Math.max(w.shake, 7);
+    w.hitstop = Math.max(w.hitstop, 0.05);
+    sfx('shove');
     looseBall(w, handler.x, handler.z, 12, dir * 60 + (rng(w) - 0.5) * 30, -30, (rng(w) - 0.5) * 0.5);
 };
 
@@ -737,6 +910,15 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
     w.lastScorer = scorer.team;
     w.stats.makes++;
     w.rimFlash[attackHoop(scorer.team)] = 0.55;
+    sfx(dunkKind === 'alley' ? 'alley' : viaDunk ? 'dunk' : pts === 3 ? 'three' : 'swish');
+
+    // Points, popping off the scorer rather than only up in the corner —
+    // a bucket should read at the basket, where you were looking.
+    w.popups.push({
+        x: scorer.x, z: scorer.z, y: 30 + scorer.y,
+        text: `+${pts}`, color: viaDunk ? PAL.legend : pts === 3 ? PAL.accent : PAL.ok,
+        life: 0.9, max: 0.9,
+    });
 
     scorer.streak++;
     for (const o of w.players) {
@@ -756,19 +938,33 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
         w.stats.fires++;
         shout(w, `${scorer.name} IS ON FIRE!`, PAL.warn, 2);
         say(w, pick(w, SAY.fire));
-        w.shake = Math.max(w.shake, 4);
+        w.shake = Math.max(w.shake, 8);
+        w.hitstop = Math.max(w.hitstop, 0.08);
+        sfx('fire');
+        // The ignition gets its own burst on top of the flame trail that
+        // starts ticking once `onFire` is true — a whoosh, not a fade-in.
+        for (let i = 0; i < 12; i++) {
+            w.parts.push({
+                x: scorer.x, z: scorer.z, y: 8 + rng(w) * 16,
+                vx: (rng(w) - 0.5) * 90, vy: 40 + rng(w) * 70,
+                life: 0.55, max: 0.55, kind: 'fire',
+            });
+        }
     } else if (dunkKind === 'alley') {
         shout(w, pick(w, SAY.alley), PAL.legend, 1.6);
         say(w, pick(w, SAY.alley));
     } else if (viaDunk) {
         shout(w, pick(w, SAY.dunk).replace(/[.!]$/, '!'), PAL.legend, 1.5);
         say(w, pick(w, SAY.dunk));
+    } else if (scorer.streak === 2) {
+        // "Heating up" is the tension cue — it beats the plain three-point
+        // call for the one shot where they'd otherwise collide, so it never
+        // goes unsaid just because the second make of a run was from deep.
+        shout(w, pts === 3 ? 'HEATING UP FROM DEEP' : 'HEATING UP', PAL.warn, 1.1);
+        say(w, pick(w, SAY.heat));
     } else if (pts === 3) {
         shout(w, 'THREE!', PAL.accent, 1.1);
         say(w, pick(w, SAY.three));
-    } else if (scorer.streak === 2) {
-        shout(w, 'HEATING UP', PAL.warn, 1.1);
-        say(w, pick(w, SAY.heat));
     } else {
         say(w, pick(w, SAY.make));
     }
@@ -777,12 +973,20 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
     if (dunkKind === 'turbo') w.stats.turboDunks++;
     if (dunkKind === 'alley') w.stats.alleyOops++;
 
+    // Hitstop on a made dunk, scaled to how big a deal it is — a plain slam
+    // barely registers, a fire dunk is the biggest freeze in the game (see
+    // the backboard-shatter block just below, which stacks its own on top).
+    if (viaDunk) {
+        w.hitstop = Math.max(w.hitstop, dunkKind === 'alley' ? 0.09 : dunkKind === 'turbo' ? 0.08 : 0.06);
+    }
+
     // Backboard shatter: earned, not cheap — only a dunk landed by a player
     // who is already (or just now) on fire cracks the glass.
     if (viaDunk && scorer.onFire) {
         const hi = attackHoop(scorer.team);
         w.shatter[hi] = 1.1;
         w.shake = Math.max(w.shake, 11);
+        w.hitstop = Math.max(w.hitstop, 0.14);
         for (let i = 0; i < 14; i++) {
             w.parts.push({
                 x: HOOPS[hi].x, z: HOOPS[hi].z, y: HOOPS[hi].h - 6,
@@ -796,18 +1000,49 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
     w.phaseT = viaDunk ? 1.15 : 0.95;
     w.possession = null;
     w.ball.mode = 'loose';
+    w.ball.brick = false;
     const h = HOOPS[attackHoop(scorer.team)];
     w.ball.x = h.x; w.ball.z = h.z; w.ball.y = h.h - 6;
     w.ball.vx = h.inward * 12; w.ball.vy = -10; w.ball.vz = 0;
 
-    if (w.score[scorer.team] >= TARGET_SCORE) endGame(w);
+    // Whether this bucket also ends the game (target reached, or the clock
+    // already ran out under it) is decided once the score-phase celebration
+    // above has had its moment — see the 'score' phase branch in stepWorld.
+    // That is what gives the winning bucket its held beat instead of the
+    // "make" banner being clobbered by "YOU WIN!" on the very same frame.
 };
 
-const endGame = (w: World) => {
+const endGame = (w: World, reason: EndReason = 'target') => {
     w.phase = 'over';
     w.phaseT = 0;
+    w.endReason = reason;
     w.winner = w.score[0] > w.score[1] ? 0 : 1;
-    shout(w, w.winner === 0 ? 'YOU WIN!' : 'YOU LOSE', w.winner === 0 ? PAL.ok : PAL.bad, 99);
+    const youWin = w.winner === 0;
+    sfx('whistle');
+
+    if (reason === 'buzzer-make') {
+        // The screenshot moment: hold on it hard.
+        shout(w, 'BUZZER BEATER!!', PAL.legend, 99);
+        w.hitstop = Math.max(w.hitstop, 0.1);
+        w.shake = Math.max(w.shake, 6);
+        sfx('buzzer');
+        say(w, pick(w, SAY.buzzer));
+        for (let i = 0; i < 10; i++) {
+            w.parts.push({
+                x: w.ball.x, z: w.ball.z, y: 10 + rng(w) * 20,
+                vx: (rng(w) - 0.5) * 120, vy: 30 + rng(w) * 80,
+                life: 0.7, max: 0.7, kind: 'spark',
+            });
+        }
+        return;
+    }
+
+    shout(w, youWin ? 'YOU WIN!' : 'YOU LOSE', youWin ? PAL.ok : PAL.bad, 99);
+    // A plain time-out gets its own line; a target-reached win already had
+    // the winning bucket's own call a moment ago, and a missed buzzer-beater
+    // already had the brick/miss line — either would just be talking over
+    // itself.
+    if (reason === 'time') say(w, pick(w, SAY.final));
 };
 
 /* ------------------------------------------------------------------ */
@@ -995,6 +1230,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
                     giveBall(w, p.id);
                     say(w, pick(w, SAY.steal));
                     shout(w, 'STOLEN!', PAL.accent2, 0.9);
+                    sfx('steal');
                 } else {
                     say(w, 'That was NOT a foul.');
                 }
@@ -1132,6 +1368,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
                     giveBall(w, p.id);
                     shout(w, 'STRIP!', PAL.accent, 0.9);
                     say(w, pick(w, SAY.steal));
+                    sfx('steal');
                 } else {
                     say(w, 'He reaches. He misses. He complains.');
                 }
@@ -1189,6 +1426,7 @@ const stepBall = (w: World, dt: number) => {
                     w.stats.interceptions++;
                     shout(w, 'PICKED OFF!', PAL.accent2, 0.9);
                     say(w, pick(w, SAY.intercept));
+                    sfx('intercept');
                     giveBall(w, o.id);
                     return;
                 }
@@ -1210,6 +1448,18 @@ const stepBall = (w: World, dt: number) => {
                 }
             } else if (b.made) {
                 score(w, w.players[b.shooter], b.pts, 'none');
+            } else if (b.brick) {
+                // Not a metaphor. A shot this bad does not get a live rebound
+                // — it becomes an actual brick, clangs, and drops dead. See
+                // `drawBall` for the swap and the no-bounce physics below.
+                say(w, pick(w, SAY.brick));
+                w.rimFlash[attackHoop(w.players[b.shooter].team)] = 0.35;
+                w.stats.bricks++;
+                w.shake = Math.max(w.shake, 6);
+                w.hitstop = Math.max(w.hitstop, 0.07);
+                sfx('brick');
+                looseBall(w, b.x, b.z, b.y, 0, -30, 0);
+                w.ball.brick = true;
             } else {
                 // Clank. Live rebound off the iron, tipped back into the court.
                 const h = HOOPS[attackHoop(w.players[b.shooter].team)];
@@ -1235,10 +1485,25 @@ const stepBall = (w: World, dt: number) => {
 
     if (b.y <= 3) {
         b.y = 3;
-        b.vy = -b.vy * 0.55;              // bounce; dies out after a few hops
-        b.vx *= 0.84;
-        b.vz *= 0.7;
-        if (Math.abs(b.vy) < 22) { b.vy = 0; b.vx *= 0.9; }
+        if (b.brick) {
+            // A brick does not bounce. That is the entire joke: it thuds and
+            // sits there. A puff of dust on the one frame it actually lands,
+            // then dead stop.
+            if (b.vy !== 0 || Math.abs(b.vx) > 0.5 || Math.abs(b.vz) > 0.01) {
+                for (let i = 0; i < 5; i++) {
+                    w.parts.push({
+                        x: b.x, z: b.z, y: 2, vx: (rng(w) - 0.5) * 30, vy: 10 + rng(w) * 18,
+                        life: 0.35, max: 0.35, kind: 'dust',
+                    });
+                }
+            }
+            b.vy = 0; b.vx = 0; b.vz = 0;
+        } else {
+            b.vy = -b.vy * 0.55;          // bounce; dies out after a few hops
+            b.vx *= 0.84;
+            b.vz *= 0.7;
+            if (Math.abs(b.vy) < 22) { b.vy = 0; b.vx *= 0.9; }
+        }
     }
     // The fence is in play. Everything is in play.
     if (b.x < COURT_L - 6) { b.x = COURT_L - 6; b.vx = Math.abs(b.vx) * 0.7; }
@@ -1310,6 +1575,8 @@ const stepDunk = (w: World, p: Player, dt: number) => {
             shout(w, 'DENIED!', PAL.bad, 1.2);
             say(w, pick(w, SAY.block));
             w.shake = Math.max(w.shake, 6);
+            w.hitstop = Math.max(w.hitstop, 0.07);
+            sfx('block');
             looseBall(w, p.x - h.inward * 16, p.z, 26, -h.inward * 60, -50);
         } else {
             w.shake = Math.max(w.shake, 9);
@@ -1330,10 +1597,15 @@ const stepDunk = (w: World, p: Player, dt: number) => {
 /* The step                                                            */
 /* ------------------------------------------------------------------ */
 
-export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
-    if (w.phase === 'over') return;
-
-    w.t += dt;
+/**
+ * The decay every frame owes the cosmetic state — shake, banners, the
+ * commentator ticker, rim flash, backboard shatter, and the particle/popup
+ * budgets. Pulled out on its own because hitstop needs to run it too: the
+ * whole point of a freeze-frame is that the world stops but the flourish
+ * that triggered it (sparks, dust, the flash) keeps animating, or the freeze
+ * just reads as a pause screen instead of an impact.
+ */
+const stepCosmetics = (w: World, dt: number) => {
     w.shake = Math.max(0, w.shake - dt * 26);
     w.bannerT = Math.max(0, w.bannerT - dt);
     w.sayT = Math.max(0, w.sayT - dt);
@@ -1342,7 +1614,6 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     w.shatter[0] = Math.max(0, w.shatter[0] - dt);
     w.shatter[1] = Math.max(0, w.shatter[1] - dt);
 
-    // Particles (flame trail + dunk sparks) live on a fixed budget.
     for (let i = w.parts.length - 1; i >= 0; i--) {
         const q = w.parts[i];
         q.life -= dt;
@@ -1352,6 +1623,41 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         if (q.life <= 0) w.parts.splice(i, 1);
     }
     if (w.parts.length > 60) w.parts.splice(0, w.parts.length - 60);
+
+    for (let i = w.popups.length - 1; i >= 0; i--) {
+        const q = w.popups[i];
+        q.life -= dt;
+        q.y += 16 * dt;          // floats up
+        if (q.life <= 0) w.popups.splice(i, 1);
+    }
+    if (w.popups.length > 10) w.popups.splice(0, w.popups.length - 10);
+};
+
+export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
+    if (w.phase === 'over') return;
+
+    // Hitstop: a handful of frozen frames on a big hit — a monster dunk, a
+    // swatted block, a landed shove, a brick clanging home — sells the
+    // weight of the moment far better than shake alone. Nothing about the
+    // world advances while it runs except this cosmetic decay, so it costs
+    // nothing in the physics the balance tests depend on.
+    if (w.hitstop > 0) {
+        w.hitstop = Math.max(0, w.hitstop - dt);
+        stepCosmetics(w, dt);
+        return;
+    }
+
+    w.t += dt;
+    stepCosmetics(w, dt);
+
+    // Camera: eased toward wherever `cameraTarget` wants it this instant, so
+    // a dunk punch-in or a fast-break pull-back arrives as a motion rather
+    // than a cut. Pure render-side state — nothing below reads `w.cam`.
+    const camT = cameraTarget(w);
+    const camEase = clamp(dt * 8, 0, 1);
+    w.cam.zoom += (camT.zoom - w.cam.zoom) * camEase;
+    w.cam.fx += (camT.fx - w.cam.fx) * camEase;
+    w.cam.fy += (camT.fy - w.cam.fy) * camEase;
 
     if (w.phase === 'tip') {
         w.phaseT -= dt;
@@ -1376,15 +1682,37 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             }
         }
         if (w.phaseT <= 0) {
-            inbound(w, (1 - w.lastScorer) as 0 | 1);
-            w.phase = 'play';
+            // Whether this bucket also ends the game is decided here, once
+            // its own celebration has had its full beat — not the instant it
+            // went in. That is what gives the winning shot a held moment
+            // instead of "YOU WIN!" clobbering "BOOMSHAKALAKA" on one frame.
+            const gameOver = w.clock <= 0 || w.score[0] >= TARGET_SCORE || w.score[1] >= TARGET_SCORE;
+            if (gameOver) {
+                endGame(w, w.buzzerLive ? 'buzzer-make' : 'target');
+            } else {
+                inbound(w, (1 - w.lastScorer) as 0 | 1);
+                w.phase = 'play';
+            }
         }
         return;
     }
 
     /* --- live play ---------------------------------------------------- */
     w.clock -= dt;
-    if (w.clock <= 0) { w.clock = 0; endGame(w); return; }
+    if (w.clock <= 0) {
+        w.clock = 0;
+        // Let a shot (or a dunk drive) that was already live finish instead
+        // of the game ending mid-air — the classic "shot released before the
+        // buzzer still counts" rule. Only the FIRST frame the clock hits zero
+        // makes this call: once `buzzerLive` is set, every later frame falls
+        // straight through and lets the endHoldT/'score'-phase machinery
+        // below decide when the game actually ends, instead of re-triggering
+        // this check and ending it the instant the shot stops being "live".
+        if (!w.buzzerLive) {
+            if (!shotIsLive(w)) { endGame(w, 'time'); return; }
+            w.buzzerLive = true;
+        }
+    }
 
     if (w.possession !== null) {
         w.shotClock -= dt;
@@ -1396,6 +1724,14 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             launchShot(w, p, 0.1, 1, true);
         }
     }
+
+    // Final-seconds slow motion: a shot (or dunk) still live with the clock
+    // inside BUZZER_WINDOW visibly slows down — the ball hangs, the reach
+    // stretches out — without the game clock or cooldowns themselves
+    // slowing, so nothing about pacing or termination changes, only how the
+    // moment plays out on screen.
+    const slowmo = w.clock <= BUZZER_WINDOW && shotIsLive(w);
+    const simDt = slowmo ? dt * SLOWMO_FACTOR : dt;
 
     for (const p of w.players) {
         p.cool = Math.max(0, p.cool - dt);
@@ -1416,25 +1752,25 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             }
         }
 
-        if (p.dunkT > 0) { stepDunk(w, p, dt); clampToCourt(p); continue; }
+        if (p.dunkT > 0) { stepDunk(w, p, simDt); clampToCourt(p); continue; }
 
         // Shoved: down and sliding, no input reaches this body until it ends.
         if (p.stumbleT > 0) {
             p.stumbleT = Math.max(0, p.stumbleT - dt);
-            p.x += p.vx * dt;
-            p.z += p.vz * dt;
+            p.x += p.vx * simDt;
+            p.z += p.vz * simDt;
             p.vx *= 0.86; p.vz *= 0.86;
             clampToCourt(p);
             continue;
         }
 
-        if (p.human) humanControl(w, p, cmd, dt);
-        else aiThink(w, p, dt);
+        if (p.human) humanControl(w, p, cmd, simDt);
+        else aiThink(w, p, simDt);
 
         // Vertical: a single arcade jump arc, no air control, no double jump.
         if (p.y > 0 || p.vy !== 0) {
-            p.vy -= GRAVITY * dt;
-            p.y += p.vy * dt;
+            p.vy -= GRAVITY * simDt;
+            p.y += p.vy * simDt;
             if (p.y <= 0) { p.y = 0; p.vy = 0; }
         }
         if (!p.human && !p.onFire) p.turbo = clamp(p.turbo + TURBO_REGEN * 0.7 * dt, 0, 1);
@@ -1459,9 +1795,20 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         }
     }
 
-    stepBall(w, dt);
+    stepBall(w, simDt);
 
-    if (w.score[0] >= TARGET_SCORE || w.score[1] >= TARGET_SCORE) endGame(w);
+    // A buzzer shot that resolved as a make routes through the 'score' phase
+    // above (and gets its held beat there). One that resolved as a miss (or a
+    // dunk that got denied) never enters that phase at all — it just goes
+    // loose — so it gets a short grace of its own here: long enough for the
+    // clang or the brick's dust puff to read before the final whistle.
+    if (w.buzzerLive && w.phase === 'play' && w.endHoldT <= 0 && !shotIsLive(w)) {
+        w.endHoldT = 0.5;
+    }
+    if (w.endHoldT > 0) {
+        w.endHoldT -= dt;
+        if (w.endHoldT <= 0) { endGame(w, 'buzzer-miss'); return; }
+    }
 };
 
 /* ------------------------------------------------------------------ */
@@ -1506,14 +1853,30 @@ const drawBackdrop = (ctx: CanvasRenderingContext2D, w: World) => {
         }
     });
 
-    // Crowd behind the fence: bobbing silhouettes, permanently unimpressed.
+    // Crowd behind the fence — no longer bobbing on a fixed sine regardless
+    // of what just happened. `hype` is a cheap read of "something big just
+    // occurred" off state the sim already tracks (shake magnitude covers
+    // dunks, blocks and shoves alike, since all three set it) rather than a
+    // dedicated crowd-energy field; `losing` quiets them down when nothing
+    // is popping off and the human is getting beaten on the scoreboard.
+    const hype = clamp(w.shake / 10, 0, 1);
+    const fired = w.players.some(p => p.onFire);
+    const losing = w.score[1] - w.score[0] >= 4;
+    const energy = clamp((hype * 1.4 + (fired ? 0.35 : 0)) * (losing ? 0.4 : 1), 0, 1.5);
     for (let i = 0; i < 22; i++) {
         const x = 6 + i * 16 + hash(i) * 6;
-        const bob = Math.sin(w.t * 2.4 + i) * 1.6;
-        const y = 118 + hash(i + 3) * 3 + bob;
-        const c = i % 5 === 0 ? '#1c2740' : '#131b2c';
-        rect(ctx, x - 4, y - 10, 8, 11, c);
+        const jitter = hash(i + 50);
+        const amp = 1.6 + energy * 5 * (0.4 + jitter);
+        const speed = 2.4 + energy * 3;
+        const bob = Math.sin(w.t * speed + i) * amp;
+        // A surge rises (the crowd is on its feet); a quiet stretch sinks
+        // and shrinks a touch, reading as a crowd that has sat back down.
+        const y = 118 + hash(i + 3) * 3 + bob - energy * jitter * 3 + (losing && energy < 0.15 ? 1.5 : 0);
+        const quiet = losing && energy < 0.15;
+        const c = quiet ? '#0c1120' : i % 5 === 0 ? '#1c2740' : '#131b2c';
+        rect(ctx, x - 4, y - 10, 8, quiet ? 9 : 11, c);
         circle(ctx, x, y - 12, 3.4, c);
+        if (energy > 0.55 && i % 3 === 0) glyph(ctx, '🙌', x, y - 19, 6 + energy * 3, 0, clamp(energy, 0, 1));
     }
 
     // Chain-link fence across the back of the court.
@@ -1677,6 +2040,17 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
         rotation: down ? p.facing * 1.15 : 0,
     });
 
+    // Streak pips: the tension the "heating up" line only announces once —
+    // this is what lets you watch a run build toward FIRE_STREAK in real
+    // time, for whoever is on it, teammate or opponent.
+    if (p.streak > 0 && !p.onFire) {
+        const pw = 5;
+        const baseX = x - (FIRE_STREAK * pw) / 2;
+        const baseY = feet - h - 20;
+        for (let i = 0; i < FIRE_STREAK; i++) {
+            rect(ctx, baseX + i * pw, baseY, pw - 1, 3, i < p.streak ? PAL.warn : 'rgba(255,255,255,0.15)');
+        }
+    }
     if (p.onFire) glyph(ctx, '🔥', x - p.facing * 7, feet - h - 4, 9 + Math.sin(w.t * 14) * 1.5);
     // Alley-oop cue: this man is up, near the rim, ready to catch a lob.
     if (p.alleyCall > 0 || (p.y > 6 && hoopDist(p, HOOPS[attackHoop(p.team)]) < ALLEY_HOOP_R)) {
@@ -1719,6 +2093,27 @@ const drawBall = (ctx: CanvasRenderingContext2D, w: World) => {
         ctx.restore();
     }
 
+    // A shot hanging in the final seconds gets a comet of faint echoes
+    // behind it — the one visual that makes "everything just slowed down"
+    // read on the ball itself, not just on how fast the legs are moving.
+    if (b.mode === 'flight' && b.kind !== 'pass' && w.clock <= BUZZER_WINDOW) {
+        for (const back of [0.06, 0.12, 0.18]) {
+            const et = Math.max(0, b.t - back);
+            const ex = b.sx + (b.tx - b.sx) * et;
+            const ez = b.sz + (b.tz - b.sz) * et;
+            const ey = b.sy + (b.ty - b.sy) * et + b.arc * 4 * et * (1 - et);
+            glyph(ctx, '●', screenX(ex, ez), screenY(ez, ey), 4 * sc(ez), 0, 0.16);
+        }
+    }
+
+    // A brick renders as exactly that, from the instant it clangs off the
+    // rim (see the miss handling in stepBall) until somebody scoops it up.
+    if (b.mode === 'loose' && b.brick) {
+        shadow(ctx, x, floorY(b.z), 3.2, 1.3, 0.45);
+        glyph(ctx, '🧱', x, y - 2, 9 * sc(b.z));
+        return;
+    }
+
     shadow(ctx, screenX(b.x, b.z), floorY(b.z), 3.2, 1.3, 0.45);
     const r = 3.4 * sc(b.z);
     circle(ctx, x, y, r + 0.6, '#0b0705');
@@ -1747,10 +2142,48 @@ const fmtClock = (s: number) => {
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
 
+/**
+ * The post-game stat line — the box score `World.stats` was tracking the
+ * whole time, condensed into one sentence for the result card. Only mentions
+ * a stat that actually happened, so a quiet game gets a quiet line instead
+ * of a wall of zeroes.
+ */
+const statLine = (w: World): string => {
+    const s = w.stats;
+    const pct = s.shots > 0 ? Math.round((s.makes / s.shots) * 100) : 0;
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const bits = [
+        `${s.makes}-for-${s.shots} shooting (${pct}%)`,
+        s.dunks > 0 ? `${plural(s.dunks, 'dunk')}${s.turboDunks > 0 ? ` (${s.turboDunks} turbo)` : ''}` : null,
+        s.alleyOops > 0 ? `${plural(s.alleyOops, 'alley-oop')}` : null,
+        s.bricks > 0 ? `${plural(s.bricks, 'brick')}` : null,
+        s.steals > 0 ? `${plural(s.steals, 'steal')}` : null,
+        s.blocks > 0 ? `${plural(s.blocks, 'block')}` : null,
+        s.shovesLanded > 0 ? `${plural(s.shovesLanded, 'shove')} landed` : null,
+        s.fires > 0 ? `caught fire ${s.fires}x` : null,
+    ].filter((b): b is string => b !== null);
+    return bits.join(', ') + '.';
+};
+
 export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
+    // Cleared once at identity, before the camera transform below: zoomed out
+    // on a fast break, the transformed scene is smaller than the physical
+    // canvas, and without this the corners it no longer reaches would show
+    // whatever the previous frame left there instead of empty court-void.
+    clear(ctx, VW, VH, '#070b14');
+
     ctx.save();
     const [sx, sy] = shakeOffset(w.shake);
     ctx.translate(sx, sy);
+    // Camera: punches in on a dunk, drifts toward the ball, pulls back on a
+    // fast break (see `cameraTarget` / the easing in `stepWorld`). Mapping
+    // `w.cam.fx/fy` onto the fixed pivot is what makes this "look at that
+    // point, zoomed" rather than "zoom from the corner" — everything that
+    // draws in world coordinates (screenX/screenY, hoop rim height, dunk
+    // range) is completely unaware this transform exists.
+    ctx.translate(CAM_PIVOT_X, CAM_PIVOT_Y);
+    ctx.scale(w.cam.zoom, w.cam.zoom);
+    ctx.translate(-w.cam.fx, -w.cam.fy);
 
     drawBackdrop(ctx, w);
     drawCourt(ctx, w);
@@ -1764,6 +2197,8 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
         const py = screenY(q.z, q.y);
         if (q.kind === 'fire') {
             circle(ctx, px, py, 3.2 * a + 0.6, `rgba(255,${90 + 120 * a | 0},0,${0.6 * a})`);
+        } else if (q.kind === 'dust') {
+            rect(ctx, px, py, 2 * a + 1, 2 * a + 1, `rgba(170,150,130,${0.5 * a})`);
         } else {
             rect(ctx, px, py, 1.6, 1.6, `rgba(255,220,120,${a})`);
         }
@@ -1775,6 +2210,23 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     // one thing this game is not allowed to do.
     for (const p of [...w.players].sort((a, b) => a.z - b.z)) drawPlayer(ctx, w, p);
     drawBall(ctx, w);
+
+    // Point popups: "+2"/"+3" off the scorer, on top of everything else in
+    // world space so it never disappears into the pile the way the HUD
+    // score in the corner can.
+    for (const q of w.popups) {
+        const a = clamp(q.life / q.max, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = a;
+        text(ctx, q.text, screenX(q.x, q.z), screenY(q.z, q.y), {
+            size: 10, color: q.color, align: 'center', bold: true,
+        });
+        ctx.restore();
+    }
+
+    // Camera + shake end here: the HUD, banners and ticker below are fixed
+    // screen furniture and must never swim with either of them.
+    ctx.restore();
 
     /* --- on-canvas furniture ------------------------------------------ */
     rect(ctx, 0, 0, VW, 13, 'rgba(4,6,10,0.72)');
@@ -1808,14 +2260,33 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
         const pop = w.phase === 'over' ? 20 : 16 + Math.sin(w.t * 22) * 2;
         drawBanner(ctx, w.bannerText, VW, 66, w.bannerColor, pop);
     }
+    // A buzzer-beater's big banner is the hype line, not the score — spell
+    // out who actually won underneath it so the card still reads at a glance.
+    if (w.phase === 'over' && w.endReason === 'buzzer-make') {
+        text(ctx, w.winner === 0 ? 'YOU WIN' : 'YOU LOSE', VW / 2, 88, {
+            size: 9, color: w.winner === 0 ? PAL.ok : PAL.bad, align: 'center', bold: true,
+        });
+    }
     if (w.phase === 'tip') {
-        drawBanner(ctx, 'CHECK IT UP', VW, 48, PAL.accent, 18);
-        text(ctx, `First to ${TARGET_SCORE} — shoes on the line`, VW / 2, 62, {
+        const pop = 14 + clamp((1.8 - w.phaseT) / 0.35, 0, 1) * 6;
+        drawBanner(ctx, 'CHECK IT UP', VW, 42, PAL.accent, pop);
+        text(ctx, 'YOU & BIG MIKE', VW / 2 - 5, 55, { size: 7, color: PAL.accent, align: 'right', bold: true });
+        text(ctx, 'VS', VW / 2, 55, { size: 6, color: PAL.dim, align: 'center' });
+        text(ctx, `${w.opponent} & HIS COUSIN`, VW / 2 + 5, 55, { size: 7, color: PAL.accent2, align: 'left', bold: true });
+        text(ctx, `First to ${TARGET_SCORE} — shoes on the line`, VW / 2, 67, {
             size: 7, color: PAL.dim, align: 'center',
         });
     }
 
-    ctx.restore();
+    // Hitstop punch: a bright single-frame flash right as the freeze lands —
+    // cheap, sells the weight of the hit, and belongs on top of absolutely
+    // everything, HUD included.
+    if (w.hitstop > 0) {
+        ctx.save();
+        ctx.globalAlpha = clamp(w.hitstop / 0.14, 0, 1) * 0.5;
+        rect(ctx, 0, 0, VW, VH, '#ffffff');
+        ctx.restore();
+    }
 };
 
 /* ------------------------------------------------------------------ */
@@ -1890,6 +2361,7 @@ const HoopsGame: React.FC<{
 
     const w = worldRef.current;
     const dunks = w.stats.dunks;
+    const buzzer = w.endReason === 'buzzer-make' || w.endReason === 'buzzer-miss';
 
     return (
         <ArcadeShell
@@ -1923,11 +2395,15 @@ const HoopsGame: React.FC<{
                 done === null ? undefined : (
                     <MiniGameResult
                         won={done}
-                        headline={done ? `You Win ${hud.you}-${hud.them}` : `You Lose ${hud.you}-${hud.them}`}
+                        headline={
+                            (buzzer ? 'Buzzer Beater — ' : '')
+                            + (done ? `You Win ${hud.you}-${hud.them}` : `You Lose ${hud.you}-${hud.them}`)
+                        }
                         detail={
-                            done
+                            (done
                                 ? `${dunks > 0 ? 'The rim needs a doctor. ' : ''}${opponent} says the court was uneven and that he plays overseas.`
-                                : `${opponent} hits one more after the whistle, just to be sure everybody saw it.`
+                                : `${opponent} hits one more after the whistle, just to be sure everybody saw it.`)
+                            + ` ${statLine(w)}`
                         }
                         onClose={finish}
                         closeLabel={done ? 'Collect' : 'Walk Off'}
