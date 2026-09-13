@@ -309,3 +309,189 @@ export const ROSTER: Record<string, HoopsProfile> = {
         signature: 'Human Backboard',
     },
 };
+
+/* ------------------------------------------------------------------------- *
+ * The partner
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The fourth body on the floor.
+ *
+ * A 2-on-2 game needs four players and the roster above only names three of
+ * them — you, Big Mike, and whoever you challenged. The opponent's partner has
+ * been 'HIS COUSIN' with a colour palette and nothing else since the game
+ * shipped, which means half the other team played like the generic fallback no
+ * matter who you were up against.
+ *
+ * Rather than author one cousin, derive him from the foe. Two reasons, and the
+ * second is the real one:
+ *
+ *   1. A single fixed cousin would be the same player in all nine matchups, so
+ *      four of the eight attributes on the floor would never change. The whole
+ *      point of the roster is that a matchup feels different within seconds.
+ *   2. Real pickup pairs cover for each other. The cousin of a shooter who
+ *      cannot jump is the guy who gets the rebounds; the cousin of a rim
+ *      attacker who cannot shoot is the one who spaces the floor. Inverting
+ *      the foe's standout axes means beating a team requires beating a *pair*,
+ *      and the hole you find in one of them is the hole the other one plugs.
+ *
+ * He is deliberately the weaker half — `PARTNER_BUDGET_SHARE` of the foe's
+ * spend — because he is a sidekick, not a second boss. Pure function of the
+ * foe, so the same challenge always produces the same cousin.
+ */
+const PARTNER_BUDGET_SHARE = 0.85;
+
+/** How far the cousin leans away from the foe on each axis. 0 = clone. */
+const PARTNER_INVERSION = 0.55;
+
+export function partnerFor(foe: HoopsProfile): HoopsProfile {
+    const a = foe.attributes;
+    const mean = total(a) / 7;
+
+    // Mirror each attribute about the foe's own average: whatever he is
+    // unusually good at, the cousin is ordinary at, and vice versa.
+    const mirror = (v: number): number => v + (mean - v) * 2 * PARTNER_INVERSION;
+
+    const raw: Attributes = {
+        speed: mirror(a.speed), jump: mirror(a.jump), dunk: mirror(a.dunk),
+        range: mirror(a.range), handles: mirror(a.handles),
+        defense: mirror(a.defense), stamina: mirror(a.stamina),
+    };
+
+    // Rescale to the sidekick's budget, then clamp. Clamping can only pull a
+    // value down toward the legal range, so the result never exceeds budget.
+    const want = total(a) * PARTNER_BUDGET_SHARE;
+    const have = total(raw);
+    const k = have > 0.001 ? want / have : 1;
+    const attributes: Attributes = {
+        speed: clamp01(raw.speed * k), jump: clamp01(raw.jump * k),
+        dunk: clamp01(raw.dunk * k), range: clamp01(raw.range * k),
+        handles: clamp01(raw.handles * k), defense: clamp01(raw.defense * k),
+        stamina: clamp01(raw.stamina * k),
+    };
+
+    return {
+        npcId: `${foe.npcId}-cousin`,
+        name: 'His Cousin',
+        attributes,
+        style: `Covers whatever ${foe.name} doesn't, and not much else.`,
+        signature: 'Family Obligation',
+    };
+}
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** You. Not an opponent, so it lives here rather than in `opponents.ts`. */
+export const playerProfile = (): HoopsProfile => ROSTER.player;
+
+/** Your team-mate. */
+export const mateProfile = (): HoopsProfile => ROSTER['big-mike'];
+
+/* ------------------------------------------------------------------------- *
+ * Derived modifiers
+ * ------------------------------------------------------------------------- */
+
+/**
+ * What an attribute set actually *does*.
+ *
+ * The attributes above are authoring units — 0..1, readable, arguable. The game
+ * loop needs multipliers it can apply to the constants it already has, and the
+ * translation between the two is the part that decides whether a roster is fun
+ * or broken. Keeping it here, as one pure function, buys three things:
+ *
+ *   1. **Nobody is unplayable.** Every span below is bounded well away from
+ *      zero. Big Mike's 0.12 speed is the lowest number on the roster and it
+ *      still leaves him at `SPEED_SPAN`'s floor — slow enough that you feel it
+ *      every time you wait for him, fast enough that he gets down the floor.
+ *      A 2-on-2 game where one of the four is functionally absent is a 1-on-2
+ *      game, and that is a bug with a stat block for a cause.
+ *   2. **Nobody is unbeatable.** Grandma Laces spends 4.30 of a 4.55 budget on
+ *      four near-maximum numbers, and the only reason that is not oppressive is
+ *      that `defense` buys a *multiplier on a positional check*, never a free
+ *      takeaway. She has to be in front of you, and 0.40 speed means she often
+ *      is not. The spans keep the ceiling reachable; the game loop has to keep
+ *      the check positional.
+ *   3. **One place to tune.** Every span is a named constant. Balancing the
+ *      roster means editing this block, not hunting multipliers through 2800
+ *      lines of game loop.
+ *
+ * All spans are linear in the attribute and pass through 1.0 at 0.5, so an
+ * unremarkable player is exactly the game's tuned baseline and every profile
+ * reads as a deviation from it.
+ */
+export interface Modifiers {
+    /** Multiplies top running speed. */
+    speedMult: number;
+    /** Multiplies how fast they reach that top speed. */
+    accelMult: number;
+    /** Multiplies jump velocity — contest height, rebound reach, hang time. */
+    jumpMult: number;
+    /** Multiplies dunk range, so a big can slam from where a guard cannot. */
+    dunkRangeMult: number;
+    /** 0..1. How much the AI prefers going up over pulling up. */
+    dunkBias: number;
+    /** Multiplies the shot release window — a shooter's timing is forgiving. */
+    shotWindowMult: number;
+    /** Multiplies make chance on shots beyond the arc. The three-point game. */
+    deepMult: number;
+    /** Divides an opponent's chance of taking the ball off them. */
+    stealResist: number;
+    /** Multiplies their own steal chance. Applied *after* a positional check. */
+    stealMult: number;
+    /** Multiplies their own block chance. Also positional. */
+    blockMult: number;
+    /** Multiplies turbo capacity. */
+    turboCapMult: number;
+    /** Multiplies how fast turbo comes back. */
+    turboRegenMult: number;
+}
+
+/**
+ * Each span is [what a 0.0 gets, what a 1.0 gets]. Two rules, both enforced by
+ * `tests/hoops-attributes.test.mts`:
+ *
+ *   - **Symmetric about 1.0.** A span is `[1 - d, 1 + d]`, so an attribute of
+ *     0.5 lands exactly on the multiplier of 1.0 and an unremarkable player
+ *     is the game's own tuned baseline rather than a slight deviation from it.
+ *     Every constant the game loop already balances against stays meaningful.
+ *   - **Floors well clear of zero.** The low half is the load-bearing one: it
+ *     is what stops an extreme profile from being a player who cannot
+ *     participate at all.
+ */
+const SPEED_SPAN: readonly [number, number] = [0.82, 1.18];
+const ACCEL_SPAN: readonly [number, number] = [0.78, 1.22];
+const JUMP_SPAN: readonly [number, number] = [0.80, 1.20];
+/** Widest span on purpose: dunk range is the most visible attribute there is. */
+const DUNK_RANGE_SPAN: readonly [number, number] = [0.58, 1.42];
+const SHOT_WINDOW_SPAN: readonly [number, number] = [0.66, 1.34];
+/** Deep shooting is the other marquee axis, so it swings nearly as hard. */
+const DEEP_SPAN: readonly [number, number] = [0.55, 1.45];
+const HANDLES_SPAN: readonly [number, number] = [0.60, 1.40];
+const DEFENSE_SPAN: readonly [number, number] = [0.60, 1.40];
+const STAMINA_CAP_SPAN: readonly [number, number] = [0.80, 1.20];
+const STAMINA_REGEN_SPAN: readonly [number, number] = [0.72, 1.28];
+
+/** Linear interpolation across a span, with the attribute clamped to 0..1. */
+const across = (span: readonly [number, number], v: number): number =>
+    span[0] + (span[1] - span[0]) * clamp01(v);
+
+export function derive(a: Attributes): Modifiers {
+    return {
+        speedMult: across(SPEED_SPAN, a.speed),
+        accelMult: across(ACCEL_SPAN, a.speed),
+        jumpMult: across(JUMP_SPAN, a.jump),
+        dunkRangeMult: across(DUNK_RANGE_SPAN, a.dunk),
+        dunkBias: clamp01(a.dunk),
+        shotWindowMult: across(SHOT_WINDOW_SPAN, a.range),
+        deepMult: across(DEEP_SPAN, a.range),
+        stealResist: across(HANDLES_SPAN, a.handles),
+        stealMult: across(DEFENSE_SPAN, a.defense),
+        blockMult: across(DEFENSE_SPAN, a.defense),
+        turboCapMult: across(STAMINA_CAP_SPAN, a.stamina),
+        turboRegenMult: across(STAMINA_REGEN_SPAN, a.stamina),
+    };
+}
+
+/** The lowest and highest any modifier is allowed to reach. Tests enforce it. */
+export const MODIFIER_FLOOR = 0.55;
+export const MODIFIER_CEILING = 1.45;
