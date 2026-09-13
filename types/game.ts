@@ -47,7 +47,10 @@ export type MiniGameId =
     | 'mystery-box'
     | 'legit-check'
     | 'flight-404'        // run-and-gun plane rescue
-    | 'cart-race';        // downhill shopping cart chase
+    | 'cart-race'         // downhill shopping cart chase
+    | 'street-dice'       // back-alley dice, in-game currency only
+    | 'drunk-darts'       // darts where every drink measurably worsens your aim
+    | 'pizza-run';        // Paperboy-style delivery shift
 
 /** A request to hand control to a mini-game, plus what to do with the result. */
 export interface MiniGameRequest {
