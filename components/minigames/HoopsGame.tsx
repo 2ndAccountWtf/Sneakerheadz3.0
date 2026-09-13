@@ -1102,8 +1102,8 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             const c = w.players[j];
             if (a.dunkT > 0 || c.dunkT > 0) continue;
             const d = dist2d(a.x, a.z, c.x, c.z);
-            if (d > 0.001 && d < 12) {
-                const push = (12 - d) / 2;
+            if (d > 0.001 && d < 11) {
+                const push = (11 - d) / 2;
                 const ux = (a.x - c.x) / d;
                 const uz = ((a.z - c.z) * Z_PX) / d / Z_PX;
                 a.x += ux * push; c.x -= ux * push;

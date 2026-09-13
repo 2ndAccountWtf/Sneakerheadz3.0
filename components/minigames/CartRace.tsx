@@ -1253,11 +1253,13 @@ const CartRace: React.FC<{
             loadout={arms}
             selectedWeapon={sel}
             onSelectWeapon={setSel}
+            /* Three short columns so the whole strip still fits at 390px. */
             hud={
-                <div className="grid grid-cols-3 gap-3">
-                    <div>
-                        <div className="flex justify-between label mb-1">
-                            <span>Gap</span><span className="numeric">{hud.gap}m</span>
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="min-w-0">
+                        <div className="flex justify-between gap-1 label mb-1">
+                            <span className="truncate">Gap</span>
+                            <span className="numeric flex-shrink-0">{hud.gap}m</span>
                         </div>
                         <div className="meter h-2">
                             <i style={{
@@ -1266,16 +1268,17 @@ const CartRace: React.FC<{
                             }} />
                         </div>
                     </div>
-                    <div>
-                        <div className="flex justify-between label mb-1">
-                            <span>Hill Left</span><span className="numeric">{100 - hud.hill}%</span>
+                    <div className="min-w-0">
+                        <div className="flex justify-between gap-1 label mb-1">
+                            <span className="truncate">Hill</span>
+                            <span className="numeric flex-shrink-0">{100 - hud.hill}%</span>
                         </div>
                         <div className="meter h-2"><i style={{ width: `${100 - hud.hill}%`, background: 'var(--warn)' }} /></div>
                     </div>
-                    <div>
-                        <div className="flex justify-between label mb-1">
-                            <span>{hud.speed} mph</span>
-                            <span className="numeric">{hud.health}hp</span>
+                    <div className="min-w-0">
+                        <div className="flex justify-between gap-1 label mb-1">
+                            <span className="truncate">{hud.speed}mph</span>
+                            <span className="numeric flex-shrink-0">{hud.health}hp</span>
                         </div>
                         <div className="meter h-2">
                             <i style={{ width: `${hud.health}%`, background: hud.health > 35 ? 'var(--ok)' : 'var(--bad)' }} />
