@@ -17,7 +17,8 @@ import { bathroomsIn } from '../data/bathrooms.ts';
 import { getStoreSkin } from '../data/storeSkins.ts';
 import { VENUES, venuesIn, isVenueOpen } from '../data/venues.ts';
 import { OPPONENTS, getOpponent, effectiveSkill } from '../systems/opponents.ts';
-import { ROSTER } from '../systems/hoops/roster.ts';
+import { ROSTER, profileFor, total } from '../systems/hoops/roster.ts';
+import { createWorld } from '../components/minigames/HoopsGame.tsx';
 import { INITIAL_PLAYER } from '../constants.ts';
 
 let pass = 0;
@@ -206,6 +207,38 @@ t('every hoops opponent has a profile, so nobody falls back to a nobody', () => 
             `${o.npcId} plays street-ball but has no profile — they would play as a generic nobody`,
         );
     }
+});
+
+t('everybody you can challenge brings their own cousin onto the floor', () => {
+    // A 2-on-2 game needs four people and the roster names three. The fourth
+    // was a colour and the string 'HIS COUSIN' in every matchup, while
+    // `partnerFor` derived a real one and was called by nothing — the same
+    // dead content as a character nobody can reach, one seat further in.
+    for (const o of OPPONENTS) {
+        if (!o.games.includes('street-ball')) continue;
+        const foe = profileFor(o.npcId, o.skill);
+        const w = createWorld(4242, o.name, foe);
+        const cousin = w.players[3];
+        assert.equal(cousin.profile.npcId, `${o.npcId}-cousin`,
+            `${o.name} turned up with ${cousin.profile.npcId} instead of his own cousin`);
+        assert.ok(total(cousin.profile.attributes) < total(foe.attributes),
+            `${o.name}'s cousin is the better half of that pair`);
+    }
+});
+
+t('the four bodies on the floor are four different people', () => {
+    const w = createWorld(7, 'Grandma Laces', ROSTER['grandma-laces']);
+    const ids = w.players.map(p => p.profile.npcId);
+    assert.equal(new Set(ids).size, 4, `only ${new Set(ids).size} distinct players: ${ids.join(', ')}`);
+    assert.deepEqual(ids.slice(0, 2), ['player', 'big-mike'], 'your own team changed under you');
+});
+
+t('the same challenge always brings the same cousin', () => {
+    // Pure function of the foe, so a pair can be learned across a run rather
+    // than re-rolled at the player every time they take the same game.
+    const a = createWorld(1, 'Scalper Sid', ROSTER['scalper-sid']).players[3].profile;
+    const b = createWorld(99, 'Scalper Sid', ROSTER['scalper-sid']).players[3].profile;
+    assert.deepEqual(a.attributes, b.attributes);
 });
 
 console.log(`\n${pass} world checks passed`);

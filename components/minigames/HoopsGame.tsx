@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { MiniGameResult } from './MiniGameShell';
-import { profileFor, type HoopsProfile } from '../../systems/hoops/roster';
+import { profileFor, partnerFor, playerProfile, mateProfile, type HoopsProfile } from '../../systems/hoops/roster';
 import {
     ArcadeShell,
     useInput,
@@ -356,6 +356,12 @@ export interface Player {
     human: boolean;
     name: string;
     kit: Kit;
+    /**
+     * Who this body actually is — see `systems/hoops/roster.ts`. Carried on the
+     * player rather than looked up by name because the fourth one has no entry
+     * in the roster to look up: he is derived from the man he came with.
+     */
+    profile: HoopsProfile;
     x: number; z: number;
     vx: number; vz: number;
     facing: 1 | -1;
@@ -809,8 +815,9 @@ const cameraTarget = (w: World): { zoom: number; fx: number; fy: number } => {
 
 const mkPlayer = (
     id: number, team: 0 | 1, human: boolean, name: string, kit: Kit, x: number, z: number,
+    profile: HoopsProfile,
 ): Player => ({
-    id, team, human, name, kit,
+    id, team, human, name, kit, profile,
     x, z, vx: 0, vz: 0,
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
@@ -861,6 +868,12 @@ const KITS: Record<'you' | 'mate' | 'foe' | 'cousin', Kit> = {
 
 export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = profileFor(undefined, 0.5)): World => {
     const foeName = (opponent || 'HIM').toUpperCase().slice(0, 12);
+    // The fourth body on the floor. He was a colour palette and a hard-coded
+    // string — the same nobody in every matchup — while `partnerFor` sat there
+    // deriving a real one from whoever you challenged and never being called.
+    // Pure function of the foe, so the same challenge always brings the same
+    // cousin and the pair can be learned rather than re-rolled at you.
+    const cousin = partnerFor(foe);
     const w: World = {
         seed,
         rngState: seed | 0,
@@ -869,10 +882,13 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
         clock: GAME_SECONDS,
         score: [0, 0],
         players: [
-            mkPlayer(0, 0, true, 'YOU', KITS.you, 150, 0.62),
-            mkPlayer(1, 0, false, 'BIG MIKE', KITS.mate, 120, 0.3),
-            mkPlayer(2, 1, false, foeName, KITS.foe, 205, 0.4),
-            mkPlayer(3, 1, false, 'HIS COUSIN', KITS.cousin, 235, 0.75),
+            mkPlayer(0, 0, true, 'YOU', KITS.you, 150, 0.62, playerProfile()),
+            mkPlayer(1, 0, false, 'BIG MIKE', KITS.mate, 120, 0.3, mateProfile()),
+            // The name on the vest is the one the challenge came under, not the
+            // one in the roster: the player knows him as whoever they just
+            // agreed to play.
+            mkPlayer(2, 1, false, foeName, KITS.foe, 205, 0.4, foe),
+            mkPlayer(3, 1, false, cousin.name.toUpperCase(), KITS.cousin, 235, 0.75, cousin),
         ],
         ball: mkBall(),
         possession: 0,
@@ -3048,10 +3064,17 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
         drawBanner(ctx, 'CHECK IT UP', VW, 42, PAL.accent, pop);
         text(ctx, 'YOU & BIG MIKE', VW / 2 - 5, 55, { size: 7, color: PAL.accent, align: 'right', bold: true });
         text(ctx, 'VS', VW / 2, 55, { size: 6, color: PAL.dim, align: 'center' });
-        text(ctx, `${w.opponent} & HIS COUSIN`, VW / 2 + 5, 55, { size: 7, color: PAL.accent2, align: 'left', bold: true });
+        const cousin = w.players[3];
+        text(ctx, `${w.opponent} & ${cousin.name}`, VW / 2 + 5, 55, { size: 7, color: PAL.accent2, align: 'left', bold: true });
         text(ctx, `First to ${TARGET_SCORE} — shoes on the line`, VW / 2, 67, {
             size: 7, color: PAL.dim, align: 'center',
         });
+        // The cousin's own line, which is written off the foe he came with —
+        // `style` has been authored for exactly this moment since the roster
+        // shipped and has never been shown to anybody. Fitted like the ticker,
+        // because a long foe name pushes it past 352px.
+        const tipFit = fitTickerText(ctx, `${cousin.name}: ${cousin.profile.style}`, 6);
+        text(ctx, tipFit.text, VW / 2, 78, { size: tipFit.size, color: PAL.faint, align: 'center' });
     }
 
     // Hitstop punch: a bright single-frame flash right as the freeze lands —
