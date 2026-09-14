@@ -109,32 +109,32 @@ const BASE_MOVES: Record<MoveId, MoveDef> = {
     jab: {
         label: 'Jab', startup: 4, active: 3, recovery: 6,
         damage: 6, reach: 25, height: 'mid',
-        knock: 18, hitstun: 12, hitstop: 3, shake: 1, chip: 0.18, cancel: 13,
+        knock: 18, hitstun: 12, hitstop: 3, shake: 1, chip: 0.10, cancel: 13,
     },
     // Slow, long, hurts. Whiffing it is a decision you regret.
     heavy: {
         label: 'Kick', startup: 9, active: 4, recovery: 15,
         damage: 13, reach: 33, height: 'mid',
-        knock: 70, hitstun: 19, hitstop: 6, shake: 4, chip: 0.16, cancel: 0,
+        knock: 70, hitstun: 19, hitstop: 6, shake: 4, chip: 0.09, cancel: 0,
     },
     // Low: goes UNDER a standing block. Knocks down, so it never combos.
     sweep: {
         label: 'Sweep', startup: 8, active: 4, recovery: 18,
         damage: 10, reach: 31, height: 'low',
-        knock: 56, hitstun: 24, hitstop: 5, shake: 3, chip: 0.14, cancel: 0,
+        knock: 56, hitstun: 24, hitstop: 5, shake: 3, chip: 0.08, cancel: 0,
         knockdown: true,
     },
     // Overhead: goes OVER a crouch block. The answer to a turtle.
     air: {
         label: 'Air Stomp', startup: 4, active: 9, recovery: 6,
         damage: 9, reach: 22, height: 'overhead',
-        knock: 40, hitstun: 16, hitstop: 4, shake: 2, chip: 0.2, cancel: 11, air: true,
+        knock: 40, hitstun: 16, hitstop: 4, shake: 2, chip: 0.12, cancel: 11, air: true,
     },
     // The special. Costs the whole hype meter, launches, gets a banner.
     special: {
         label: 'Shoelace Uppercut', startup: 5, active: 7, recovery: 22,
         damage: 24, reach: 28, height: 'mid',
-        knock: 120, hitstun: 30, hitstop: 10, shake: 7, chip: 0.28, cancel: 0,
+        knock: 120, hitstun: 30, hitstop: 10, shake: 7, chip: 0.18, cancel: 0,
         knockdown: true, launch: -190, meter: 100,
     },
     // Windup for a thrown AM/PM weapon. No hitbox of its own.
@@ -863,7 +863,7 @@ function separate(a: Fighter, b: Fighter) {
 const PROJECTILE_MOVE = (dmg: number): MoveDef => ({
     label: 'Thrown', startup: 0, active: 1, recovery: 0,
     damage: dmg, reach: 0, height: 'mid',
-    knock: 58, hitstun: 16, hitstop: 5, shake: 3, chip: 0.15, cancel: 0,
+    knock: 58, hitstun: 16, hitstop: 5, shake: 3, chip: 0.09, cancel: 0,
 });
 
 const RETURN_DIST = 120;
@@ -1023,7 +1023,7 @@ function aiInput(s: FightState, dt: number): FightInput {
         && s.rng() < 0.64) {
         ai.plan = 'block';
         ai.queued = null;
-        ai.guardLow = pm.height === 'low' ? s.rng() < 0.72 : s.rng() < 0.22;
+        ai.guardLow = pm.height === 'low' ? s.rng() < 0.55 : s.rng() < 0.25;
         ai.think = 6;
         ai.react = 3 + Math.floor(s.rng() * 4);
     }
@@ -1726,7 +1726,7 @@ const StreetFighter: React.FC<{
             selectedWeapon={weaponId}
             onSelectWeapon={selectWeapon}
             help={
-                '◀ ▶ walk · ▲ jump · ▼ crouch · hold BACK (away from him) to block — ' +
+                '◀ ▶ walk · double-tap FORWARD to dash in · ▲ jump · ▼ crouch · hold BACK (away from him) to block — ' +
                 'standing block stops highs, crouch block stops lows. ' +
                 'PUNCH is fast and combos into itself; ' + heavyLabel.toUpperCase() + ' is slow, long and hurts. ' +
                 '▼ + ' + heavyLabel.toUpperCase() + ' sweeps low (goes under a standing block); jump + PUNCH comes down over a crouch block. ' +

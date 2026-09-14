@@ -191,6 +191,33 @@ t('a fighter always has a hurtbox', () => {
     }
 });
 
+t('a light hit cancels into the heavy instead of jabbing again', () => {
+    // The cancel window is the whole combo system, and the buffer used to eat
+    // it: the light press was checked first and still had frames left, so the
+    // kick a player pressed to cash the window came out as another jab. Over
+    // fifty measured matches a jab-then-heavy policy landed exactly zero heavies.
+    const s = liveFight();
+    s.p.x = s.f.x - 24;                  // inside jab range
+    for (let i = 0; i < 40 && s.p.cancel <= 0; i++) {
+        stepFight(s, i % 14 === 0 ? press('a') : blankInput(), DT);
+    }
+    assert.ok(s.p.cancel > 0, 'the jab never connected, so there was no window to cancel');
+    for (let i = 0; i < 6 && s.p.move !== 'heavy'; i++) stepFight(s, press('b'), DT);
+    assert.equal(s.p.move, 'heavy', 'the kick came out as another jab');
+});
+
+t('a dash covers more ground than a walk', () => {
+    const walk = liveFight();
+    const dash = liveFight();
+    const fwd = { ...blankInput(), right: true };
+    // A held direction walks; the same direction tapped twice dashes.
+    for (let i = 0; i < 12; i++) stepFight(walk, fwd, DT);
+    for (let i = 0; i < 12; i++) {
+        stepFight(dash, i === 2 || i === 3 ? blankInput() : fwd, DT);
+    }
+    assert.ok(dash.p.x > walk.p.x + 4, `the dash went nowhere: ${walk.p.x} vs ${dash.p.x}`);
+});
+
 t('the same seed fights the same fight twice', () => {
     const run = () => {
         const s = liveFight(99);
@@ -198,6 +225,160 @@ t('the same seed fights the same fight twice', () => {
         return `${s.p.hp}/${s.f.hp}/${s.p.x.toFixed(2)}/${s.f.x.toFixed(2)}`;
     };
     assert.equal(run(), run(), 'the fight is not reproducible');
+});
+
+// ---------------------------------------------------------------------------
+// Balance
+//
+// The fight was decided before either fighter moved. Measured over thirty
+// seeded matches, 86% of every match was spent at a centre-to-centre distance
+// where no move could reach — the average gap was 56px and the longest move
+// stopped connecting at 48 — so there was no neutral game, the jab landed 1.3
+// times a match, and mashing the one long button won 100% of matches. These
+// checks are the instrument that found that, boiled down: they run whole
+// matches against the built-in AI and assert on where the fighters stand and
+// who wins, because none of that can be seen from a single frame.
+// ---------------------------------------------------------------------------
+
+type Policy = (s: FightState, frame: number) => FightInput;
+
+const BODY = 15;
+const REACH = movesFor(FISTS);
+/** Past this gap nothing either fighter has can touch the other. */
+const NO_REACH = Math.max(REACH.heavy.reach, REACH.sweep.reach) + BODY;
+
+const facingFoe = (s: FightState): 'left' | 'right' => (s.f.x >= s.p.x ? 'right' : 'left');
+const facingAway = (s: FightState): 'left' | 'right' => (s.f.x >= s.p.x ? 'left' : 'right');
+const hold = (btn: 'a' | 'b'): FightInput =>
+    ({ ...blankInput(), [btn]: true, [`${btn}Pressed`]: true } as FightInput);
+const walking = (s: FightState, dir: 'left' | 'right', rest: Partial<FightInput> = {}): FightInput =>
+    ({ ...blankInput(), [dir]: true, ...rest } as FightInput);
+
+const MASH_HEAVY: Policy = () => hold('b');
+const MASH_JAB: Policy = () => hold('a');
+/** Double-tap forward, then jab: the approach the dash exists for. */
+const DASH_IN: Policy = (s, i) => {
+    const ph = i % 20;
+    const jab = ph >= 14 ? { a: true, aPressed: ph === 14 } : {};
+    return ph < 4 || (ph >= 6 && ph < 14)
+        ? walking(s, facingFoe(s), jab)
+        : ({ ...blankInput(), ...jab } as FightInput);
+};
+/** Guards only while he is actually swinging, so it never backs into a corner. */
+const GUARDING: Policy = s => (s.f.state === 'attack' ? walking(s, facingAway(s)) : blankInput());
+const PASSIVE: Policy = () => blankInput();
+
+interface Series {
+    matches: number; wins: number;
+    frames: number; inReach: number;
+    jabs: number; dmgTaken: number;
+    gapSum: number;
+}
+
+/** Plays whole matches against the AI and reports what happened in them. */
+function series(policy: Policy, seeds: number): Series {
+    const r: Series = { matches: 0, wins: 0, frames: 0, inReach: 0, jabs: 0, dmgTaken: 0, gapSum: 0 };
+    for (let n = 1; n <= seeds; n++) {
+        const s = createFight({ opponent: 'Foe', weapon: FISTS, rng: seeded(n * 7919) });
+        for (let i = 0; s.matchWon === null && i < 60 * 60 * 6; i++) {
+            const live = s.phase === 'fight';
+            const foeHp = s.f.hp;
+            const ownHp = s.p.hp;
+            const landed = s.stats.hitsLanded;
+            stepFight(s, live ? policy(s, i) : blankInput(), DT);
+            if (!live) continue;
+            r.frames++;
+            const gap = Math.abs(s.p.x - s.f.x);
+            r.gapSum += gap;
+            if (gap < NO_REACH) r.inReach++;
+            if (s.stats.hitsLanded > landed && s.f.hp < foeHp && s.p.move === 'jab') r.jabs++;
+            if (s.p.hp < ownHp) r.dmgTaken += ownHp - s.p.hp;
+        }
+        r.matches++;
+        if (s.matchWon) r.wins++;
+    }
+    return r;
+}
+
+/** Enough matches that one unlucky seed cannot move a win rate ten points. */
+const SEEDS = 40;
+const heavy = series(MASH_HEAVY, SEEDS);
+const jab = series(MASH_JAB, SEEDS);
+const dashing = series(DASH_IN, SEEDS);
+
+console.log('\nthe spacing, which is the whole fight');
+
+t('the fighters spend real time at a distance where a move can reach', () => {
+    // It was 4% of frames. A fighting game in which nothing reaches is two
+    // people doing a dance forty pixels apart.
+    for (const [name, r] of [['mashing the kick', heavy], ['mashing the jab', jab]] as const) {
+        const share = r.inReach / r.frames;
+        assert.ok(share > 0.4, `${name}: only ${(share * 100).toFixed(1)}% of frames in anyone's range`);
+    }
+});
+
+t('the neutral gap came in off the old dead zone', () => {
+    // The average gap was 56-60px against a longest reach of 48: the fighters
+    // idled where neither of them could be punished for it. It now sits on the
+    // edge of the longest move rather than well outside it.
+    for (const [name, r] of [['mashing the kick', heavy], ['mashing the jab', jab]] as const) {
+        const mean = r.gapSum / r.frames;
+        assert.ok(mean < 53, `${name}: the fighters averaged ${mean.toFixed(1)}px apart`);
+    }
+});
+
+console.log('\nno one button is the whole game');
+
+t('mashing the long button is good, not solved', () => {
+    const rate = heavy.wins / heavy.matches;
+    assert.ok(rate < 0.9, `the kick alone won ${(rate * 100).toFixed(0)}% of matches`);
+    assert.ok(rate > 0.3, `the kick is now useless: ${(rate * 100).toFixed(0)}%`);
+});
+
+t('the jab is a move that actually lands', () => {
+    // 1.3 hits a match, at six damage each, is not a move. It is a decoration.
+    const per = jab.jabs / jab.matches;
+    assert.ok(per > 8, `the jab landed ${per.toFixed(1)} times a match`);
+});
+
+t('walking in beats standing still and mashing', () => {
+    // The point of the dash. A policy that closes the gap should out-perform
+    // the one that waits at the edge of its own range pressing the long button.
+    assert.ok(
+        dashing.wins / dashing.matches > heavy.wins / heavy.matches,
+        `dashing in won ${dashing.wins}/${dashing.matches}, mashing won ${heavy.wins}/${heavy.matches}`,
+    );
+});
+
+t('a jab lands close enough to follow up on', () => {
+    // Knockback was 46 against a forward walk of 58: every poke threw the
+    // fighters further apart than the poking fighter could walk back in.
+    const s = liveFight();
+    s.p.x = s.f.x - 24;
+    for (let i = 0; i < 40 && s.f.hp === s.f.maxHp; i++) {
+        stepFight(s, i === 0 ? press('a') : blankInput(), DT);
+    }
+    assert.ok(s.f.hp < s.f.maxHp, 'the jab never landed');
+    idleFor(s, 8);
+    const gap = Math.abs(s.p.x - s.f.x);
+    assert.ok(gap < REACH.jab.reach + BODY, `a landed jab left them ${gap.toFixed(1)}px apart`);
+});
+
+console.log('\nblocking and being passive are different things');
+
+t('holding a guard beats standing there taking it', () => {
+    const guard = series(GUARDING, 12);
+    const passive = series(PASSIVE, 12);
+    const rate = (r: Series) => r.dmgTaken / (r.frames / 60);
+    assert.ok(
+        rate(guard) < rate(passive),
+        `guarding took ${rate(guard).toFixed(1)} dmg/s, doing nothing took ${rate(passive).toFixed(1)}`,
+    );
+});
+
+t('neither passive fighter ever wins a match', () => {
+    // Fine that they lose. They should never fluke a win out of the AI.
+    assert.equal(series(PASSIVE, 8).wins, 0, 'doing nothing won a fight');
 });
 
 console.log(`\n${pass} fighter checks passed.\n`);
