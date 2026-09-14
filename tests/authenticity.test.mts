@@ -12,8 +12,11 @@ import assert from 'node:assert/strict';
 import {
     AUTH_GRADES, GRADE_COST, GRADE_DIFFICULTY, GRADE_LABEL,
     gradeOf, isCounterfeit, fakeFlagFor, spotChance, gradePrice,
+    claimedGradeOf, isPassedOff, leakRateFor, gradeForLeak,
+    LEAK_RATE,
     type AuthGrade,
 } from '../systems/market/authenticity.ts';
+import { rngFor } from '../utils/rng.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -108,6 +111,77 @@ t('the boolean and the ladder never disagree', () => {
 t('an old fake prices the same as it used to', () => {
     // Nothing a player already owns silently changes value under them.
     assert.equal(gradePrice(2400, gradeOf({ isFake: true })), Math.round(2400 * 0.15));
+});
+
+console.log('\nthe leak');
+
+t('an honest listing claims exactly what it is', () => {
+    for (const g of AUTH_GRADES) {
+        assert.equal(claimedGradeOf({ grade: g }), g, `${g} misreports itself`);
+        assert.equal(isPassedOff({ grade: g }), false, `${g} is lying about nothing`);
+    }
+    // And a listing from before any of this resolves the same way.
+    assert.equal(claimedGradeOf({ isFake: true }), 'street');
+    assert.equal(claimedGradeOf({}), 'retail');
+});
+
+t('passing off is claiming to be worth more than you are', () => {
+    assert.equal(isPassedOff({ grade: 'super', claimed: 'retail' }), true);
+    assert.equal(isPassedOff({ grade: 'street', claimed: 'retail' }), true);
+    // Honest in the other direction: a real pair on a rep table is not a scam,
+    // it is a bargain, and it must never be counted as one.
+    assert.equal(isPassedOff({ grade: 'retail', claimed: 'street' }), false);
+});
+
+t('the careful shop leaks least and the trunk leaks most', () => {
+    assert.ok(leakRateFor(0) > leakRateFor(1), 'a stall should be worse than a shop');
+    assert.ok(leakRateFor(1) > leakRateFor(2), 'a shop should be worse than a gallery');
+    // Nowhere is clean. If the gallery were airtight it would be the only
+    // place anyone ever shopped, and the question would stop being a question.
+    assert.ok(leakRateFor(2) > 0, 'somewhere is airtight');
+    assert.ok(leakRateFor(0) < 0.5, 'more than half fake is not a shop, it is a rep table');
+});
+
+t('an unknown rigour is treated as an ordinary shop', () => {
+    assert.equal(leakRateFor(7), LEAK_RATE[1]);
+    assert.equal(leakRateFor(-1), LEAK_RATE[1]);
+});
+
+t('an obvious rep never survives a gallery intake', () => {
+    const rng = rngFor('leak-grades');
+    for (let i = 0; i < 400; i++) {
+        assert.notEqual(gradeForLeak(2, rng), 'street', 'a gallery is holding an obvious rep');
+    }
+});
+
+t('the worse the shop, the worse the paper it will carry', () => {
+    const count = (level: number) => {
+        const rng = rngFor(`leak-mix-${level}`);
+        let bad = 0;
+        for (let i = 0; i < 2000; i++) if (gradeForLeak(level, rng) === 'street') bad++;
+        return bad / 2000;
+    };
+    const stall = count(0);
+    const shop = count(1);
+    assert.ok(stall > shop, `stall ${stall} should carry more junk than shop ${shop}`);
+    assert.ok(shop > 0, 'an ordinary shop never carrying junk makes rigour meaningless');
+});
+
+t('every leak is a fake, and never the real thing', () => {
+    const rng = rngFor('leak-is-fake');
+    for (const level of [0, 1, 2]) {
+        for (let i = 0; i < 300; i++) {
+            const g = gradeForLeak(level, rng);
+            assert.equal(isCounterfeit(g), true, `level ${level} leaked a real pair`);
+        }
+    }
+});
+
+t('a leak is listed at the price of what it claims to be', () => {
+    // No discount, no tell. Measured: this economy has no room for cheaper real
+    // stock, so the price signal was cut and the mystery rests on rigour, seller
+    // talk and a paid LegitCheck instead. See the note in authenticity.ts.
+    assert.equal(GRADE_COST[claimedGradeOf({ grade: 'super', claimed: 'retail' })], GRADE_COST.retail);
 });
 
 console.log(`\n${pass} authenticity checks passed.\n`);

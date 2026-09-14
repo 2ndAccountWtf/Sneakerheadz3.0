@@ -39,7 +39,15 @@ import { STORE_CONFIGS } from '../../data/storeConfigs';
 import { CITIES } from '../../data/cities';
 import { profileFor } from './cityProfiles';
 import { tagsFor } from './taxonomy';
-import { GRADE_COST, gradeOf, type AuthGrade } from './authenticity';
+import {
+    GRADE_COST,
+    gradeOf,
+    claimedGradeOf,
+    gradeForLeak,
+    leakRateFor,
+    fakeFlagFor,
+    type AuthGrade,
+} from './authenticity';
 
 /** How much of the gap to fair value closes each day. */
 const REVERSION = 0.18;
@@ -274,10 +282,11 @@ function priceListing(listing: MarketSneaker, index: Record<string, PriceIndex>)
     if (!sneaker || !idx) return listing.price;
 
     let price = sneaker.basePrice * idx.value;
-    // A fake costs what its grade costs. A street rep is 15% of real, which is
-    // what this has always charged; an unauthorised pair is 55%, which is the
-    // rung that makes running reps an investment rather than free money.
-    price *= GRADE_COST[gradeOf(listing)];
+    // Priced off what it *claims* to be, not what it is. A fakes tab claims to
+    // be a fakes tab, so a street rep is still 15% of real — what this has
+    // always charged. A pair that leaked onto the ordinary shelf claims to be
+    // retail and is charged for like retail, which is the entire scam.
+    price *= GRADE_COST[claimedGradeOf(listing)];
     // Per-listing spread, stable because it is derived from the listing's own
     // group rather than rolled: two tabs in one city are not the same price.
     price *= 1 + spreadFor(listing) ;
@@ -352,23 +361,33 @@ export function seedWorld(rng: () => number = Math.random): Record<string, CityM
                 if (tab.id === 'trade' || tab.id === 'consignment') continue;
                 const isFakeTab =
                     tab.inventoryGroupRef.includes('fakes') || tab.inventoryGroupRef.includes('backroom');
+                const rigour = config.behavior?.securityLevel ?? 1;
 
                 // Which models a tab stocks is weighted by the city's taste, so
                 // Chicago's shelves are visibly full of basketball shoes rather
                 // than merely pricing them differently.
                 const count = 3 + Math.floor(rng() * 6);
                 for (const sneaker of weightedPick(SNEAKERS, count, city.id, rng)) {
+                    // A fakes tab is honest about itself. An ordinary tab is
+                    // honest most of the time — how often depends on how hard
+                    // this particular shop looks at what it takes in.
+                    const leaked = !isFakeTab && rng() < leakRateFor(rigour);
+                    const grade: AuthGrade = isFakeTab
+                        ? gradeForFakeTab(tab.inventoryGroupRef, rng)
+                        : leaked
+                          ? gradeForLeak(rigour, rng)
+                          : 'retail';
                     listings.push({
                         sneakerId: sneaker.id,
                         price: 0, // set by repriceListings below
                         quantity: Math.max(1, Math.round((1 + rng() * 4) * profile.supply)),
                         group: tab.inventoryGroupRef,
-                        isFake: isFakeTab,
-                        // Step 1 keeps the existing rule — a fakes tab is all
-                        // fakes — and only changes *what kind*. The leak into
-                        // ordinary tabs comes next, once the economy has been
-                        // simulated with the ladder in place.
-                        grade: isFakeTab ? gradeForFakeTab(tab.inventoryGroupRef, rng) : 'retail',
+                        isFake: fakeFlagFor(grade),
+                        grade,
+                        // Still labelled: a leak claims what it is, so the
+                        // badge remains truthful and the economy can be
+                        // measured before anything is hidden (step 4).
+                        claimed: grade,
                     });
                 }
             }
@@ -545,6 +564,10 @@ export function trendFor(market: CityMarket | undefined, sneakerId: string): Tre
 export function referenceAsk(market: CityMarket | undefined, sneakerId: string): number | undefined {
     const posted = market?.sneakers.filter((l) => l.sneakerId === sneakerId && !l.isFake);
     if (!posted?.length) return undefined;
+    // Deliberately counts clearance. The cap this feeds is what stops a pair
+    // being bought and resold on the spot: if a marked-down pair did not drag
+    // the local quote down with it, every clearance sticker would be free money
+    // without leaving the city. A deal has to be *flown* to be worth anything.
     return Math.min(...posted.map((l) => l.price));
 }
 

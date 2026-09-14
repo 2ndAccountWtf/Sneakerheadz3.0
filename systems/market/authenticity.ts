@@ -108,3 +108,81 @@ export function spotChance(eye: number, grade: AuthGrade): number {
  */
 export const gradePrice = (realPrice: number, grade: AuthGrade): number =>
     Math.max(1, Math.round(realPrice * GRADE_COST[grade]));
+
+/* ------------------------------------------------------------------ *
+ * The leak
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the seller *says* it is, which is not always what it is.
+ *
+ * A fakes tab is honest — it says rep, it charges rep money, and nobody is
+ * fooled. A pair that has leaked onto the ordinary shelf claims to be retail
+ * and is priced like retail, and that is the whole scam: the money you lose
+ * buying one is the money somebody else makes selling one.
+ *
+ * Defaults to the truth, so every listing that predates the leak is honest by
+ * construction and nothing already on a shelf changes.
+ */
+export function claimedGradeOf(item: { claimed?: AuthGrade; grade?: AuthGrade; isFake?: boolean }): AuthGrade {
+    return item.claimed ?? gradeOf(item);
+}
+
+/** True when a listing is being passed off as better than it is. */
+export const isPassedOff = (item: { claimed?: AuthGrade; grade?: AuthGrade; isFake?: boolean }): boolean =>
+    GRADE_COST[claimedGradeOf(item)] > GRADE_COST[gradeOf(item)];
+
+/**
+ * How often an ordinary tab is holding something that is not what it says,
+ * by the store's own rigour.
+ *
+ * A gallery that authenticates everything is not immune, only careful — 2.5%
+ * keeps the paranoia alive without making the expensive shops a trap. A stall
+ * that guarantees nothing is holding reps about a fifth of the time, which is
+ * roughly what it means to buy from a man with a trunk.
+ *
+ * This is the dial that decides whether every purchase carries a question, so
+ * it is the first number step 3 will tune against the simulation.
+ */
+export const LEAK_RATE: Record<number, number> = { 0: 0.22, 1: 0.09, 2: 0.025 };
+
+export const leakRateFor = (securityLevel: number): number => LEAK_RATE[securityLevel] ?? LEAK_RATE[1];
+
+/**
+ * What grade of fake gets past a shop of a given rigour.
+ *
+ * The better the shop, the better the paper has to be to be sitting on its
+ * shelf at all — an obvious rep does not survive a gallery's intake, so a
+ * level-2 leak is always something that nearly passes. The flip side is that
+ * the careful shop's rare fake is the dangerous one: it is expensive and it
+ * looks right.
+ */
+export function gradeForLeak(securityLevel: number, rng: () => number): AuthGrade {
+    const roll = rng();
+    if (securityLevel >= 2) return roll < 0.6 ? 'unauthorised' : 'super';
+    if (securityLevel === 1) {
+        if (roll < 0.25) return 'unauthorised';
+        return roll < 0.75 ? 'super' : 'street';
+    }
+    if (roll < 0.1) return 'unauthorised';
+    return roll < 0.45 ? 'super' : 'street';
+}
+
+/**
+ * A leak is listed at the price of the thing it claims to be — full retail, no
+ * discount, no tell.
+ *
+ * The first draft gave it a keen sticker, on the theory that price-against-
+ * market is the player's first clue. That needed genuine clearance to exist
+ * alongside it, or "marked down" would just be the word "fake" in a costume.
+ * Measuring it killed it: the economy already runs at a 244% best cross-city
+ * margin against a 260% ceiling, so *any* real pair listed below its rate blows
+ * the arbitrage guard — a 7% discount is enough. Cheaper real stock is the one
+ * thing this economy has no room for.
+ *
+ * So the mystery rests on the other three signals instead: how rigorous the shop
+ * is, how the seller talks about the pair, and paying for a `LegitCheck`. Those
+ * cost nothing economically and are the readable ones anyway. If step 3 says the
+ * player still cannot form a view, the missing signal is more seller dialogue,
+ * not a cheaper sticker.
+ */

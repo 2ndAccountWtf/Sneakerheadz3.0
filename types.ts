@@ -240,6 +240,12 @@ export interface MarketSneaker {
     isFake?: boolean;
     /** See `InventoryItem.grade`. Carried onto the pair when you buy it. */
     grade?: import('./systems/market/authenticity').AuthGrade;
+    /**
+     * What the seller says it is. Equal to `grade` while the badge is still
+     * truthful; when a pair is being passed off, this is the lie the price is
+     * built on. Absent means honest.
+     */
+    claimed?: import('./systems/market/authenticity').AuthGrade;
 }
 
 /**

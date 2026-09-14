@@ -146,9 +146,25 @@ rather than a dice roll.
 
 1. **The grade.** `AuthGrade` type, grade on listings and inventory, pricing
    off it, `gradeDifficulty` in all three detection rolls. Pure, testable, no
-   UI. The game plays exactly as now.
+   UI. The game plays exactly as now. ✅ *Done.*
 2. **Leak fakes into ordinary tabs**, weighted by store rigour. Still labelled,
-   so it is observable and tunable before anything is hidden.
+   so it is observable and tunable before anything is hidden. ✅ *Done.*
+   Measured on a seeded world: 23.6% of listings at a `securityLevel 0` stall,
+   7.4% at an ordinary shop, 3.4% at a gallery. `claimed` now sits beside
+   `grade` — what the seller says versus what it is — and is equal to it while
+   the badge stays honest, which is what makes step 4 a one-line change.
+
+   **Finding that changes step 4.** The first draft gave a leak a keen sticker,
+   because "price against local market" is the first of the four signals below.
+   That needs genuine clearance on real pairs to exist too, or a markdown is
+   just the word *fake* with extra steps. Measuring it killed the idea: this
+   economy already runs at a **244% best cross-city margin against a 260%
+   guard**, so any real pair listed below its rate blows the arbitrage ceiling —
+   a 7% discount is enough to do it. Cheaper real stock is the one thing there
+   is no room for. **Signal 1 is therefore unavailable**, and the mystery has to
+   rest on the other three: store rigour, how the seller talks, and a paid
+   `LegitCheck`. If step 3 says the player still cannot form a view, the answer
+   is more seller dialogue, not a cheaper sticker.
 3. **Simulate the economy.** Headless: does a rep-runner out-earn a straight
    trader? By how much? At what cred cost? Tune before a single label moves.
 4. **Hide the truth.** Remove the badge, add believed-grade, add the four
