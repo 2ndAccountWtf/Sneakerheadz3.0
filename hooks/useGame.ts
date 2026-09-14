@@ -46,6 +46,7 @@ import {
 import { isWeaponItem } from '../systems/ampm/stock';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
+import { shopCredGain } from '../systems/pricing';
 import { reputationSpread } from '../systems/npc/reactions';
 import {
     seedWorld, advanceWorld, applyTradePressure, snapshotMarket, addLocalStock,
@@ -524,14 +525,11 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             }
 
             const profit = price - itemToSell.purchasePrice;
-            // Big flips build a name for you — but never on a fake. Passing one
-            // off is the rep game's whole bargain: it makes money and it earns
-            // you nothing, so the rep route stays locked out of everything cred
-            // gates. `systems/street/selling.ts` has always got this right; this
-            // counter did not, and since a pair bought at 15% of market carries
-            // the fattest profit in the game, running reps was actually the
-            // *fastest* way to build a name.
-            const credGain = itemToSell.isFake ? 0 : profit > 500 ? 3 : profit > 150 ? 1 : 0;
+            // Big flips build a name for you, and a fake never does. The rule
+            // lives in `systems/pricing.ts` rather than here — it was written
+            // twice once already, and the copy in this reducer was the one
+            // missing the fake check.
+            const credGain = shopCredGain(itemToSell, profit);
 
             // You are the supply now, in both senses. Dumping into one city
             // walks its price down — and the pair you just sold is on a shelf in

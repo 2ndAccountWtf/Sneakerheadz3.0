@@ -38,6 +38,21 @@ const BODY_W = 15;         // hurtbox width
 const MIN_SEP = 15;        // bodies push each other apart at this distance
 const FPS = 60;
 
+/**
+ * Closing the gap.
+ *
+ * Walking was the only approach and it was slower than the knockback of a jab,
+ * which is how the fighters ended up living at a distance no move could reach.
+ * WALK_FWD is the sustained approach; the dash is the burst, on a double-tap
+ * forward — the only "motion" input a three-button phone D-pad can express.
+ */
+const WALK_FWD = 70;
+const WALK_BACK = 48;
+const DASH_V = 138;
+const DASH_FRAMES = 11;
+/** How long the first forward tap waits for its partner. */
+const TAP_WINDOW = 13;
+
 const ROUND_SECONDS = 60;
 const ROUNDS_TO_WIN = 2;   // best of 3
 
@@ -93,33 +108,33 @@ const BASE_MOVES: Record<MoveId, MoveDef> = {
     // Fast, short, combos into itself and into everything else.
     jab: {
         label: 'Jab', startup: 4, active: 3, recovery: 6,
-        damage: 6, reach: 22, height: 'mid',
-        knock: 46, hitstun: 12, hitstop: 3, shake: 1, chip: 0.18, cancel: 13,
+        damage: 6, reach: 25, height: 'mid',
+        knock: 18, hitstun: 12, hitstop: 3, shake: 1, chip: 0.18, cancel: 13,
     },
     // Slow, long, hurts. Whiffing it is a decision you regret.
     heavy: {
         label: 'Kick', startup: 9, active: 4, recovery: 15,
         damage: 13, reach: 33, height: 'mid',
-        knock: 132, hitstun: 19, hitstop: 6, shake: 4, chip: 0.16, cancel: 0,
+        knock: 70, hitstun: 19, hitstop: 6, shake: 4, chip: 0.16, cancel: 0,
     },
     // Low: goes UNDER a standing block. Knocks down, so it never combos.
     sweep: {
         label: 'Sweep', startup: 8, active: 4, recovery: 18,
-        damage: 10, reach: 30, height: 'low',
-        knock: 90, hitstun: 24, hitstop: 5, shake: 3, chip: 0.14, cancel: 0,
+        damage: 10, reach: 31, height: 'low',
+        knock: 56, hitstun: 24, hitstop: 5, shake: 3, chip: 0.14, cancel: 0,
         knockdown: true,
     },
     // Overhead: goes OVER a crouch block. The answer to a turtle.
     air: {
         label: 'Air Stomp', startup: 4, active: 9, recovery: 6,
         damage: 9, reach: 22, height: 'overhead',
-        knock: 70, hitstun: 16, hitstop: 4, shake: 2, chip: 0.2, cancel: 11, air: true,
+        knock: 40, hitstun: 16, hitstop: 4, shake: 2, chip: 0.2, cancel: 11, air: true,
     },
     // The special. Costs the whole hype meter, launches, gets a banner.
     special: {
         label: 'Shoelace Uppercut', startup: 5, active: 7, recovery: 22,
         damage: 24, reach: 28, height: 'mid',
-        knock: 170, hitstun: 30, hitstop: 10, shake: 7, chip: 0.28, cancel: 0,
+        knock: 120, hitstun: 30, hitstop: 10, shake: 7, chip: 0.28, cancel: 0,
         knockdown: true, launch: -190, meter: 100,
     },
     // Windup for a thrown AM/PM weapon. No hitbox of its own.
@@ -158,7 +173,7 @@ export function movesFor(weapon: Weapon): Record<MoveId, MoveDef> {
             reach: 33 + (weapon.damage >= 34 ? 13 : 8),
             startup: weapon.damage >= 34 ? 11 : 8,
             recovery: Math.max(11, Math.round(weapon.cooldown * FPS * 0.55)),
-            knock: 120 + dmg * 3,
+            knock: 62 + dmg * 1.6,
             hitstop: 7,
             shake: 5,
         };
@@ -222,6 +237,12 @@ export interface Fighter {
      * fight and it was the one most likely to be thrown away.
      */
     buf: { a: number; b: number; up: number };
+    /** Frames of dash momentum left. */
+    dash: number;
+    /** Frames left for a second forward tap to register as a dash. */
+    tapWin: number;
+    /** Last frame's forward-hold, so a tap is an edge and not a hold. */
+    fwdWas: boolean;
 }
 
 export interface Projectile {
@@ -291,6 +312,8 @@ export interface AiBrain {
     react: number;
     /** Whether the current guard is a crouch block. */
     guardLow: boolean;
+    /** Frame counter, used to shape the forward hold into a double tap. */
+    tick: number;
 }
 
 export interface FightInput {
@@ -360,6 +383,7 @@ function makeFighter(isPlayer: boolean, name: string, x: number, hp: number, wea
         slow: 0, flash: 0, blockFlash: 0,
         weapon, moves: movesFor(weapon), dealt: 0,
         buf: { a: 0, b: 0, up: 0 },
+        dash: 0, tapWin: 0, fwdWas: false,
     };
 }
 
@@ -380,7 +404,7 @@ export function createFight(cfg: FightConfig): FightState {
         hitstop: 0, shake: 0, elapsed: 0,
         credEdge: Math.max(0, Math.min(0.2, cfg.credEdge ?? 0)),
         rng,
-        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false },
+        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false, tick: 0 },
         ammoBank: { [cfg.weapon.id]: cfg.weapon.uses ?? Infinity },
         stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0 },
     };
@@ -599,7 +623,7 @@ export function startAttack(s: FightState, f: Fighter, id: MoveId): boolean {
     f.hasHit = false;
     f.cancel = 0;
     f.crouch = id === 'sweep';
-    if (!m.air) { f.vx = 0; }
+    if (!m.air) { f.vx = 0; f.dash = 0; f.tapWin = 0; }
     return true;
 }
 
@@ -679,6 +703,19 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
     const wantBack = (toward === 1 && cmd.left) || (toward === -1 && cmd.right);
     const wantFwd = (toward === 1 && cmd.right) || (toward === -1 && cmd.left);
 
+    // Double-tap forward = dash. Detected on the rising edge of the forward
+    // hold, so holding forward walks and tapping it twice bursts. The window is
+    // deliberately short: a player alternating taps to walk should not skate.
+    if (f.tapWin > 0) f.tapWin = Math.max(0, f.tapWin - df);
+    if (f.dash > 0) f.dash = Math.max(0, f.dash - df);
+    const fwdEdge = wantFwd && !f.fwdWas;
+    f.fwdWas = wantFwd;
+    if (fwdEdge && !locked && !airborne && f.state !== 'attack' && !f.crouch) {
+        if (f.tapWin > 0) { f.dash = DASH_FRAMES; f.tapWin = 0; }
+        else f.tapWin = TAP_WINDOW;
+    }
+    if (!wantFwd || locked) f.dash = 0;
+
     // Blocking is "hold back": no dedicated button, so it works with the
     // on-screen D-pad on a phone with a single thumb.
     f.blockHeld = !locked && !airborne && f.state !== 'attack' && wantBack;
@@ -689,7 +726,8 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
         // A buffered press is cleared only once it actually produces a move, so
         // one that still cannot come out — mid-recovery, say — keeps waiting
         // out the rest of its window instead of being spent on a refusal.
-        if (f.buf.a > 0) {
+        const tryLight = () => {
+            if (f.buf.a <= 0) return;
             // Down + A with a full meter is the special. One thumb on the pad,
             // one on the button — the only "motion" input a phone can do well.
             // The direction is read live: what you are holding when it fires is
@@ -700,8 +738,9 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
                   ? startAttack(s, f, 'air')
                   : startAttack(s, f, 'jab');
             if (fired) f.buf.a = 0;
-        }
-        if (f.buf.b > 0) {
+        };
+        const tryHeavy = () => {
+            if (f.buf.b <= 0) return;
             const fired = airborne
                 ? startAttack(s, f, 'air')
                 : cmd.down
@@ -710,7 +749,19 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
                     ? startAttack(s, f, 'toss')
                     : startAttack(s, f, 'heavy');
             if (fired) f.buf.b = 0;
-        }
+        };
+        /**
+         * The NEWER press goes first — a buffer counts down, so the bigger
+         * number is the more recent one.
+         *
+         * Order used to be fixed, light before heavy, and that quietly deleted
+         * the game's only combo: press punch, then kick to cash in the cancel
+         * window, and the punch press was still sitting in the buffer with a
+         * few frames left, so it won the check and jabbed again. Measured over
+         * fifty matches, a "jab then heavy" policy landed exactly zero heavies.
+         */
+        if (f.buf.b > f.buf.a) { tryHeavy(); tryLight(); }
+        else { tryLight(); tryHeavy(); }
 
         // --- movement ---
         if (f.state !== 'attack') {
@@ -728,11 +779,12 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
                 f.vx = 0;
                 f.state = 'crouch';
             } else if (wantFwd) {
-                f.vx = toward * 58 * (f.slow > 0 ? 0.5 : 1);
+                const speed = f.dash > 0 ? DASH_V : WALK_FWD;
+                f.vx = toward * speed * (f.slow > 0 ? 0.5 : 1);
                 f.state = 'walk';
             } else if (wantBack) {
                 // Walking back is slower, which is what makes cornering work.
-                f.vx = -toward * 46 * (f.slow > 0 ? 0.5 : 1);
+                f.vx = -toward * WALK_BACK * (f.slow > 0 ? 0.5 : 1);
                 f.state = 'walk';
             } else {
                 f.vx = 0;
@@ -811,7 +863,7 @@ function separate(a: Fighter, b: Fighter) {
 const PROJECTILE_MOVE = (dmg: number): MoveDef => ({
     label: 'Thrown', startup: 0, active: 1, recovery: 0,
     damage: dmg, reach: 0, height: 'mid',
-    knock: 92, hitstun: 16, hitstop: 5, shake: 3, chip: 0.15, cancel: 0,
+    knock: 58, hitstun: 16, hitstop: 5, shake: 3, chip: 0.15, cancel: 0,
 });
 
 const RETURN_DIST = 120;
@@ -891,6 +943,7 @@ function aiInput(s: FightState, dt: number): FightInput {
 
     ai.think -= df;
     ai.react -= df;
+    ai.tick = (ai.tick + df) % 4200;
     // Ramps as he loses; the player's street cred takes a little off the top.
     ai.aggr = Math.max(0.15, Math.min(0.95, 0.32 + (1 - f.hp / f.maxHp) * 0.55 - s.credEdge * 0.5));
 
@@ -912,33 +965,39 @@ function aiInput(s: FightState, dt: number): FightInput {
             ai.plan = 'block';
             ai.guardLow = s.rng() < 0.35;
             ai.think = 16;
-        } else if (playerRecovering && dist < reach + 12) {
+        } else if (playerRecovering && dist < reach + BODY_W + 10) {
             // Whiff punish: this is the single thing that makes him feel alive.
+            // Inside jab range the jab is the punish — 4 frames of startup beats
+            // the heavy's 9, and a whiff window is only ever a dozen frames wide.
             ai.plan = 'attack';
-            ai.queued = dist > 24 ? 'heavy' : 'jab';
+            ai.queued = dist <= f.moves.jab.reach + BODY_W + 5 ? 'jab' : 'heavy';
             ai.think = 16;
+        } else if (f.hype >= 100 && dist < 40 && r < 0.55) {
+            // Above the guard branch on purpose. The special has invulnerable
+            // startup — it is his reversal, the answer to being held down by a
+            // string of safe pokes — and while it sat below "they are attacking,
+            // block" he could never spend a meter he only earned by being hit.
+            ai.plan = 'attack';
+            ai.queued = 'special';
+            ai.think = 22;
         } else if (playerAttacking && dist < reach + 18 && r < 0.5 + ai.aggr * 0.2) {
             ai.plan = 'block';
             // Guess the height. He is wrong often enough to be beatable.
             ai.guardLow = pm!.height === 'low' ? s.rng() < 0.7 : s.rng() < 0.3;
             ai.think = 14;
-        } else if (f.hype >= 100 && dist < 34 && r < 0.55) {
-            ai.plan = 'attack';
-            ai.queued = 'special';
-            ai.think = 22;
-        } else if (dist > 62) {
+        } else if (dist > 50) {
             if (r < 0.12 && f.hp > f.maxHp * 0.6) { ai.plan = 'taunt'; ai.think = 40; }
             else { ai.plan = 'approach'; ai.think = 14; }
-        } else if (dist > 38) {
+        } else if (dist > 32) {
             if (r < ai.aggr) { ai.plan = 'approach'; ai.think = 12; }
             else { ai.plan = r < 0.6 ? 'neutral' : 'retreat'; ai.think = 18; }
         } else if (dist > 16) {
             if (r < ai.aggr + 0.18) {
                 ai.plan = 'attack';
                 // Read the guard: sweep a stander, stomp a croucher.
-                if (p.blockHeld && !p.crouch) ai.queued = 'sweep';
-                else if (p.blockHeld && p.crouch) ai.queued = s.rng() < 0.55 ? 'jumpin' : 'heavy';
-                else ai.queued = s.rng() < 0.45 ? 'jab' : dist > 26 ? 'heavy' : s.rng() < 0.3 ? 'sweep' : 'jab';
+                if (p.blockHeld && !p.crouch) ai.queued = s.rng() < 0.5 ? 'sweep' : 'heavy';
+                else if (p.blockHeld && p.crouch) ai.queued = s.rng() < 0.45 ? 'jumpin' : 'heavy';
+                else { const k = s.rng(); ai.queued = k < 0.38 ? 'jab' : k < 0.72 ? 'heavy' : 'sweep'; }
                 ai.think = 14;
             } else { ai.plan = r < 0.5 ? 'block' : 'neutral'; ai.guardLow = s.rng() < 0.4; ai.think = 16; }
         } else {
@@ -949,10 +1008,53 @@ function aiInput(s: FightState, dt: number): FightInput {
         ai.react = 4 + Math.floor(s.rng() * 7);
     }
 
+    /**
+     * Reflex guard — the one thing he is allowed to do off-schedule.
+     *
+     * His decision timer runs at 12-22 frames and a heavy is a 28-frame move,
+     * so a purely scheduled read walks face-first into a hitbox about half the
+     * time. That is what made mashing the long button a solved strategy. He
+     * still has to have his reaction available, and he still guesses the height,
+     * so mashing is *good* against him rather than free.
+     */
+    if (playerAttacking && pm && ai.react <= 2 && ai.plan !== 'block' && ai.queued !== 'special'
+        && dist < pm.reach + BODY_W + 8
+        && p.frame >= pm.startup - 7 && p.frame < pm.startup + pm.active + 2
+        && s.rng() < 0.64) {
+        ai.plan = 'block';
+        ai.queued = null;
+        ai.guardLow = pm.height === 'low' ? s.rng() < 0.72 : s.rng() < 0.22;
+        ai.think = 6;
+        ai.react = 3 + Math.floor(s.rng() * 4);
+    }
+
+    /**
+     * Forward, optionally with a dash in it.
+     *
+     * He has no private movement code: the dash is the same double-tap the
+     * player's pad produces, so releasing forward for one frame in seven is
+     * literally him tapping twice. Without it he could set a punish up and then
+     * fail to arrive — measured at eight-odd frames short of a jab on a blocked
+     * heavy, which is the whole reason a mashed long button used to be free.
+     */
+    const forward = (burst: boolean) => {
+        if (burst && Math.floor(ai.tick) % 7 === 0) return;
+        if (toward === 1) cmd.right = true; else cmd.left = true;
+    };
+    /** Only sprints when there is ground to make up: into a punish, or from afar. */
+    const burst = dist > 58 || (ai.plan === 'attack' && playerRecovering);
+
     // --- execute ---
     switch (ai.plan) {
-        case 'approach': if (toward === 1) cmd.right = true; else cmd.left = true; break;
-        case 'retreat': if (toward === 1) cmd.left = true; else cmd.right = true; break;
+        case 'approach': forward(burst); break;
+        case 'retreat':
+            // Retreat has a floor. Walking backwards until nothing reaches is
+            // exactly the drift that emptied the neutral game; past his own
+            // heavy's range he holds ground instead.
+            if (dist < f.moves.heavy.reach + BODY_W + 6) {
+                if (toward === 1) cmd.left = true; else cmd.right = true;
+            }
+            break;
         case 'block':
             if (toward === 1) cmd.left = true; else cmd.right = true;
             if (ai.guardLow) cmd.down = true;
@@ -977,16 +1079,23 @@ function aiInput(s: FightState, dt: number): FightInput {
             }
         } else {
             // Walk into range first; commit once the move can actually reach.
+            // The margin is INSIDE the reach, not at the lip of it: a move
+            // started at the exact edge spends its startup frames there and the
+            // hitbox arrives in empty air. Swinging at the edge was most of what
+            // he did, and it is why mashing a long button beat him for free.
             const want = f.moves[ai.queued];
-            if (dist <= want.reach + BODY_W + 2) {
+            // A target stuck in recovery, hitstun or blockstun cannot walk out
+            // of it, so against one he commits at the lip of his range; against
+            // a free opponent he steps inside it first.
+            const frozen = playerRecovering || p.state === 'hitstun' || p.blockstun > 0;
+            if (dist <= want.reach + BODY_W - (frozen ? 1 : 5)) {
                 if (ai.queued === 'jab' || ai.queued === 'special') { cmd.aPressed = true; cmd.a = true; }
                 else { cmd.bPressed = true; cmd.b = true; }
                 // Sweep and special are both "down + button" inputs, same as the player's.
                 if (ai.queued === 'sweep' || ai.queued === 'special') cmd.down = true;
                 ai.queued = null;
                 ai.plan = 'neutral';
-            } else if (toward === 1) cmd.right = true;
-            else cmd.left = true;
+            } else forward(burst);
         }
     }
 
@@ -1007,6 +1116,7 @@ function resetRound(s: FightState) {
         f.hitstun = 0; f.blockstun = 0; f.blockHeld = false; f.crouch = false;
         f.downTimer = 0; f.invuln = 0; f.cancel = 0; f.slow = 0;
         f.flash = 0; f.blockFlash = 0; f.dealt = 0;
+        f.dash = 0; f.tapWin = 0; f.fwdWas = false;
         f.hype = hype;                      // ammo deliberately NOT reset: uses are per game
     };
     reset(s.p, 108, 1);
@@ -1017,7 +1127,7 @@ function resetRound(s: FightState) {
     s.roundClock = ROUND_SECONDS;
     s.hitstop = 0;
     s.shake = 0;
-    s.ai = { plan: 'approach', think: 24, queued: null, aggr: 0.32, react: 0, guardLow: false };
+    s.ai = { plan: 'approach', think: 24, queued: null, aggr: 0.32, react: 0, guardLow: false, tick: 0 };
 }
 
 function endRound(s: FightState, playerWon: boolean | null, byKo: boolean) {

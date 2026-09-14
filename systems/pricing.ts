@@ -50,6 +50,25 @@ export function getBuyPrice(listedPrice: number, player: Player): number {
     return Math.max(1, Math.round(listedPrice * buffMultiplier(player, 'storeDiscount')));
 }
 
+/**
+ * Street cred for moving a pair over a shop counter.
+ *
+ * Exported rather than inlined in the reducer because it has already been got
+ * wrong once by being written twice: the rule lived as a literal inside
+ * `SELL_SNEAKER` with no `isFake` check, while `systems/street/selling.ts`
+ * correctly paid nothing for a fake. Since a pair bought at 15% of market
+ * carries the fattest profit in the game, that made running reps the *fastest*
+ * way to build a name — the exact inverse of the intended rule. One definition,
+ * so the reducer and anything measuring it cannot drift apart again.
+ *
+ * Passing off a fake makes money and earns you nothing. That is the bargain,
+ * and it is what keeps the rep route locked out of everything cred gates.
+ */
+export function shopCredGain(item: Pick<InventoryItem, 'isFake'>, profit: number): number {
+    if (item.isFake) return 0;
+    return profit > 500 ? 3 : profit > 150 ? 1 : 0;
+}
+
 /** What the player is handed when selling one specific pair. */
 export function getSellPrice(marketPrice: number, item: InventoryItem, player: Player): number {
     let price = marketPrice * (item.valueMultiplier ?? 1);

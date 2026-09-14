@@ -20,6 +20,10 @@ dist-ssr
 # shipped, so they are ignored rather than left to be swept up by `git add -A`.
 __*.html
 __*.tsx
+# .mts too: the headless measurement harnesses (market flips, fighter balance,
+# leak rates) are written as `__name.mts` and were not covered here, which is
+# the same gap the note above describes.
+__*.mts
 vite.*.config.mts
 !vite.config.ts
 
