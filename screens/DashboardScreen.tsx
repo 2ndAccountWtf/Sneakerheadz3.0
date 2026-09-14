@@ -75,7 +75,7 @@ const DashboardScreen: React.FC = () => {
     );
 
     const spotCount = useMemo(
-        () => spotsIn(currentCityId).length,
+        () => spotsIn(currentCityId, gameState.day).length,
         [currentCityId],
     );
 

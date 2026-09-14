@@ -3,6 +3,7 @@ import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
 import { venuesIn, isVenueOpen, timeOfDayFor, type Venue } from '../data/venues';
+import { activeHypeEvent } from '../systems/events/hypeCalendar';
 import { getOpponent, effectiveSkill, challengeLine, rivalryWith, type Opponent } from '../systems/opponents';
 import { CITIES } from '../data/cities';
 import { whereIs } from '../systems/npc/schedule';
@@ -70,10 +71,11 @@ function buildMatch(game: MiniGameId, venue: Venue, opponent: Opponent | null, s
 }
 
 const VenuesScreen: React.FC = () => {
-    const { gameState, launchMiniGame, dispatch } = useGame();
+    const { gameState, launchMiniGame, dispatch, changeScreen } = useGame();
     const { currentCityId, day, player } = gameState;
 
     const venues = useMemo(() => venuesIn(currentCityId), [currentCityId]);
+    const liveEvent = useMemo(() => activeHypeEvent(day, currentCityId), [day, currentCityId]);
     const cityName = CITIES.find(c => c.id === currentCityId)?.name ?? 'here';
     const [expanded, setExpanded] = useState<string | null>(venues[0]?.id ?? null);
 
@@ -157,7 +159,36 @@ const VenuesScreen: React.FC = () => {
                 back={Screen.Dashboard}
             />
 
-            {venues.length === 0 ? (
+            {/* The event, when one is on here.
+                The calendar has been announcing it for days and this is where a
+                player goes looking for it — "around town" is the question it
+                answers. Selling at it happens through Set Up Shop, so this is a
+                door rather than a second implementation of the same floor. */}
+            {liveEvent && (
+                <button
+                    className="panel p-4 mb-3 w-full text-left border-[var(--accent)]"
+                    onClick={() => changeScreen(Screen.StreetSell)}
+                >
+                    <div className="flex items-start gap-2.5">
+                        <span className="text-xl leading-none flex-shrink-0">{liveEvent.icon}</span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-display text-sm uppercase text-white">{liveEvent.name}</span>
+                                <span className="chip chip-accent">on now</span>
+                            </div>
+                            <p className="text-sm text-[var(--ink-dim)] leading-snug mt-1">{liveEvent.blurb}</p>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                <span className="chip">💰 +{Math.round((liveEvent.priceMultiplier - 1) * 100)}% on the floor</span>
+                                {liveEvent.celebrityChance >= 0.15 && <span className="chip chip-accent">⭐ somebody famous, maybe</span>}
+                                <span className="chip chip-bad">🚨 everybody can see you</span>
+                            </div>
+                            <div className="label mt-2" style={{ color: 'var(--accent)' }}>Go and set up →</div>
+                        </div>
+                    </div>
+                </button>
+            )}
+
+            {venues.length === 0 && !liveEvent ? (
                 <div className="panel p-10 text-center">
                     <div className="text-4xl mb-3">🚧</div>
                     <p className="text-[var(--ink-dim)]">Nothing going on here. Try another city.</p>

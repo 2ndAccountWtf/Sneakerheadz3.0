@@ -359,3 +359,44 @@ export function resolveEscape(
 
 const clamp = (n: number) => Math.max(0, Math.min(MAX_HEAT, n));
 const fmt = (n: number) => `$${n.toLocaleString()}`;
+
+/* ------------------------------------------------------------------ *
+ * Where a stop can happen
+ * ------------------------------------------------------------------ */
+
+/**
+ * Odds of being stopped while working a corner.
+ *
+ * Street selling has always tracked heat per spot — `heatRate` runs from 1 at
+ * a quiet flea-market table to 6 at a subway exit — and the only thing that
+ * number ever did was make the pitch more likely to be shut down. Being moved
+ * along is not a consequence, it is an inconvenience, so the spot-choice the
+ * whole screen is built around ("busy but watched" against "quiet but rich")
+ * never actually cost anything.
+ *
+ * Now the eyes on you can belong to somebody. This is deliberately lower than
+ * the shutdown roll: getting told to move on should stay the common case and a
+ * stop should be the one that ruins an afternoon.
+ */
+export function streetBustChance(
+    spotHeatRate: number,
+    player: Player,
+    hypeHeatMultiplier = 1,
+): number {
+    const pressure = Math.max(0, Math.min(1, player.heat / MAX_HEAT));
+    // Carrying counterfeits is what turns a look into a conversation.
+    const fakes = Math.min(0.08, fakesOn(player) * 0.02);
+    const base = 0.012 + pressure * 0.1 + fakes;
+    const exposure = 1 + (spotHeatRate - 3) * 0.14;
+    return Math.max(0.005, Math.min(0.35, base * exposure * hypeHeatMultiplier));
+}
+
+/**
+ * Whether an AM/PM run gets interrupted. Buying a weapon while already hot is
+ * the kind of thing that gets noticed, and the shop is the one place the game
+ * lets you arm yourself.
+ */
+export function shopBustChance(player: Player, boughtWeapon: boolean): number {
+    const pressure = Math.max(0, Math.min(1, player.heat / MAX_HEAT));
+    return Math.max(0, Math.min(0.3, (boughtWeapon ? 0.04 : 0.008) + pressure * (boughtWeapon ? 0.2 : 0.06)));
+}

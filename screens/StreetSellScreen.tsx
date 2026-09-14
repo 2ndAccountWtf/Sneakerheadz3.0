@@ -7,7 +7,7 @@ import { CITIES } from '../data/cities';
 import { SNEAKERS } from '../data/sneakers';
 import { getCityMarketPrice } from '../systems/pricing';
 import { MAX_HEAT } from '../constants';
-import { spotsIn, isSpotOpen, type SellingSpot } from '../data/sellingSpots';
+import { spotsIn, isSpotOpen, isEventSpot, type SellingSpot } from '../data/sellingSpots';
 import { generateBuyer, interestedIn, arrivalChance } from '../systems/street/buyers';
 import {
     arriveAtSpot, openingOffer, counterOffer, acceptOffer, walkAway, resolveSale,
@@ -15,6 +15,7 @@ import {
 } from '../systems/street/selling';
 import type { StreetBuyer, BuyerKind } from '../types/hype';
 import { activeHypeEvent } from '../systems/events/hypeCalendar';
+import { streetBustChance } from '../systems/police/bust';
 
 /**
  * Street selling.
@@ -56,7 +57,7 @@ const StreetSellScreen: React.FC = () => {
 
     const cityName = CITIES.find(c => c.id === currentCityId)?.name ?? 'here';
     const hype = useMemo(() => activeHypeEvent(day, currentCityId), [day, currentCityId]);
-    const spots = useMemo(() => spotsIn(currentCityId), [currentCityId]);
+    const spots = useMemo(() => spotsIn(currentCityId, day), [currentCityId, day]);
 
     const [activeSpot, setActiveSpot] = useState<SellingSpot | null>(null);
     const [buyer, setBuyer] = useState<StreetBuyer | null>(null);
@@ -73,6 +74,15 @@ const StreetSellScreen: React.FC = () => {
         const result = arriveAtSpot(spot, player, day, isSpotOpen(spot, day));
         dispatch({ type: 'RESOLVE_STREET_SALE', payload: { player: result.player, log: result.log } });
         if (result.ok) {
+            // The eyes on a spot now belong to somebody. `heatRate` only ever
+            // decided how likely you were to be moved along, which is an
+            // inconvenience rather than a consequence — so the choice this
+            // whole screen is built around, busy-but-watched against
+            // quiet-but-rich, never cost anything.
+            if (Math.random() < streetBustChance(spot.heatRate, result.player, hype?.heatMultiplier ?? 1)) {
+                dispatch({ type: 'START_BUST' });
+                return;
+            }
             setActiveSpot(spot);
             setBuyer(null);
             setNegotiation(null);
@@ -202,6 +212,8 @@ const StreetSellScreen: React.FC = () => {
                                 <p className="text-sm text-[var(--ink-dim)] leading-snug mb-2.5">{spot.blurb}</p>
 
                                 <div className="flex flex-wrap gap-1.5 mb-3">
+                                    {/* The event floor is the reason you flew here — say so. */}
+                                    {isEventSpot(spot) && <span className="chip chip-accent">★ the event · on now</span>}
                                     <span className="chip">{Math.round(spot.buyerMix.local * 100)}% locals</span>
                                     <span className="chip">{Math.round(spot.buyerMix.international * 100)}% tourists</span>
                                     {spot.buyerMix.celebrity >= 0.15 && <span className="chip chip-accent">chance of ⭐ somebody famous</span>}

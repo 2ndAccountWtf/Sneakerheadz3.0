@@ -11,7 +11,8 @@
 import assert from 'node:assert/strict';
 import {
     rollOfficer, openBust, offer, resolveBust, temperamentFor,
-    seizableCash, fakesOn, resolveEscape, JAIL_MIN_DAY, JAIL_MIN_HEAT,
+    seizableCash, fakesOn, resolveEscape, streetBustChance, shopBustChance,
+    JAIL_MIN_DAY, JAIL_MIN_HEAT,
 } from '../systems/police/bust.ts';
 import { seeded } from '../utils/rng.ts';
 import type { Player } from '../types.ts';
@@ -233,6 +234,53 @@ t('promising money you do not have goes badly', () => {
     const out = resolveBust(s, 'pay', p, seeded(3));
     assert.ok(out.player.heat > p.heat, 'no consequence for bluffing him');
     assert.ok(out.player.cash < 20 || out.player.cash === 0);
+});
+
+
+console.log('\nwhere a stop can happen');
+
+t('a watched corner is riskier than a quiet one', () => {
+    const p = mk({ heat: 50 });
+    const subwayExit = streetBustChance(6, p);
+    const fleaTable = streetBustChance(1, p);
+    assert.ok(subwayExit > fleaTable * 1.4,
+        `heatRate 6 gives ${subwayExit.toFixed(3)} against heatRate 1 at ${fleaTable.toFixed(3)} — ` +
+        'the busy/quiet choice the whole screen is built around still costs nothing');
+});
+
+t('heat is the main dial', () => {
+    const cold = streetBustChance(3, mk({ heat: 0 }));
+    const hot = streetBustChance(3, mk({ heat: 100 }));
+    assert.ok(hot > cold * 4, `${cold.toFixed(3)} cold vs ${hot.toFixed(3)} hot`);
+});
+
+t('counterfeits in the bag turn a look into a conversation', () => {
+    const clean = streetBustChance(3, mk({ heat: 40 }));
+    const dirty = streetBustChance(3, mk({ heat: 40, inventory: [pair(true), pair(true, 2), pair(true, 3)] }));
+    assert.ok(dirty > clean, `${clean.toFixed(3)} vs ${dirty.toFixed(3)}`);
+});
+
+t('an event floor is more exposed than the corner outside it', () => {
+    const p = mk({ heat: 45 });
+    assert.ok(streetBustChance(4, p, 1.5) > streetBustChance(4, p, 1));
+});
+
+t('being stopped stays rarer than being moved along', () => {
+    // Getting told to shift is the common case; a stop should be the one that
+    // ruins the afternoon.
+    for (const heat of [0, 25, 50, 75, 100]) {
+        for (const rate of [1, 3, 6]) {
+            const c = streetBustChance(rate, mk({ heat }));
+            assert.ok(c <= 0.35, `heat ${heat} rate ${rate} gives ${c.toFixed(3)} — that is not a rare event`);
+            assert.ok(c > 0, 'a stop became impossible');
+        }
+    }
+});
+
+t('buying a weapon while hot is the thing that gets noticed', () => {
+    const hot = mk({ heat: 85 });
+    assert.ok(shopBustChance(hot, true) > shopBustChance(hot, false) * 2);
+    assert.ok(shopBustChance(mk({ heat: 0 }), false) < 0.02, 'a clean player gets hassled buying crisps');
 });
 
 console.log(`\n${pass} bust checks passed.\n`);

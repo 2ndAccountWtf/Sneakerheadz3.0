@@ -1,4 +1,5 @@
 import { timeOfDayFor } from './venues';
+import { activeHypeEvent } from '../systems/events/hypeCalendar';
 
 /**
  * Street selling spots.
@@ -426,8 +427,68 @@ export const SELLING_SPOTS: SellingSpot[] = [
     },
 ];
 
-export const spotsIn = (cityId: string): SellingSpot[] =>
-    SELLING_SPOTS.filter(s => s.cityId === cityId);
+/**
+ * The corners you can work in a city — plus, on the days it runs, the event
+ * itself. The event is listed first because it is the reason you came.
+ */
+export const spotsIn = (cityId: string, day?: number): SellingSpot[] => {
+    const fixed = SELLING_SPOTS.filter(s => s.cityId === cityId);
+    if (day === undefined) return fixed;
+    const live = activeHypeEvent(day, cityId);
+    return live ? [eventSpot(live), ...fixed] : fixed;
+};
+
+/** True for the spot that only exists because an event is on. */
+export const isEventSpot = (spot: SellingSpot): boolean => spot.id.startsWith('event-');
 
 export const isSpotOpen = (spot: SellingSpot, day: number): boolean =>
     !spot.timeOfDay || spot.timeOfDay === timeOfDayFor(day);
+
+/* ------------------------------------------------------------------ *
+ * The event floor
+ * ------------------------------------------------------------------ */
+
+/**
+ * A hype event, as somewhere you can actually stand.
+ *
+ * The calendar has been announcing these for a while — "Marché aux Puces
+ * Sneaker Row, happening here right now" — and when you arrived there was
+ * nowhere to go. The event was a set of invisible multipliers on the corners
+ * you could already sell from: prices up, footfall up, more chance of somebody
+ * famous. Real effects, no destination. You were told a market was on and then
+ * sold shoes outside a station as usual.
+ *
+ * So the event becomes a spot of its own, derived from its own numbers, and it
+ * shows up at the top of Set Up Shop on the days it runs. Everything about it
+ * falls out of the event rather than being authored twice:
+ *
+ *   - `footfallMultiplier` decides how packed it is,
+ *   - a crowd that travelled for this leans international, and the celebrity
+ *     chance is the event's own,
+ *   - `heatMultiplier` sets how watched it is — a convention floor with a
+ *     security line is not a quiet alley, and the whole point of a market is
+ *     that everybody can see you.
+ *
+ * No cred gate: the door is open, that is what a market is. The cost is energy
+ * and exposure.
+ */
+export function eventSpot(event: {
+    id: string; cityId: string; name: string; blurb: string; icon: string;
+    footfallMultiplier: number; celebrityChance: number; heatMultiplier?: number;
+}): SellingSpot {
+    const footfall = Math.max(1, Math.min(5, Math.round(3 * event.footfallMultiplier))) as 1 | 2 | 3 | 4 | 5;
+    const celeb = Math.min(0.5, event.celebrityChance);
+    return {
+        id: `event-${event.id}`,
+        cityId: event.cityId,
+        name: event.name,
+        blurb: event.blurb,
+        icon: event.icon,
+        footfall,
+        // People came here on purpose, and a lot of them came a long way.
+        buyerMix: { local: 0.35, international: 0.65 - celeb, celebrity: celeb },
+        // Busy, legitimate, and comprehensively observed.
+        heatRate: Math.round(4 * (event.heatMultiplier ?? 1)),
+        energyCost: 12,
+    };
+}
