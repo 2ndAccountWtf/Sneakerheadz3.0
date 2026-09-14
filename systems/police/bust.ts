@@ -35,11 +35,18 @@ import { MAX_HEAT } from '../../constants';
 
 /**
  * Losing a day is the most expensive thing that can happen in a thirty-day
- * run, so it is gated twice rather than once. It needs real heat — this is not
- * something that happens to someone who has been careful — and it cannot
- * happen in the opening stretch at all, because a night in a cell on day 3 is
- * not a lesson, it is a run that is over before the player understands what
- * they did wrong.
+ * run, so it is gated three ways rather than one.
+ *
+ * It is only ever reached by making the stop physical — running, driving off,
+ * or swinging on him — and then losing. Refusing to pay is not a route to it:
+ * declining a shakedown costs you the cash in your pocket and any counterfeits
+ * you are carrying, which is plenty, but jailing somebody for saying no would
+ * be the game punishing the one honest option it offers.
+ *
+ * On top of that it needs real heat — this does not happen to somebody who has
+ * been careful — and it cannot happen in the opening stretch at all, because a
+ * night in a cell on day 3 is not a lesson, it is a run that ended before the
+ * player understood what they did wrong.
  */
 export const JAIL_MIN_DAY = 10;
 export const JAIL_MIN_HEAT = 70;
@@ -256,14 +263,16 @@ export function resolveBust(
         if (s.fakes > 0) log.push({ icon: '👟', text: `${s.fakes} counterfeit ${s.fakes === 1 ? 'pair' : 'pairs'} confiscated.`, tone: 'bad' });
         if (player.bank > 0) log.push({ icon: '🏦', text: 'What is in the bank stays in the bank.', tone: 'good' });
 
-        const jail = officer.canJail && (insulted || rng() < 0.45);
-        const daysLost = jail ? 1 : 0;
-        if (jail) log.push({ icon: '⛓️', text: 'You spend the night in a room with a bench and a door that locks from outside. A day gone.', tone: 'bad' });
-        else if (insulted) log.push({ icon: '😐', text: 'He looks at what you offered him, then at you, and decides you are not worth the paperwork.', tone: 'bad' });
-
+        // No cell for refusing. Saying no to a shakedown is expensive — the
+        // pocket and the counterfeits go — but it is not a crime, and being
+        // jailed for declining to bribe somebody would read as the game
+        // punishing the honest option.
+        if (insulted) {
+            log.push({ icon: '😐', text: 'He looks at what you offered him, then at you, and decides you are not worth the paperwork.', tone: 'bad' });
+        }
         return {
             player: { ...s.player, heat: clamp(player.heat + (insulted ? 22 : 12)) },
-            log, daysLost,
+            log, daysLost: 0,
         };
     }
 
@@ -280,6 +289,71 @@ export function resolveBust(
     return {
         player: { ...player, heat: clamp(player.heat + (choice === 'swing' ? 26 : 16)) },
         log, daysLost: 0, minigame,
+    };
+}
+
+/* ------------------------------------------------------------------ *
+ * How the chase ends
+ * ------------------------------------------------------------------ */
+
+/**
+ * The cell is only ever reached from here.
+ *
+ * Refusing to pay costs you money and counterfeits and nothing else — declining
+ * a shakedown is not a crime, and jailing somebody for it would have the game
+ * punishing the one honest option on the menu. What gets you booked is making
+ * it physical and then losing: running, driving off, or swinging on him.
+ *
+ * Both of the owner's original guards still hold on top of that, so the worst
+ * night in the game needs four things at once — you escalated, you lost, it is
+ * past day 10, and your heat was already high. Getting away with it costs you
+ * nothing but the heat you picked up on the way out.
+ */
+export function resolveEscape(
+    officer: Officer,
+    choice: Extract<BustChoice, 'run' | 'drive' | 'swing'>,
+    gotAway: boolean,
+    player: Player,
+): BustOutcome {
+    const log: BustOutcome['log'] = [];
+
+    if (gotAway) {
+        log.push({
+            icon: choice === 'swing' ? '🥊' : '💨',
+            text: choice === 'swing'
+                ? 'He goes down. You are already three streets away when he gets up.'
+                : 'Two corners and a fire escape later, nobody is behind you.',
+            tone: 'good',
+        });
+        return { player, log, daysLost: 0 };
+    }
+
+    const s = searched(player, 1);
+    log.push({
+        icon: '🚔',
+        text: choice === 'swing'
+            ? 'It turns out he does this for a living and you do not.'
+            : 'He was never going to be the one who got tired first.',
+        tone: 'bad',
+    });
+    if (s.taken > 0) log.push({ icon: '💵', text: `${fmt(s.taken)} gone.`, tone: 'bad' });
+    if (s.fakes > 0) log.push({ icon: '👟', text: `${s.fakes} counterfeit ${s.fakes === 1 ? 'pair' : 'pairs'} confiscated.`, tone: 'bad' });
+    if (player.bank > 0) log.push({ icon: '🏦', text: 'The bank is still the bank.', tone: 'good' });
+
+    const daysLost = officer.canJail ? 1 : 0;
+    if (daysLost) {
+        log.push({
+            icon: '⛓️',
+            text: choice === 'swing'
+                ? 'You wake up on a bench, behind a door that locks from the outside. A day gone, and they have your name now.'
+                : 'A night in a room with a bench and a door that locks from the outside. A day gone.',
+            tone: 'bad',
+        });
+    }
+
+    return {
+        player: { ...s.player, heat: clamp(player.heat + (choice === 'swing' ? 18 : 10)) },
+        log, daysLost,
     };
 }
 

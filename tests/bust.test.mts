@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import {
     rollOfficer, openBust, offer, resolveBust, temperamentFor,
-    seizableCash, fakesOn, JAIL_MIN_DAY, JAIL_MIN_HEAT,
+    seizableCash, fakesOn, resolveEscape, JAIL_MIN_DAY, JAIL_MIN_HEAT,
 } from '../systems/police/bust.ts';
 import { seeded } from '../utils/rng.ts';
 import type { Player } from '../types.ts';
@@ -138,14 +138,41 @@ t('refusing costs pocket cash and every fake, and never the bank', () => {
 
 console.log('\nthe night in a cell');
 
-t('never in the first ten days, at any heat', () => {
+t('refusing to pay never costs a day, at any heat, on any day', () => {
+    // Declining a shakedown is expensive but it is not a crime. Jailing
+    // somebody for it would have the game punishing its one honest option.
+    for (const day of [1, 11, 20, 29]) {
+        for (const heat of [0, 50, 100]) {
+            const p = mk({ heat, cash: 3000 });
+            const o = rollOfficer(p, day, seeded(day + heat));
+            for (const status of ['refused', 'insulted'] as const) {
+                for (let s = 0; s < 8; s++) {
+                    const out = resolveBust({ ...openBust(o), status }, 'refuse', p, seeded(s));
+                    assert.equal(out.daysLost, 0, `day ${day} heat ${heat} (${status}) cost a day for refusing`);
+                }
+            }
+        }
+    }
+});
+
+t('getting away with it costs nothing but the heat', () => {
+    for (const choice of ['run', 'drive', 'swing'] as const) {
+        const p = mk({ heat: 95, cash: 4000, inventory: [pair(true), pair(false, 2)] });
+        const o = rollOfficer(p, 25, seeded(2));
+        const out = resolveEscape(o, choice, true, p);
+        assert.equal(out.daysLost, 0, `${choice} cost a day despite getting away`);
+        assert.equal(out.player.cash, 4000, 'he took money off somebody who outran him');
+        assert.equal(out.player.inventory.length, 2, 'he confiscated from somebody who got away');
+    }
+});
+
+t('never in the first ten days, however badly it goes', () => {
     for (let day = 1; day <= JAIL_MIN_DAY; day++) {
         const p = mk({ heat: 100 });
         const o = rollOfficer(p, day, seeded(day));
         assert.equal(o.canJail, false, `day ${day} at max heat could still jail`);
-        for (let s = 0; s < 12; s++) {
-            const out = resolveBust({ ...openBust(o), status: 'insulted' }, 'refuse', p, seeded(s));
-            assert.equal(out.daysLost, 0, `day ${day} cost a day`);
+        for (const choice of ['run', 'drive', 'swing'] as const) {
+            assert.equal(resolveEscape(o, choice, false, p).daysLost, 0, `day ${day}: ${choice} cost a day`);
         }
     }
 });
@@ -155,21 +182,22 @@ t('never at low heat, however late in the run', () => {
         const p = mk({ heat });
         const o = rollOfficer(p, 28, seeded(heat));
         assert.equal(o.canJail, false, `heat ${heat} on day 28 could jail`);
-        for (let s = 0; s < 12; s++) {
-            assert.equal(resolveBust({ ...openBust(o), status: 'insulted' }, 'refuse', p, seeded(s)).daysLost, 0);
+        for (const choice of ['run', 'drive', 'swing'] as const) {
+            assert.equal(resolveEscape(o, choice, false, p).daysLost, 0);
         }
     }
 });
 
-t('a real possibility once you are both late and hot', () => {
-    const p = mk({ heat: 90, cash: 4000 });
+t('losing a chase late in a hot run is what books you', () => {
+    const p = mk({ heat: 90, cash: 4000, inventory: [pair(true)] });
     const o = rollOfficer(p, 22, seeded(11));
     assert.equal(o.canJail, true);
-    let jailed = 0;
-    for (let s = 0; s < 40; s++) {
-        if (resolveBust({ ...openBust(o), status: 'refused' }, 'refuse', p, seeded(s)).daysLost > 0) jailed++;
+    for (const choice of ['run', 'drive', 'swing'] as const) {
+        const out = resolveEscape(o, choice, false, p);
+        assert.equal(out.daysLost, 1, `${choice} did not book you`);
+        assert.ok(out.player.cash < 4000, 'caught and kept the cash');
+        assert.equal(out.player.inventory.filter(i => i.isFake).length, 0, 'caught and kept the fakes');
     }
-    assert.ok(jailed > 4 && jailed < 36, `${jailed}/40 — that is a certainty or a non-event, not a risk`);
 });
 
 t('paying him never costs a day, however hot', () => {
