@@ -40,6 +40,7 @@ export function useInventory(opts: UseInventoryOpts): {
                     quantity: marketSneaker.quantity,
                     // Ensure we pass the fake status to the UI item
                     isFake: marketSneaker.isFake,
+                    grade: marketSneaker.grade,
                 };
             })
             .filter((item): item is SneakerItem => item !== null);

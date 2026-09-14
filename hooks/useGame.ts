@@ -32,6 +32,7 @@ import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
 import { clearRumorCache } from '../systems/rumorEngine';
 import { saveRun, loadRun, clearRun } from '../systems/persistence/save';
 import { skimCard } from '../systems/banking';
+import { spotChance, gradeOf } from '../systems/market/authenticity';
 
 /**
  * Odds a card gets skimmed on arriving somewhere new. Low: this should be a
@@ -409,6 +410,11 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 // is honest about the discount or the surcharge.
                 purchasePrice: priceFor(price, payment),
                 isFake: isFake || false,
+                // Taken off the listing the shop actually sold, rather than
+                // plumbed through the payload — the grade is a property of the
+                // pair on the shelf, and reading it here means no call site
+                // has to know the ladder exists.
+                grade: gradeOf(sneakerInMarket),
             }));
 
             // Buying counterfeits draws attention.
@@ -459,7 +465,11 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // --- LEGIT CHECK ---
             if (itemToSell.isFake) {
                 // Heat makes staff suspicious on top of the store's own rigour.
-                const detectionChance = Math.min(0.95, securityLevel * 0.4 + state.player.heat / 400);
+                // The shop's own rigour, less whatever the grade hides. A
+                // street rep fails a casual glance; an unauthorised pair walks
+                // past most counters.
+                const rigour = Math.min(0.95, securityLevel * 0.4 + state.player.heat / 400);
+                const detectionChance = spotChance(rigour, gradeOf(itemToSell));
                 if (Math.random() < detectionChance) {
                     const fine = Math.round(price * 0.2);
                     // Getting caught in a shop is not a private embarrassment.

@@ -54,6 +54,7 @@ import type { StreetBuyer, HypeEvent } from '../../types/hype';
 import type { SellingSpot } from '../../data/sellingSpots';
 import { MAX_HEAT, MAX_ENERGY } from '../../constants';
 import { interestedIn } from './buyers';
+import { spotChance, gradeOf } from '../market/authenticity';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -393,7 +394,7 @@ export function resolveSale(
     }
 
     // --- 3. Do they clock the fake before paying for it? ---
-    if (item.isFake && Math.random() < buyer.eye) {
+    if (item.isFake && Math.random() < spotChance(buyer.eye, gradeOf(item))) {
         const flagged: Player = {
             ...player,
             heat: clamp(player.heat + 8, 0, MAX_HEAT),

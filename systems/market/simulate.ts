@@ -39,6 +39,7 @@ import { STORE_CONFIGS } from '../../data/storeConfigs';
 import { CITIES } from '../../data/cities';
 import { profileFor } from './cityProfiles';
 import { tagsFor } from './taxonomy';
+import { GRADE_COST, gradeOf, type AuthGrade } from './authenticity';
 
 /** How much of the gap to fair value closes each day. */
 const REVERSION = 0.18;
@@ -273,9 +274,10 @@ function priceListing(listing: MarketSneaker, index: Record<string, PriceIndex>)
     if (!sneaker || !idx) return listing.price;
 
     let price = sneaker.basePrice * idx.value;
-    // A fake costs what a fake costs. The markup on a *convincing* fake is the
-    // player's problem, handled at the point of sale.
-    if (listing.isFake) price *= 0.15;
+    // A fake costs what its grade costs. A street rep is 15% of real, which is
+    // what this has always charged; an unauthorised pair is 55%, which is the
+    // rung that makes running reps an investment rather than free money.
+    price *= GRADE_COST[gradeOf(listing)];
     // Per-listing spread, stable because it is derived from the listing's own
     // group rather than rolled: two tabs in one city are not the same price.
     price *= 1 + spreadFor(listing) ;
@@ -311,6 +313,27 @@ function restock(listing: MarketSneaker, supply: number, rng: () => number): num
  * store tab is fixed here for the whole run — that is what makes the map
  * learnable.
  */
+/**
+ * What grade of counterfeit a given back-room stocks.
+ *
+ * The tab names were already doing this work in prose — "Super Perfects" is
+ * not selling the same thing as "Back of the Truck" — so the ladder reads the
+ * name rather than inventing a second taxonomy beside it. A shop that calls
+ * its aisle Super Perfects had better be selling super perfects.
+ */
+function gradeForFakeTab(groupRef: string, rng: () => number): AuthGrade {
+    const ref = groupRef.toLowerCase();
+    if (ref.includes('backroom')) {
+        // The curtain hides the good stuff, and occasionally the real thing
+        // that fell off the back of something.
+        return rng() < 0.35 ? 'unauthorised' : 'super';
+    }
+    const roll = rng();
+    if (roll < 0.12) return 'unauthorised';
+    if (roll < 0.45) return 'super';
+    return 'street';
+}
+
 export function seedWorld(rng: () => number = Math.random): Record<string, CityMarket> {
     const markets: Record<string, CityMarket> = {};
 
@@ -341,6 +364,11 @@ export function seedWorld(rng: () => number = Math.random): Record<string, CityM
                         quantity: Math.max(1, Math.round((1 + rng() * 4) * profile.supply)),
                         group: tab.inventoryGroupRef,
                         isFake: isFakeTab,
+                        // Step 1 keeps the existing rule — a fakes tab is all
+                        // fakes — and only changes *what kind*. The leak into
+                        // ordinary tabs comes next, once the economy has been
+                        // simulated with the ladder in place.
+                        grade: isFakeTab ? gradeForFakeTab(tab.inventoryGroupRef, rng) : 'retail',
                     });
                 }
             }

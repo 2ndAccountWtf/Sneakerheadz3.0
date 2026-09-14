@@ -20,6 +20,13 @@ export interface InventoryItem {
     purchasePrice: number;
     isFake?: boolean; // Persist fake status to inventory
     /**
+     * How real it is, on the ladder in `systems/market/authenticity.ts`.
+     * Optional so saves and listings written before the ladder still resolve —
+     * `gradeOf()` reads the old boolean when this is missing. `isFake` is kept
+     * in step and stays the thing 29 files already read.
+     */
+    grade?: import('./systems/market/authenticity').AuthGrade;
+    /**
      * Permanent value scalar on this specific pair. Blessings (and the
      * Bibi/Drip collab) multiply what a pair is worth without touching the
      * wider market.
@@ -231,6 +238,8 @@ export interface MarketSneaker {
     quantity: number;
     group: string; // Supports separating "New", "Used", "Fakes" within a city
     isFake?: boolean;
+    /** See `InventoryItem.grade`. Carried onto the pair when you buy it. */
+    grade?: import('./systems/market/authenticity').AuthGrade;
 }
 
 /**

@@ -122,5 +122,11 @@ export type UseInventoryOpts = { groupRef: string; page?: number; pageSize?: num
 export type NPCRef = any; // Placeholder for NPC type
 export type StoreEvent = any; // Placeholder for StoreEvent type
 export type HaggleState = any; // Placeholder for HaggleState type
-export type SneakerItem = Sneaker & { price: number; quantity: number };
+export type SneakerItem = Sneaker & {
+  price: number;
+  quantity: number;
+  /** Carried from the listing so the till knows what it just sold. */
+  isFake?: boolean;
+  grade?: import('../systems/market/authenticity').AuthGrade;
+};
 export type { StoreTheme, TabStyles };
