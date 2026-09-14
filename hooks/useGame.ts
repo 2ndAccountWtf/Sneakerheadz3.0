@@ -30,6 +30,15 @@ import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
 import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
 import { clearRumorCache } from '../systems/rumorEngine';
+import { saveRun, loadRun, clearRun } from '../systems/persistence/save';
+import { skimCard } from '../systems/banking';
+
+/**
+ * Odds a card gets skimmed on arriving somewhere new. Low: this should be a
+ * thing that happens to you a couple of times in a thirty-day run and is
+ * remembered, not a tax you learn to expect.
+ */
+const SKIM_CHANCE_ON_ARRIVAL = 0.07;
 import {
     rollOfficer, openBust, offer as bustOffer, resolveBust, resolveEscape,
 } from '../systems/police/bust';
@@ -259,16 +268,41 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 ...(arriving ? { [action.payload.cityId]: snapshotMarket(arriving, newDay) } : {}),
             };
 
+            /**
+             * Somebody had a reader on a machine you used.
+             *
+             * Rolled on arrival in a new city, because that is when a card has
+             * been through the most hands — hotels, transit, an airport ATM —
+             * and because a day boundary is the natural place to find out that
+             * money left while you were asleep. Only for a player who has a
+             * card at all: pay cash for everything and nobody can skim you,
+             * which is the trade the whole payment system is built on.
+             */
+            let skimmed = player;
+            const skimLog: OutcomeLogEntry[] = [];
+            if (player.wallet?.hasCard && Math.random() < SKIM_CHANCE_ON_ARRIVAL) {
+                const hit = skimCard(player.bank, Math.random);
+                if (hit.amount > 0) {
+                    skimmed = { ...player, bank: player.bank - hit.amount };
+                    skimLog.push({ icon: '💳', text: hit.line, tone: 'bad' });
+                    skimLog.push({
+                        icon: '🏦',
+                        text: `$${hit.amount.toLocaleString()} gone from the account — ${Math.round(hit.fraction * 100)}% of it.`,
+                        tone: 'bad',
+                    });
+                }
+            }
+
             const baseNextState: GameState = {
                 ...state,
-                player,
+                player: skimmed,
                 currentCityId: action.payload.cityId,
                 day: newDay,
                 markets: newMarkets,
                 marketIntel,
                 activeMarketSignals: activeSignals,
                 pendingTravelEvent: null,
-                outcomeLog: interestLog,
+                outcomeLog: [...skimLog, ...interestLog],
             };
 
             // Bibi gift scenes and the ultra-rare collab outrank ordinary travel chaos.
@@ -1060,6 +1094,9 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             // Rumours are memoised by city+day. Day 1 of the new run must not
             // be served day 1 of the old one out of that cache.
             clearRumorCache();
+            // The old run's save must not outlive it, or "new game" boots
+            // straight back into the game you just walked away from.
+            clearRun();
             // Fresh markets too — otherwise the new run inherits the old
             // world's prices and the first day is not a fresh read.
             return {
@@ -1212,8 +1249,37 @@ const initialState: GameState = {
     activeBust: null,
 };
 
+/**
+ * The run you left behind, if there is one and it still fits this build.
+ *
+ * `loadRun` hands back `unknown` on purpose — it refuses to know what a game
+ * state looks like — so this is where the cast happens and where a save that
+ * survived a version check but is still missing something obvious gets
+ * rejected. Better a lost run than a game that boots into a broken state.
+ */
+function restoredState(): GameState | null {
+    const saved = loadRun<GameState>();
+    if (!saved || typeof saved !== 'object') return null;
+    const ok = typeof saved.day === 'number'
+        && saved.day > 0
+        && !!saved.player
+        && typeof saved.player.cash === 'number'
+        && Array.isArray(saved.player.inventory);
+    if (!ok) {
+        clearRun();
+        return null;
+    }
+    // Never resume straight into a mini-game: a canvas game cannot be restored
+    // mid-frame, and dropping the player into one they did not start reads as
+    // a bug. A police stop IS restored — it is plain data, and reloading out
+    // of a bust would be an escape hatch.
+    return { ...saved, activeMiniGame: null };
+}
+
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [gameState, dispatch] = useReducer(gameReducer, initialState);
+    // Lazy init so the save is read once, on the first render, rather than on
+    // every re-render of the provider.
+    const [gameState, dispatch] = useReducer(gameReducer, initialState, init => restoredState() ?? init);
 
     const changeScreen = useCallback((screen: Screen) => {
         dispatch({ type: 'CHANGE_SCREEN', payload: screen });
@@ -1292,6 +1358,31 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // The 30-day limit is enforced here rather than inside TRAVEL because naps
     // and hospital stays also burn days, and every one of those paths should
     // end the run the same way.
+    /**
+     * Autosave.
+     *
+     * Keyed on the things that genuinely move a run rather than on every
+     * dispatch: the day, your money, the size of the bag, your heat and where
+     * you are standing. Saving on every action would write on every keystroke
+     * of a haggle; saving only on day change would lose an afternoon's work to
+     * a closed tab, which is the exact thing this is here to stop.
+     *
+     * A finished run is not saved over — the end screen is a destination, and
+     * resuming into it would be a loop with no exit.
+     */
+    useEffect(() => {
+        if (gameState.currentScreen === Screen.GameOver) return;
+        saveRun(gameState);
+    }, [
+        gameState.day,
+        gameState.player.cash,
+        gameState.player.bank,
+        gameState.player.inventory.length,
+        gameState.player.heat,
+        gameState.currentCityId,
+        gameState.currentScreen,
+    ]);
+
     useEffect(() => {
         if (gameState.day > TOTAL_DAYS && gameState.currentScreen !== Screen.GameOver) {
             dispatch({ type: 'CHANGE_SCREEN', payload: Screen.GameOver });

@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useGame } from '../hooks/useGame';
 import ScreenHeader from '../components/ScreenHeader';
 import { INITIAL_PLAYER_CASH, TOTAL_DAYS, getCredRank, CRED_RANKS } from '../constants';
 import { getBagValue } from '../systems/pricing';
 import { getRunGrade, gradeColor } from '../data/ranks';
+import { recordScore, loadScores, type RunScore } from '../systems/persistence/save';
 
 /** One line of the highlight reel. `note` takes the value so zero reads as a joke, not a gap. */
 interface ReelRow {
@@ -56,6 +57,39 @@ const GameOverScreen: React.FC = () => {
     const badges = Object.entries(player.flags)
         .filter(([key, value]) => key.startsWith('badge-') && value)
         .map(([key]) => key.replace('badge-', '').replace(/-/g, ' '));
+
+    /**
+     * File the run, once.
+     *
+     * The screen has always computed a net worth, a multiple on the stake, a
+     * grade and a cred rank — and then thrown all of it away when the tab
+     * closed, so there has never been anything to beat. `recordScore` reports
+     * whether this run topped the board, which is the only line on this page
+     * anybody is going to care about twice.
+     *
+     * Guarded by a ref rather than an empty dep array because React will run
+     * an effect twice in development, and a run filed twice is a leaderboard
+     * that lies.
+     */
+    const filedRef = useRef(false);
+    const [board, setBoard] = useState<{ scores: RunScore[]; isBest: boolean } | null>(null);
+    useEffect(() => {
+        if (filedRef.current) return;
+        filedRef.current = true;
+        setBoard(recordScore({
+            netWorth,
+            multiple: netWorth / INITIAL_PLAYER_CASH,
+            grade: grade.title,
+            days: daysUsed,
+            streetCred: player.streetCred,
+            endedAt: Date.now(),
+        }));
+    }, []);
+
+    const previousBest = useMemo(() => {
+        const all = board?.scores ?? loadScores();
+        return all.find(r => r.endedAt !== board?.scores[0]?.endedAt) ?? null;
+    }, [board]);
 
     const s = player.stats;
     const reel: ReelRow[] = [
@@ -149,6 +183,38 @@ const GameOverScreen: React.FC = () => {
                         {grade.title}
                     </h2>
                     <p className="text-sm text-[var(--ink-dim)] leading-snug mt-2 max-w-2xl">{grade.verdict}</p>
+
+                    {/* The line that makes a second run worth starting. Until
+                        now this screen computed a score and forgot it the
+                        moment the tab closed. */}
+                    {board && (
+                        board.isBest ? (
+                            <div className="panel p-3 mt-4 inline-flex items-center gap-2.5 border-[var(--ok)]">
+                                <span className="text-xl leading-none">🏆</span>
+                                <div>
+                                    <div className="font-display text-sm uppercase" style={{ color: 'var(--ok)' }}>
+                                        Best run yet
+                                    </div>
+                                    {previousBest && (
+                                        <div className="label mt-0.5">
+                                            Beat {money(previousBest.netWorth)} from {previousBest.days} days
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : previousBest ? (
+                            <div className="panel p-3 mt-4 inline-flex items-center gap-2.5">
+                                <span className="text-xl leading-none">📈</span>
+                                <div>
+                                    <div className="label">Your best is still</div>
+                                    <div className="numeric text-lg leading-none">{money(board.scores[0].netWorth)}</div>
+                                    <div className="label mt-0.5">
+                                        {money(board.scores[0].netWorth - netWorth)} more than this run
+                                    </div>
+                                </div>
+                            </div>
+                        ) : null
+                    )}
 
                     <div className="flex flex-wrap items-end gap-x-6 gap-y-3 mt-5">
                         <div>
