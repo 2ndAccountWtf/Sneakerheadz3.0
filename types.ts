@@ -303,6 +303,12 @@ export interface GameState {
     activeCutscene: Cutscene | null;
     /** A challenge or happening in the city you are standing in. */
     activeCityEvent: import('./systems/events/cityEvents').CityEvent | null;
+    /**
+     * A police stop, mid-negotiation. Holds the officer's hidden ceiling and
+     * patience, so the player is reading a person across several rounds rather
+     * than picking from a list once.
+     */
+    activeBust: import('./systems/police/bust').BustState | null;
 }
 
 export interface Cutscene {

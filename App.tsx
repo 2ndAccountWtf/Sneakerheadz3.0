@@ -23,6 +23,7 @@ import { Screen } from './types';
 import Layout from './components/Layout';
 import Notification from './components/Notification';
 import { useNewsEngine } from './hooks/useNewsEngine';
+import BustScene from './components/police/BustScene';
 
 // This component ensures the news engine hook is running at the top level.
 const NewsEngineRunner: React.FC = () => {
@@ -82,6 +83,7 @@ const ScreenManager: React.FC = () => {
         <Layout>
             {renderScreen()}
             <Notification />
+            <BustScene />
         </Layout>
     );
 };

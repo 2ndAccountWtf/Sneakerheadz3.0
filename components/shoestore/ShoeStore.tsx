@@ -36,7 +36,7 @@ const SECURITY_COPY = ['No legit check — fakes pass freely', 'Casual legit che
  * column — and the personality lives in twelve layouts that cannot break it.
  */
 const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
-    const { gameState, startInteraction, changeScreen, viewMarketAnalysis, launchMiniGame } = useGame();
+    const { gameState, dispatch, startInteraction, changeScreen, viewMarketAnalysis, launchMiniGame } = useGame();
     const [activeTabId, setActiveTabId] = useState<ShoeTabProps['id']>(store.tabs[0]?.id ?? 'new');
     const previousInventoryCount = useRef(gameState.player.inventory.length);
 
@@ -63,11 +63,15 @@ const ShoeStore: React.FC<{ store: ShoeStoreProps }> = ({ store }) => {
             // Heat makes a raid meaningfully more likely than the old flat 20%.
             const chance = 0.18 + gameState.player.heat / 500;
             if (Math.random() < chance) {
-                startInteraction('system-events', Math.random() > 0.5 ? 'police-raid' : 'back-alley-mugging');
+                // The raid is a negotiation now (`systems/police/bust.ts`), not
+                // the three-fixed-prices scenario it used to fire. The mugging
+                // is still a scenario — it has no bribe to haggle over.
+                if (Math.random() > 0.5) dispatch({ type: 'START_BUST' });
+                else startInteraction('system-events', 'back-alley-mugging');
             }
         }
         previousInventoryCount.current = gameState.player.inventory.length;
-    }, [gameState.player.inventory.length, gameState.player.heat, isShady, startInteraction]);
+    }, [gameState.player.inventory.length, gameState.player.heat, isShady, startInteraction, dispatch]);
 
     // --- Celebrity cameo can open a conversation on its own ---
     useEffect(() => {

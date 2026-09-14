@@ -30,6 +30,9 @@ import { rollCityEvent, type CityEvent } from '../systems/events/cityEvents';
 import { remember } from '../systems/npc/memory';
 import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
 import { clearRumorCache } from '../systems/rumorEngine';
+import {
+    rollOfficer, openBust, offer as bustOffer, resolveBust, resolveEscape,
+} from '../systems/police/bust';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { reputationSpread } from '../systems/npc/reactions';
@@ -89,6 +92,9 @@ type Action =
     | { type: 'ROLL_CITY_EVENT' }
     | { type: 'ACCEPT_CITY_EVENT' }
     | { type: 'DECLINE_CITY_EVENT' }
+    | { type: 'START_BUST' }
+    | { type: 'BUST_OFFER'; payload: { amount: number } }
+    | { type: 'BUST_RESOLVE'; payload: { choice: import('../systems/police/bust').BustChoice } }
     | { type: 'RESET_GAME' };
 
 interface GameContextType {
@@ -761,6 +767,27 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const req = state.activeMiniGame;
             if (!req) return state;
             const { won } = action.payload;
+
+            // A chase or a fight that started as a police stop is settled by
+            // `resolveEscape`, not by the authored win/lose payloads — that is
+            // the only path in the game that can cost you a day.
+            const bustCtx = req.config?.bust as
+                | { officer: import('../systems/police/bust').Officer; choice: 'run' | 'drive' | 'swing' }
+                | undefined;
+            if (bustCtx) {
+                const esc = resolveEscape(bustCtx.officer, bustCtx.choice, won, state.player);
+                return {
+                    ...state,
+                    player: esc.player,
+                    day: state.day + esc.daysLost,
+                    activeMiniGame: null,
+                    outcomeLog: esc.log,
+                    notification: {
+                        message: won ? 'You got away.' : esc.daysLost ? 'A night in a cell.' : 'They caught up with you.',
+                        type: won ? 'success' : 'error',
+                    },
+                };
+            }
             const outcomes = (won ? req.onWin : req.onLose) ?? [];
 
             const stripped = outcomes.map(o => ({ ...o, condition: undefined }));
@@ -792,6 +819,53 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                     message: action.payload.note ?? (won ? 'You won.' : 'You lost.'),
                     type: won ? 'success' : 'error',
                 },
+            };
+        }
+
+        /* --- The police stop -------------------------------------------- *
+         * `systems/police/bust.ts` holds the officer's hidden ceiling and his
+         * patience; the reducer only moves the negotiation along and applies
+         * what it hands back. Nothing here reveals what he will take. */
+
+        case 'START_BUST': {
+            if (state.activeBust) return state;           // already standing there
+            const officer = rollOfficer(state.player, state.day, Math.random);
+            return { ...state, activeBust: openBust(officer) };
+        }
+
+        case 'BUST_OFFER': {
+            if (!state.activeBust) return state;
+            return { ...state, activeBust: bustOffer(state.activeBust, action.payload.amount, Math.random) };
+        }
+
+        case 'BUST_RESOLVE': {
+            const bust = state.activeBust;
+            if (!bust) return state;
+            const out = resolveBust(bust, action.payload.choice, state.player, Math.random);
+
+            // Running, driving or swinging decides nothing yet — the mini-game
+            // does. The officer rides along in `config` so the escape can be
+            // settled against the same man when the game comes back.
+            if (out.minigame) {
+                return {
+                    ...state,
+                    player: out.player,
+                    activeBust: null,
+                    outcomeLog: out.log,
+                    activeMiniGame: {
+                        game: out.minigame,
+                        title: action.payload.choice === 'swing' ? 'Assaulting An Officer' : 'Getting Away',
+                        config: { bust: { officer: bust.officer, choice: action.payload.choice } },
+                    },
+                };
+            }
+
+            return {
+                ...state,
+                player: out.player,
+                day: state.day + out.daysLost,
+                activeBust: null,
+                outcomeLog: out.log,
             };
         }
 
@@ -1135,6 +1209,7 @@ const initialState: GameState = {
     quests: [],
     activeCutscene: null,
     activeCityEvent: null,
+    activeBust: null,
 };
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
