@@ -23,6 +23,8 @@ import {
     scarcityFor, localStock, referenceAsk, addLocalStock,
 } from '../systems/market/simulate.ts';
 import { tagsFor } from '../systems/market/taxonomy.ts';
+import { getCityMarketPrice, getSellPrice } from '../systems/pricing.ts';
+import { gameReducer } from '../hooks/useGame.ts';
 import { CITY_PROFILES, profileFor } from '../systems/market/cityProfiles.ts';
 
 let pass = 0;
@@ -418,10 +420,18 @@ t('a city with nothing on the shelf still knows what a shoe is worth', () => {
 /* ---------------- scarcity ---------------- */
 
 /**
- * The sell-side price, as `systems/pricing.ts#getCityMarketPrice` computes it:
- * index, times the scarcity multiplier, capped just under the posted shelf
- * price. Duplicated here rather than imported because `pricing.ts` takes a
- * whole GameState and these checks only have a market.
+ * The sell-side price: index, times the scarcity multiplier, capped just under
+ * the posted shelf price. Duplicated here rather than imported because
+ * `pricing.ts` takes a whole GameState and most of these checks only have a
+ * market.
+ *
+ * A duplicate is a liability, and this one already cost us. For a long time
+ * `getCityMarketPrice` did something else entirely — `max(posted price)`, no
+ * scarcity, no spread, no cap — so the same-city round trip these checks call
+ * impossible was live in the game at up to +27%. They passed throughout,
+ * because they were only ever testing this local copy. The section at the end
+ * of this file drives the actual function, and that is the one that would have
+ * caught it.
  */
 const BID_ASK = 0.9;
 const sellValue = (market: ReturnType<typeof seedWorld>[string], sneakerId: string): number => {
@@ -704,6 +714,142 @@ t('Tel Aviv is the cheap deep market and Paris is the thin expensive one', () =>
     assert.ok(profileFor('tel-aviv').supply > profileFor('paris').supply);
     assert.ok(profileFor('paris').costOfLiving > profileFor('tel-aviv').costOfLiving);
     assert.ok(profileFor('tel-aviv').fakeRate > profileFor('paris').fakeRate);
+});
+
+console.log('\nthe real sell price, not a copy of it');
+
+t('you cannot buy a pair and sell it back in the same city for a profit', () => {
+    // The check that matters, against the function the game actually calls.
+    // `getCityMarketPrice` is what every sell path reads — the bag's Sell
+    // button, the street screen, the collectors screen — so this is the rule as
+    // the player meets it, not as a test helper restates it.
+    let tested = 0;
+    let profitable = 0;
+    let best = -Infinity;
+
+    for (const seed of [33, 34, 7, 2001, 99]) {
+        const markets = seedWorld(rng(seed));
+        for (const c of CITIES) {
+            const state = {
+                markets, currentCityId: c.id, day: 1,
+                activeMarketSignals: [], player: { buffs: [], inventory: [] },
+            } as never;
+
+            for (const sn of SNEAKERS) {
+                const ask = bestAsk(markets[c.id], sn.id);
+                if (ask === undefined) continue;
+                const bid = getCityMarketPrice(state, sn.id);
+                if (bid === undefined) continue;
+                const got = getSellPrice(bid, { sneakerId: sn.id, purchasePrice: ask } as never, { buffs: [] } as never);
+                tested++;
+                if (got > ask) profitable++;
+                best = Math.max(best, (got - ask) / ask);
+            }
+        }
+    }
+
+    assert.ok(tested > 300, `only ${tested} buyable models — the check proves little`);
+    assert.equal(profitable, 0, `${profitable} of ${tested} models flip on the spot for a profit`);
+    assert.ok(best < 0, `the best same-city round trip makes ${(best * 100).toFixed(1)}%`);
+});
+
+t('the bid is never above the cheapest shelf in town', () => {
+    // The structural half of the same rule: whatever scarcity is doing, nobody
+    // pays you more than the shop down the road is charging.
+    const markets = seedWorld(rng(34));
+    for (const c of CITIES) {
+        const state = {
+            markets, currentCityId: c.id, day: 1,
+            activeMarketSignals: [], player: { buffs: [], inventory: [] },
+        } as never;
+
+        for (const sn of SNEAKERS) {
+            const posted = referenceAsk(markets[c.id], sn.id);
+            if (posted === undefined) continue;
+            const bid = getCityMarketPrice(state, sn.id);
+            if (bid === undefined) continue;
+            assert.ok(bid <= posted, `${c.id}/${sn.id}: bid ${bid} beats the ${posted} shelf`);
+        }
+    }
+});
+
+t('every model is worth something everywhere', () => {
+    // The old implementation returned undefined when no listing existed, so a
+    // model nobody in town stocks was worth nothing at all. The index knows.
+    const markets = seedWorld(rng(12));
+    const state = {
+        markets, currentCityId: CITIES[0].id, day: 1,
+        activeMarketSignals: [], player: { buffs: [], inventory: [] },
+    } as never;
+    for (const sn of SNEAKERS) {
+        assert.ok((getCityMarketPrice(state, sn.id) ?? 0) > 0, `${sn.id} is worth nothing anywhere`);
+    }
+});
+
+console.log('\nselling privately still moves the market');
+
+t('a street or collector sale walks the local price down', () => {
+    // The shop counter has always applied trade pressure. The street and the
+    // collectors did not, so a corner was a pressure-free dump: you could work
+    // one spot for a month and the price you were getting never budged. Both
+    // private paths now push on the city they happened in.
+    const markets = seedWorld(rng(71));
+    const cityId = CITIES[0].id;
+    const model = SNEAKERS[0].id;
+    const state = {
+        markets, currentCityId: cityId, day: 3,
+        player: {} as never, outcomeLog: [],
+    } as unknown as Parameters<typeof gameReducer>[0];
+
+    const before = localValue(markets[cityId], model)!;
+    const after = gameReducer(state, {
+        type: 'RESOLVE_STREET_SALE',
+        payload: { player: {} as never, log: [], soldId: model },
+    } as never);
+    const now = localValue(after.markets[cityId], model)!;
+
+    assert.ok(now < before, `selling on the street left the price at ${now} (was ${before})`);
+});
+
+t('a deal that fell through moves nothing', () => {
+    // `soldId` is absent when nobody bought anything — a walked negotiation, a
+    // bust, a robbery. None of those are supply hitting the city.
+    const markets = seedWorld(rng(71));
+    const cityId = CITIES[0].id;
+    const model = SNEAKERS[0].id;
+    const state = {
+        markets, currentCityId: cityId, day: 3,
+        player: {} as never, outcomeLog: [],
+    } as unknown as Parameters<typeof gameReducer>[0];
+
+    const before = localValue(markets[cityId], model)!;
+    const after = gameReducer(state, {
+        type: 'RESOLVE_COLLECTOR_DEAL',
+        payload: { player: {} as never, log: [] },
+    } as never);
+
+    assert.equal(localValue(after.markets[cityId], model)!, before, 'a walked deal moved the price');
+});
+
+t('a private sale does not put the pair on a retail shelf', () => {
+    // A shop sale calls `addLocalStock` as well, because the pair really is on
+    // that shop's shelf afterwards. A man on a corner is not a shop, so the
+    // scarcity premium must survive the sale.
+    const markets = seedWorld(rng(71));
+    const cityId = CITIES[0].id;
+    const model = SNEAKERS[0].id;
+    const state = {
+        markets, currentCityId: cityId, day: 3,
+        player: {} as never, outcomeLog: [],
+    } as unknown as Parameters<typeof gameReducer>[0];
+
+    const before = localStock(markets[cityId], model);
+    const after = gameReducer(state, {
+        type: 'RESOLVE_STREET_SALE',
+        payload: { player: {} as never, log: [], soldId: model },
+    } as never);
+
+    assert.equal(localStock(after.markets[cityId], model), before, 'a street sale restocked a shop');
 });
 
 console.log(`\n${pass} market checks passed.`);

@@ -69,7 +69,18 @@ const CollectorsScreen: React.FC = () => {
 
     const settle = (state: NegotiationState) => {
         const outcome = resolveDeal(state, player, day);
-        dispatch({ type: 'RESOLVE_COLLECTOR_DEAL', payload: { player: outcome.player, log: outcome.log } });
+        // Only a deal that actually paid moves the market. A counterfeit that
+        // got through counts: the pair is out there either way, and the city
+        // does not know what it was.
+        const changedHands = outcome.result === 'paidStraight' || outcome.result === 'paidCounterfeit';
+        dispatch({
+            type: 'RESOLVE_COLLECTOR_DEAL',
+            payload: {
+                player: outcome.player,
+                log: outcome.log,
+                soldId: changedHands ? state.item.sneakerId : undefined,
+            },
+        });
         setNegotiation(null);
     };
 

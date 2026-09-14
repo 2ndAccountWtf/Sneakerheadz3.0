@@ -127,7 +127,17 @@ const StreetSellScreen: React.FC = () => {
     const settle = (state: StreetNegotiation) => {
         if (!activeSpot) return;
         const outcome = resolveSale(state, player, activeSpot, day, hype);
-        dispatch({ type: 'RESOLVE_STREET_SALE', payload: { player: outcome.player, log: outcome.log } });
+        // `soldId` only when the pair actually changed hands — a walked deal or
+        // a bust must not move the local price. The reducer uses it to apply the
+        // same trade pressure a shop sale does.
+        dispatch({
+            type: 'RESOLVE_STREET_SALE',
+            payload: {
+                player: outcome.player,
+                log: outcome.log,
+                soldId: outcome.result === 'sold' ? state.item.sneakerId : undefined,
+            },
+        });
         setNegotiation(null);
         setBuyer(null);
         setCheckedForBuyer(false);

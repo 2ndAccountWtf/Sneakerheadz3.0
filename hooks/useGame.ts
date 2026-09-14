@@ -93,8 +93,8 @@ type Action =
     | { type: 'EMERGENCY_EXPIRED' }
     | { type: 'GAS_INCIDENT'; payload: { npcId: string } }
     // --- Money ---
-    | { type: 'RESOLVE_COLLECTOR_DEAL'; payload: { player: Player; log: OutcomeLogEntry[] } }
-    | { type: 'RESOLVE_STREET_SALE'; payload: { player: Player; log: OutcomeLogEntry[] } }
+    | { type: 'RESOLVE_COLLECTOR_DEAL'; payload: { player: Player; log: OutcomeLogEntry[]; soldId?: string } }
+    | { type: 'RESOLVE_STREET_SALE'; payload: { player: Player; log: OutcomeLogEntry[]; soldId?: string } }
     | { type: 'BANK_DEPOSIT'; payload: { amount: number } }
     | { type: 'BANK_WITHDRAW'; payload: { bankId: string; amount: number } }
     | { type: 'BANK_REPAY_CREDIT'; payload: { amount: number } }
@@ -524,8 +524,14 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             }
 
             const profit = price - itemToSell.purchasePrice;
-            // Big flips build a name for you.
-            const credGain = profit > 500 ? 3 : profit > 150 ? 1 : 0;
+            // Big flips build a name for you — but never on a fake. Passing one
+            // off is the rep game's whole bargain: it makes money and it earns
+            // you nothing, so the rep route stays locked out of everything cred
+            // gates. `systems/street/selling.ts` has always got this right; this
+            // counter did not, and since a pair bought at 15% of market carries
+            // the fattest profit in the game, running reps was actually the
+            // *fastest* way to build a name.
+            const credGain = itemToSell.isFake ? 0 : profit > 500 ? 3 : profit > 150 ? 1 : 0;
 
             // You are the supply now, in both senses. Dumping into one city
             // walks its price down — and the pair you just sold is on a shelf in
@@ -1175,10 +1181,32 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             // a street sale routinely produces several (the sale, the heat it
             // cost you, whoever was watching), where the toast only ever showed
             // the first one.
+            // You are the supply here too. The shop counter has always walked
+            // the local price down on a sale (`SELL_SNEAKER` below), and these
+            // two did not — so a corner was a pressure-free dump, and working
+            // one spot all month never cost you a cent of the price you were
+            // getting. Ten pairs into one city now moves that city, wherever you
+            // sold them.
+            //
+            // Trade pressure only, no `addLocalStock`: a private sale does not
+            // put the pair on a retail shelf, so it must not collapse the
+            // scarcity premium the way a shop sale does. `soldId` is absent when
+            // the deal fell through, which is exactly when nothing should move.
             return {
                 ...state,
                 player: action.payload.player,
                 outcomeLog: action.payload.log,
+                markets: action.payload.soldId
+                    ? {
+                        ...state.markets,
+                        [state.currentCityId]: applyTradePressure(
+                            state.markets[state.currentCityId],
+                            action.payload.soldId,
+                            1,
+                            -1,
+                        ),
+                    }
+                    : state.markets,
             };
 
         case 'BANK_DEPOSIT':
