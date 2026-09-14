@@ -41,8 +41,9 @@ import { spotChance, gradeOf } from '../systems/market/authenticity';
  */
 const SKIM_CHANCE_ON_ARRIVAL = 0.07;
 import {
-    rollOfficer, openBust, offer as bustOffer, resolveBust, resolveEscape,
+    rollOfficer, openBust, offer as bustOffer, resolveBust, resolveEscape, shopBustChance,
 } from '../systems/police/bust';
+import { isWeaponItem } from '../systems/ampm/stock';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { reputationSpread } from '../systems/npc/reactions';
@@ -169,7 +170,26 @@ function withOutcomes(
     };
 }
 
-const gameReducer = (state: GameState, action: Action): GameState => {
+/**
+ * Puts an officer in front of the player.
+ *
+ * One function rather than one per site, so a stop at the AM/PM till and a
+ * stop on a corner are the same stop — same hidden ceiling, same patience,
+ * same two guards on losing a day. A stop already in progress is never
+ * replaced: you only get stopped by one man at a time.
+ */
+function startBust(state: GameState): GameState {
+    if (state.activeBust) return state;
+    return { ...state, activeBust: openBust(rollOfficer(state.player, state.day, Math.random)) };
+}
+
+/**
+ * The single writer of game state. Exported so the wiring can be tested
+ * directly — `tests/bust.test.mts` drives a purchase through it to check that
+ * the AM/PM till can put an officer in front of you — never so a component
+ * can reach past `dispatch`.
+ */
+export const gameReducer = (state: GameState, action: Action): GameState => {
     switch (action.type) {
         case 'CHANGE_SCREEN': {
             const isLeavingStoreFlow = [Screen.Dashboard, Screen.Travel, Screen.Ampm, Screen.Inventory].includes(action.payload);
@@ -715,7 +735,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 };
             }
 
-            return {
+            const bought: GameState = {
                 ...state,
                 player: {
                     ...itemPaid.player,
@@ -728,6 +748,17 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                     type: 'success',
                 },
             };
+
+            // Walking out of the one counter in the game that sells things you
+            // can swing at somebody, while already hot, is the kind of thing
+            // that gets noticed. Rolled here rather than in the screen because
+            // only the reducer knows the purchase actually went through — a
+            // declined card should not put a squad car outside — and against
+            // the player as they now are, holding the weapon and short the
+            // cash they just spent on it.
+            return Math.random() < shopBustChance(bought.player, isWeaponItem(itemId))
+                ? startBust(bought)
+                : bought;
         }
 
         case 'SET_NOTIFICATION':
@@ -871,11 +902,8 @@ const gameReducer = (state: GameState, action: Action): GameState => {
          * patience; the reducer only moves the negotiation along and applies
          * what it hands back. Nothing here reveals what he will take. */
 
-        case 'START_BUST': {
-            if (state.activeBust) return state;           // already standing there
-            const officer = rollOfficer(state.player, state.day, Math.random);
-            return { ...state, activeBust: openBust(officer) };
-        }
+        case 'START_BUST':
+            return startBust(state);                      // no-op if one is already standing there
 
         case 'BUST_OFFER': {
             if (!state.activeBust) return state;

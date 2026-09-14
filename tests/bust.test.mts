@@ -15,7 +15,10 @@ import {
     JAIL_MIN_DAY, JAIL_MIN_HEAT,
 } from '../systems/police/bust.ts';
 import { seeded } from '../utils/rng.ts';
-import type { Player } from '../types.ts';
+import { gameReducer } from '../hooks/useGame.ts';
+import { isWeaponItem } from '../systems/ampm/stock.ts';
+import { priceFor } from '../systems/payment.ts';
+import type { GameState, Player } from '../types.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -281,6 +284,83 @@ t('buying a weapon while hot is the thing that gets noticed', () => {
     const hot = mk({ heat: 85 });
     assert.ok(shopBustChance(hot, true) > shopBustChance(hot, false) * 2);
     assert.ok(shopBustChance(mk({ heat: 0 }), false) < 0.02, 'a clean player gets hassled buying crisps');
+});
+
+console.log('\nthe stop at the AM/PM till');
+
+/**
+ * Both rolls a purchase makes — whether the trip gets interrupted, and who
+ * turns out to be standing there — go through `Math.random`, because the
+ * reducer is not handed an rng. Pinning it is what makes these checks about
+ * the wiring rather than about the dice.
+ */
+function withRandom<T>(value: number, fn: () => T): T {
+    const real = Math.random;
+    Math.random = () => value;
+    try { return fn(); } finally { Math.random = real; }
+}
+
+/** The AM/PM's cheapest way to arm yourself, and something to eat. */
+const CHANCLAS = 'itm-chanclas';
+const HUMMUS = 'itm-hummus';
+
+const atTheTill = (over: Partial<Player> = {}, day = 20): GameState =>
+    ({ player: mk({ cash: 3000, ...over }), day, activeBust: null } as unknown as GameState);
+
+const buy = (state: GameState, itemId: string, roll: number): GameState =>
+    withRandom(roll, () => gameReducer(state, { type: 'BUY_STORAGE_ITEM', payload: { itemId, price: 40 } }));
+
+t('the till can put an officer in front of you', () => {
+    const after = buy(atTheTill({ heat: 85 }), CHANCLAS, 0);
+    assert.ok(after.activeBust, 'buying a weapon at max heat never got noticed');
+    assert.equal(after.activeBust!.status, 'negotiating');
+    assert.ok(after.activeBust!.asking > 0, 'he is standing there asking for nothing');
+});
+
+t('it is the same stop as the one on the corner, jail guards and all', () => {
+    // Nothing about the shop may soften or sharpen the two guards on losing a
+    // day — a second, kinder officer at the till would be a second code path
+    // to get the rules wrong in.
+    const early = buy(atTheTill({ heat: 100 }, 5), CHANCLAS, 0);
+    assert.equal(early.activeBust!.officer.canJail, false, 'a day 5 shopper could be jailed');
+    const late = buy(atTheTill({ heat: 100 }, 20), CHANCLAS, 0);
+    assert.equal(late.activeBust!.officer.canJail, true);
+});
+
+t('the thing you just bought is yours, stopped or not', () => {
+    // The purchase completes and then he appears. Taking the money and the
+    // goods before the negotiation has even started would read as a bug.
+    const after = buy(atTheTill({ heat: 85 }), CHANCLAS, 0);
+    assert.ok(after.activeBust);
+    assert.equal(after.player.cash, 3000 - priceFor(40, 'cash'), 'paid something other than the cash price');
+    assert.equal(after.player.storage.filter(i => i.id === CHANCLAS).length, 1, 'paid for nothing');
+});
+
+t('a quiet trip to the shop is just a trip to the shop', () => {
+    const after = buy(atTheTill({ heat: 85 }), CHANCLAS, 0.999);
+    assert.equal(after.activeBust, null, 'a shop stop on a roll that should have missed');
+    assert.equal(after.player.storage.filter(i => i.id === CHANCLAS).length, 1);
+});
+
+t('a purchase that never happened cannot be followed outside', () => {
+    // The roll lives behind the payment on purpose: a declined card is not an
+    // AM/PM run, and being stopped over a sandwich you could not afford would
+    // be the game inventing a crime.
+    const broke = buy(atTheTill({ cash: 0, heat: 95 }), CHANCLAS, 0);
+    assert.equal(broke.activeBust, null, 'a refused purchase put a squad car outside');
+    assert.equal(broke.player.storage.length, 0, 'a refused purchase handed over the goods');
+});
+
+t('the shop knows a weapon from a tub of hummus', () => {
+    // Same player, same roll, one basket. Only what is in it differs.
+    const hot = mk({ heat: 60 });
+    assert.ok(
+        shopBustChance(hot, isWeaponItem(CHANCLAS)) > shopBustChance(hot, isWeaponItem(HUMMUS)),
+        'the weapons shelf carries the same risk as the fridge',
+    );
+    const roll = shopBustChance(hot, false) + 0.0001;   // past the snack, short of the sandal
+    assert.equal(buy(atTheTill({ heat: 60 }), HUMMUS, roll).activeBust, null);
+    assert.ok(buy(atTheTill({ heat: 60 }), CHANCLAS, roll).activeBust, 'the sandal went unnoticed');
 });
 
 console.log(`\n${pass} bust checks passed.\n`);

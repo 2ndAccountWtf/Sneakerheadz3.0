@@ -211,6 +211,17 @@ export interface Fighter {
     moves: Record<MoveId, MoveDef>;
     /** Damage dealt this round — decides a timeout by decision. */
     dealt: number;
+    /**
+     * Presses waiting for their moment, in frames of life left.
+     *
+     * Without this the game deletes inputs. `onFrame` consumes every button
+     * every frame, and a fighter who is in hitstun, blockstun, knocked down or
+     * mid-recovery cannot act on one — so the press is simply gone. Hit-stop is
+     * worse: `stepFight` returns before the fighters step at all, and hit-stop
+     * runs on every hit that lands. The follow-up is the most common input in a
+     * fight and it was the one most likely to be thrown away.
+     */
+    buf: { a: number; b: number; up: number };
 }
 
 export interface Projectile {
@@ -348,6 +359,7 @@ function makeFighter(isPlayer: boolean, name: string, x: number, hp: number, wea
         ammo: weapon.uses ?? Infinity,
         slow: 0, flash: 0, blockFlash: 0,
         weapon, moves: movesFor(weapon), dealt: 0,
+        buf: { a: 0, b: 0, up: 0 },
     };
 }
 
@@ -527,6 +539,31 @@ function applyHit(s: FightState, atk: Fighter, def: Fighter, m: MoveDef, at: Box
 // Attack starting
 // ---------------------------------------------------------------------------
 
+/**
+ * How long a press waits for its moment, in frames. Seven is ~117ms at 60Hz —
+ * long enough that a human aiming for the end of hitstun is forgiven, short
+ * enough that a press you have given up on does not fire on its own later.
+ */
+export const BUFFER_FRAMES = 7;
+
+/** Remember a press so it can fire the first frame the fighter is able to act. */
+export function bufferPresses(f: Fighter, cmd: FightInput) {
+    if (cmd.aPressed) f.buf.a = BUFFER_FRAMES;
+    if (cmd.bPressed) f.buf.b = BUFFER_FRAMES;
+    if (cmd.upPressed) f.buf.up = BUFFER_FRAMES;
+}
+
+/**
+ * Buffers age only while the world is moving. Deliberately not called during
+ * hit-stop: those frames are frozen for everyone, and spending a player's
+ * buffer on a freeze they cannot act through is the bug, not the fix.
+ */
+function decayBuffer(f: Fighter, df: number) {
+    if (f.buf.a > 0) f.buf.a = Math.max(0, f.buf.a - df);
+    if (f.buf.b > 0) f.buf.b = Math.max(0, f.buf.b - df);
+    if (f.buf.up > 0) f.buf.up = Math.max(0, f.buf.up - df);
+}
+
 function canAct(f: Fighter): boolean {
     if (f.state === 'hitstun' || f.state === 'down' || f.state === 'ko') return false;
     if (f.blockstun > 0) return false;
@@ -597,6 +634,10 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
     const df = dt * FPS; // frames elapsed — dt is always 1/60 but never assumed
     const airborne = f.y < GROUND - 0.5;
 
+    // Only reached on frames the world actually advanced: hit-stop returns from
+    // stepFight above this, so a freeze costs a buffered press nothing.
+    decayBuffer(f, df);
+
     // Always face the opponent unless committed to a move or airborne.
     if (f.state !== 'attack' && !airborne && f.state !== 'down' && f.state !== 'hitstun') {
         f.facing = other.x >= f.x ? 1 : -1;
@@ -645,23 +686,36 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
 
     if (!locked) {
         // --- attacks ---
-        if (cmd.aPressed) {
+        // A buffered press is cleared only once it actually produces a move, so
+        // one that still cannot come out — mid-recovery, say — keeps waiting
+        // out the rest of its window instead of being spent on a refusal.
+        if (f.buf.a > 0) {
             // Down + A with a full meter is the special. One thumb on the pad,
             // one on the button — the only "motion" input a phone can do well.
-            if (cmd.down && f.hype >= 100 && !airborne) startAttack(s, f, 'special');
-            else if (airborne) startAttack(s, f, 'air');
-            else startAttack(s, f, 'jab');
+            // The direction is read live: what you are holding when it fires is
+            // what you get, which is how a player reads their own hands.
+            const fired = cmd.down && f.hype >= 100 && !airborne
+                ? startAttack(s, f, 'special')
+                : airborne
+                  ? startAttack(s, f, 'air')
+                  : startAttack(s, f, 'jab');
+            if (fired) f.buf.a = 0;
         }
-        if (cmd.bPressed) {
-            if (airborne) startAttack(s, f, 'air');
-            else if (cmd.down) startAttack(s, f, 'sweep');
-            else if (f.weapon.klass === 'thrown' && f.ammo > 0) startAttack(s, f, 'toss');
-            else startAttack(s, f, 'heavy');
+        if (f.buf.b > 0) {
+            const fired = airborne
+                ? startAttack(s, f, 'air')
+                : cmd.down
+                  ? startAttack(s, f, 'sweep')
+                  : f.weapon.klass === 'thrown' && f.ammo > 0
+                    ? startAttack(s, f, 'toss')
+                    : startAttack(s, f, 'heavy');
+            if (fired) f.buf.b = 0;
         }
 
         // --- movement ---
         if (f.state !== 'attack') {
-            if (!airborne && cmd.upPressed && !f.crouch) {
+            if (!airborne && f.buf.up > 0 && !f.crouch) {
+                f.buf.up = 0;
                 f.vy = JUMP_V;
                 f.y -= 1;
                 if (wantFwd) f.vx = toward * 74;
@@ -1020,6 +1074,13 @@ export function stepFight(s: FightState, cmd: FightInput, dt: number) {
     const df = dt * FPS;
     s.elapsed += dt;
 
+    // Before anything can return early. Hit-stop bails out below without the
+    // fighters ever stepping, and that is exactly when a player is pressing the
+    // follow-up — so the press is recorded first and acted on when the world
+    // starts moving again. Gated to a live round so a press during the announce
+    // still cannot turn into a pre-swing on "FIGHT!".
+    if (s.phase === 'fight') bufferPresses(s.p, cmd);
+
     // Cosmetics tick even during hit-stop, so sparks still animate while the
     // fighters are frozen — that contrast is what sells the impact.
     if (s.shake > 0) s.shake = Math.max(0, s.shake - 14 * dt);
@@ -1066,6 +1127,7 @@ export function stepFight(s: FightState, cmd: FightInput, dt: number) {
     s.roundClock = Math.max(0, s.roundClock - dt);
 
     const foeCmd = aiInput(s, dt);
+    bufferPresses(s.f, foeCmd);
     stepFighter(s, s.p, s.f, cmd, dt);
     stepFighter(s, s.f, s.p, foeCmd, dt);
     separate(s.p, s.f);
