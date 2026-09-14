@@ -266,6 +266,59 @@ export interface StreetSaleOutcome {
     amount: number;
 }
 
+/**
+ * What he would actually have paid, said out loud once he has gone.
+ *
+ * `trueMax` has existed since street selling shipped and the player has never
+ * been told it. A buyer walked, you learned nothing, and the next haggle was
+ * the same coin-toss as the last one. That is the difference between a
+ * mechanic you get better at and one you just endure.
+ *
+ * It is also the cheapest tension in the game. The near-miss — two cherries
+ * and a third just past the line — is the single most reliable hook there is,
+ * and we were already computing the number and throwing it away. Forty dollars
+ * short stings in a way that a blank refusal never does, and it sends you into
+ * the next negotiation with an actual opinion.
+ *
+ * Always revealed, never conditionally. If it only appeared on close calls the
+ * player would learn that seeing it means it was close, and the information
+ * would stop being information.
+ */
+export interface NearMiss {
+    /** His real ceiling. */
+    wouldHavePaid: number;
+    /** What you were holding out for. */
+    youWanted: number;
+    /** The gap. Zero when you were actually under his ceiling. */
+    missedBy: number;
+    /** True when it was close enough to hurt. */
+    agonising: boolean;
+}
+
+export function nearMiss(state: StreetNegotiation): NearMiss | null {
+    if (state.status !== 'walked' && state.status !== 'dead') return null;
+    const youWanted = [...state.history].reverse().find(o => o.by === 'player')?.amount
+        ?? state.currentOffer;
+    const missedBy = Math.max(0, youWanted - state.trueMax);
+    return {
+        wouldHavePaid: state.trueMax,
+        youWanted,
+        missedBy,
+        agonising: missedBy > 0 && missedBy <= state.trueMax * 0.15,
+    };
+}
+
+/** The line the log shows. Deliberately plain: the number does the work. */
+export function nearMissLine(miss: NearMiss): string {
+    if (miss.missedBy <= 0) {
+        return `He had $${miss.wouldHavePaid.toLocaleString()} on him. You never asked for it.`;
+    }
+    if (miss.agonising) {
+        return `He would have gone to $${miss.wouldHavePaid.toLocaleString()}. You were $${miss.missedBy.toLocaleString()} over.`;
+    }
+    return `He was never going past $${miss.wouldHavePaid.toLocaleString()}.`;
+}
+
 const noop = (player: Player, result: StreetSaleResultKind, text: string): StreetSaleOutcome => ({
     player,
     log: [{ icon: '🚶', text, tone: 'neutral' }],
@@ -287,8 +340,23 @@ export function resolveSale(
     day: number,
     hype: HypeEvent | null = null,
 ): StreetSaleOutcome {
-    if (state.status === 'walked') return noop(player, 'walked', `"Whatever." ${state.buyer.name} is already looking past you.`);
-    if (state.status === 'dead') return noop(player, 'dead', `"Yeah, no." ${state.buyer.name} walks off, unimpressed.`);
+    // A dead deal now tells you what it was worth. See `nearMiss`.
+    if (state.status === 'walked' || state.status === 'dead') {
+        const kind: StreetSaleResultKind = state.status;
+        const text = state.status === 'walked'
+            ? `"Whatever." ${state.buyer.name} is already looking past you.`
+            : `"Yeah, no." ${state.buyer.name} walks off, unimpressed.`;
+        const out = noop(player, kind, text);
+        const miss = nearMiss(state);
+        if (miss) {
+            out.log.push({
+                icon: miss.agonising ? '😖' : '💭',
+                text: nearMissLine(miss),
+                tone: miss.agonising ? 'bad' : 'neutral',
+            });
+        }
+        return out;
+    }
 
     const { buyer, item } = state;
     const price = state.currentOffer;

@@ -390,3 +390,64 @@ export function muggingLoss(player: Player): number {
     const fraction = 0.4 + Math.random() * 0.5; // 40%-90% of what's on you
     return Math.min(cash, Math.round(cash * fraction));
 }
+
+/* ------------------------------------------------------------------ *
+ * Skimming
+ * ------------------------------------------------------------------ */
+
+/**
+ * The bank was the one safe place, and that was a problem.
+ *
+ * Cash gets robbed and gets you shaken down; the card only ever got *lost*
+ * (see `CARD_LOSS_EVENTS`) — an availability problem for a day or two, never a
+ * balance problem. Once the police stop started leaving banked money alone,
+ * the mathematically correct play became bank everything the moment you have
+ * it and never think about it again. A store of value with no downside is not
+ * a decision, it is a formality.
+ *
+ * So a card can be skimmed. Somebody put a reader on the machine in the back
+ * of the pachinko parlour, and you find out later. It takes a slice of the
+ * balance rather than the balance: a wipe would just teach players never to
+ * bank, which replaces one dominant strategy with another.
+ *
+ * The slice is 1-26%, which is deliberately wide. A 1% skim is an annoyance
+ * and a 26% skim on a big balance is the worst thing that happens all week,
+ * and not knowing which you are getting is the entire point — the same
+ * variable-ratio shape as everything else worth playing here.
+ */
+export const SKIM_MIN_FRACTION = 0.01;
+export const SKIM_MAX_FRACTION = 0.26;
+
+/** Balances below this are not worth anybody's trouble. */
+export const SKIM_FLOOR = 250;
+
+export interface SkimResult {
+    /** Money taken. Zero when the balance was not worth skimming. */
+    amount: number;
+    fraction: number;
+    line: string;
+}
+
+const SKIM_LINES = [
+    'A machine you used three days ago had a reader taped inside it.',
+    'Somebody has been buying electronics in a city you have never visited.',
+    'The bank calls it "unusual activity". You call it a specific amount of money.',
+    'Two withdrawals, four minutes apart, from a machine you were nowhere near.',
+    'A card reader in the back of a pachinko parlour got a good look at you.',
+];
+
+/**
+ * Take a slice. Pure — hand it the balance and a roll, get back what was lost.
+ * Returns a zero result for a balance not worth the effort, so callers do not
+ * need to special-case a skim that stole four dollars.
+ */
+export function skimCard(bank: number, rng: () => number): SkimResult {
+    if (bank < SKIM_FLOOR) return { amount: 0, fraction: 0, line: '' };
+    const fraction = SKIM_MIN_FRACTION + rng() * (SKIM_MAX_FRACTION - SKIM_MIN_FRACTION);
+    const amount = Math.max(1, Math.round(bank * fraction));
+    return {
+        amount,
+        fraction,
+        line: SKIM_LINES[Math.floor(rng() * SKIM_LINES.length)],
+    };
+}
