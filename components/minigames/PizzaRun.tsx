@@ -1456,7 +1456,9 @@ export function drawRun(ctx: Ctx, s: RunState) {
     ctx.translate(shx, shy);
 
     // --- parallax: far towers, then the skyline, then the street ----------
-    band(ctx, 60, 30, W, s.x * 0.08, 96, PAL.panel, (c, x, y) => {
+    // Delivered skyline kit first; the coded towers below are the fallback.
+    const kit = art.drawSkyline(ctx, s.x, W);
+    if (!kit) band(ctx, 60, 30, W, s.x * 0.08, 96, PAL.panel, (c, x, y) => {
         rect(c, x + 4, y - 26, 22, 30, '#111a28');
         rect(c, x + 34, y - 16, 16, 20, '#0e1622');
         rect(c, x + 58, y - 32, 26, 36, '#121b2a');

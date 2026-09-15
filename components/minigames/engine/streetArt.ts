@@ -206,3 +206,58 @@ export function strip(
     ctx.restore();
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// The skyline
+// ---------------------------------------------------------------------------
+import { layoutSkyline, BANDS, type BandName } from './skyline';
+
+/**
+ * Draw the assembled skyline.
+ *
+ * `skyline.ts` decides what goes where and this puts it down, so the question
+ * "does the horizon visibly repeat" is answered by a test rather than by
+ * staring at it. Returns false when the kit has not been delivered, so a caller
+ * can fall back to its coded bands and a half-delivered set is still a game.
+ *
+ * Bands are drawn back to front and dimmed by distance — the far towers are
+ * flattened toward the sky colour, which is the only thing selling depth on a
+ * flat horizon.
+ */
+export const SKY_SHADE: Record<BandName, number> = {
+    towers: 0.55, lowrise: 0.78, rooftop: 0.78, landmarks: 0.66,
+};
+
+export function drawSkyline(
+    ctx: CanvasRenderingContext2D,
+    scroll: number,
+    screenW: number,
+    salt = 0,
+): boolean {
+    let drew = false;
+    for (const { band, placements } of layoutSkyline(scroll, screenW, salt)) {
+        for (const p of placements) {
+            const sheet = LOADED.get(p.piece.id);
+            if (!sheet) continue;
+            drew = true;
+            ctx.save();
+            ctx.globalAlpha = SKY_SHADE[band];
+            ctx.imageSmoothingEnabled = false;
+            if (p.flip) {
+                ctx.translate(p.x + p.piece.w / 2, 0);
+                ctx.scale(-1, 1);
+                ctx.translate(-(p.x + p.piece.w / 2), 0);
+            }
+            ctx.drawImage(
+                sheet.img, 0, 0, sheet.fw, sheet.fh,
+                p.x, p.y - p.piece.h, p.piece.w, p.piece.h,
+            );
+            ctx.restore();
+        }
+    }
+    return drew;
+}
+
+/** Has enough of the skyline kit arrived to be worth drawing? */
+export const hasSkyline = (): boolean =>
+    BANDS.towers.pieces.some((p) => LOADED.has(p.id));

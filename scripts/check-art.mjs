@@ -142,6 +142,7 @@ const SCALE = artScale();
  */
 const BRIEFS = {
     'assets/art/street': ['docs/ASSETS-STREET.md'],
+    'assets/art/characters': ['docs/ASSETS-CHARACTERS.md'],
     'assets/art/flight404': ['docs/ASSETS-FLIGHT404.md', 'docs/ASSETS-FLIGHT404-REMAINING.md'],
 };
 

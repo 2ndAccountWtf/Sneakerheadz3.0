@@ -1238,12 +1238,17 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         rect(c, x, y, 60, 14, ridgeCol);
         rect(c, x + 44, y - 6, 26, 20, ridgeCol2);
     });
-    band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
-        rect(c, x, y + 6, 20, 36, '#16202e');
-        rect(c, x + 24, y - 4, 14, 46, '#101923');
-        rect(c, x + 41, y + 12, 11, 30, '#18222f');
-        for (let wy = 0; wy < 4; wy++) rect(c, x + 3, y + 10 + wy * 7, 3, 3, wy % 2 ? '#2a3a4d' : PAL.warn);
-    });
+    // The delivered skyline kit assembles a horizon that does not repeat; the
+    // coded band below is the fallback for before it arrives. See `skyline.ts`
+    // for why a kit beats a tiling strip.
+    if (!art.drawSkyline(ctx, s.z * 26, W)) {
+        band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
+            rect(c, x, y + 6, 20, 36, '#16202e');
+            rect(c, x + 24, y - 4, 14, 46, '#101923');
+            rect(c, x + 41, y + 12, 11, 30, '#18222f');
+            for (let wy = 0; wy < 4; wy++) rect(c, x + 3, y + 10 + wy * 7, 3, 3, wy % 2 ? '#2a3a4d' : PAL.warn);
+        });
+    }
     band(ctx, 60, 40, W, s.z * 4.4, 88, PAL.panel, (c, x, y) => {
         rect(c, x + 6, y + 8, 2, 34, '#2a3a2a');
         glyph(c, '🌴', x + 7, y + 6, 15);
