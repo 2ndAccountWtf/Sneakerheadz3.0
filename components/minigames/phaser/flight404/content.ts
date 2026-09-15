@@ -75,7 +75,26 @@ export const ART_SCALE = ZOOM;
  * it is smaller. The cabin plates therefore tile upward from the floor line
  * rather than being stretched, which is what `buildScenery` does with this.
  */
-export const PLATE_SHRINK = 1;
+export const PLATE_SHRINK = 1.35;
+
+/**
+ * Where the background cabin's own floor sits, in world units.
+ *
+ * The cabin is scenery the player runs *past*, not a room they are inside. It
+ * is one row of seats and windows occupying a band above head height, and
+ * everything that can be touched — the player, the mooks, the crates, the
+ * livestock, the food — happens on the aisle in front of it, between here and
+ * `FLOOR_Y`.
+ *
+ * That separation is what makes the whole thing legible. A player standing
+ * among the drawn seats has to be the same scale as them, which forces the art
+ * and the gameplay into one plane and makes every obstacle ambiguous: is that
+ * crate scenery or can I trip over it? A player running in front of the cabin
+ * has only one rule to learn — if it is on the aisle, it is real.
+ */
+export const CABIN_BASE = 128;
+
+
 
 /**
  * How much bigger a drawn character is than its collision box.
@@ -96,10 +115,13 @@ export const PLATE_SHRINK = 1;
  * This is a stopgap for art framed at the wrong zoom, not a permanent feature:
  * re-framed plates want it back at 1.
  */
-export const FIGURE_SCALE = 1.7;
+export const FIGURE_SCALE = 1;
 
 /** The aisle carpet — every character's feet line, and the arcade world floor. */
 export const FLOOR_Y = 164;
+
+/** The strip the game is actually played on: aisle floor, in world units. */
+export const AISLE_DEPTH = FLOOR_Y - CABIN_BASE;
 /** Feet line for a mook wedged into an open overhead bin. */
 export const BIN_FEET = 58;
 /** Distance between seat rows / windows / bin doors. One parallax tile. */

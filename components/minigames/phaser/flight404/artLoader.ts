@@ -31,6 +31,7 @@
  */
 import type * as PhaserNS from 'phaser';
 import { T } from './textures';
+import { framesFor } from './sheets';
 
 /**
  * Build-time file listing, resolved by Vite into path -> url. Wrapped because
@@ -68,7 +69,11 @@ export function parseArt(files: Record<string, string>): ArtEntry[] {
         const base = file.replace(/\.png$/i, '');
         const m = base.match(/^(.+?)@(\d+)$/);
         const id = m ? m[1] : base;
-        const frames = m ? Math.max(1, Number(m[2])) : 1;
+        // No `@N` does not mean one frame — it usually means the exporter did
+        // not add one. The asset list knows how many frames each id has, and a
+        // multi-frame sheet loaded as a single frame draws the whole strip at
+        // once: four copies of the character in a row, all moving together.
+        const frames = framesFor(id, m ? Math.max(1, Number(m[2])) : undefined);
         if (seen.has(id)) {
             // Two files claiming one id is a delivery mistake, and resolving it
             // by directory order would make which one wins depend on the

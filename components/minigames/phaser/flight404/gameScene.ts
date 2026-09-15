@@ -34,7 +34,7 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
-import { ZOOM, PLATE_SHRINK } from './content';
+import { ZOOM, PLATE_SHRINK, CABIN_BASE } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import { attachSkin, type Skin } from './skin';
 import { openRoster, stepDirector, type Member, type World as CastWorld } from './castDirector';
@@ -794,10 +794,21 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // far and mid are the cabin itself, so they stand on the aisle.
             // near is the row of seats the player runs behind, so it hangs off
             // the bottom of the screen rather than off the floor.
+            // The cabin is one row of scenery standing behind the action. Its
+            // floor is CABIN_BASE, well above the player's, so the aisle in
+            // front of it is clear: everything the player can touch lives
+            // there and nothing in the cabin band ever will.
             const drawn = [
-                plate('far', 0.22, -8, FLOOR_Y),
-                plate('mid', 0.55, -6, FLOOR_Y),
-                plate('near', 1.06, 50, VIEW_H + 2),
+                plate('far', 0.18, -8, CABIN_BASE),
+                plate('mid', 0.42, -6, CABIN_BASE),
+                // The foreground row is deliberately NOT drawn. It is a full
+                // row of seat backs, and at this framing it stands between the
+                // camera and the aisle — the player fights behind a wall of
+                // upholstery and cannot see what they are shooting. A near
+                // layer only works when it is a thin lip along the bottom edge;
+                // this one is half a screen tall, so it waits for art cut for
+                // the job rather than being cropped into something it is not.
+                false,
             ];
             if (drawn.some(Boolean)) {
                 // Anything the delivered set is missing still comes from the
