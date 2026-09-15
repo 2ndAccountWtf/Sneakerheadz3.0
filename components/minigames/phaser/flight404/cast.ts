@@ -686,18 +686,27 @@ export function stepCast(
 }
 
 /**
- * Is this actor in the middle of its comedy beat — and therefore harmless?
- * The scene uses it for the "he is not paying attention" pose; the tests use it
- * to prove the beats are real downtime rather than an animation over the top of
- * business as usual.
+ * Is this one in the middle of its bit right now?
+ *
+ * The scene uses this for one thing: a beat has to cost the enemy ground, so a
+ * distracted member does not advance. That only works if the word means "in a
+ * beat", and nothing else.
+ *
+ * It used to answer a second question as well — the Reseller and the Falafel
+ * Guy returned `true` permanently, meaning "never a threat to your health".
+ * That reading is already available as `CAST[kind].hostile` and it made this
+ * function a trap: anything that froze a distracted member froze the Reseller
+ * forever, which silently deletes the only enemy in the game who can take
+ * something off the player. It cost the first caller an afternoon, so the two
+ * questions are two functions now.
  */
 export function distracted(state: CastState): boolean {
     switch (state.kind) {
         case 'scalper': return state.phase === 'photo' || state.phase === 'grab';
         case 'hypebeast': return state.phase === 'stunned';
-        case 'reseller': return true;                     // never a threat to your health
+        case 'reseller': return state.phase === 'bag';    // head down in somebody's shoes
         case 'security': return state.phase === 'radio';
         case 'shopOwner': return state.phase === 'tidy';
-        case 'falafelGuy': return true;                   // he is at work
+        case 'falafelGuy': return state.phase !== 'serve'; // his counter is on its side
     }
 }

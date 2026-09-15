@@ -121,6 +121,16 @@ export const SURFACE = {
     hummus: TILE.SOLID | TILE.SLIPPERY,
     /** An invisible fence so the chargers stay on the counter. */
     fence: TILE.ENEMY_WALL,
+    /**
+     * Cloth hung across the aisle. It holds nobody up and stops nothing — it
+     * only draws in front, so the player walks behind it and is briefly hidden.
+     *
+     * Named here rather than left as a bare `TILE.OCCLUDES` at the call site
+     * because a surface with no footing flag looks like an authoring mistake
+     * every time somebody reads past it. The whole point of this table is that a
+     * level is written in nouns.
+     */
+    cloth: TILE.OCCLUDES,
 } as const;
 
 export interface PlatformDef {
