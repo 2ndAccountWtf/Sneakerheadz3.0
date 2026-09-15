@@ -46,8 +46,21 @@ const LANES = 4;
 const ROAD_TOP = 100;
 const LANE_H = 18;
 const LANE_Y0 = 114;
-/** The player never moves horizontally; the world moves past them. */
+/**
+ * Where the player sits along the screen, and how far that can shift.
+ *
+ * The rider used to be nailed to one x while the world slid past, which made
+ * braking invisible: you could squeeze the brakes all the way down a hill and
+ * the only evidence was a number. Left and right now mean slow down and drive
+ * on, and the rider drifts back and forward between these two marks to show it
+ * — so the control that changes your speed also changes the picture, and how
+ * much road you can see ahead becomes the reward for committing.
+ */
+const PLAYER_X_BACK = 40;
+const PLAYER_X_FWD = 96;
 const PLAYER_X = 62;
+/** How quickly the rider slides between those marks. Slow enough to read. */
+const DRIFT_RATE = 46;
 /** Near-field metres -> pixels, used to place obstacles on the road. */
 const PX_PER_M = 5;
 /** The gap is drawn on its own, much flatter scale — he's a long way off. */
@@ -355,6 +368,8 @@ export interface RaceState {
     speed: number;
     topSpeed: number;
     laneF: number;
+    /** Where the rider currently sits along the screen. See PLAYER_X_BACK. */
+    px: number;
     drag: number;
     dragTuck: number;
     tucking: boolean;
@@ -432,12 +447,20 @@ export interface RaceInput {
     tuck: boolean;
     /** Edge-triggered: up. */
     ollie: boolean;
+    /** Across the street. Lanes are drawn stacked, so this is the screen's y. */
+    up: boolean;
+    down: boolean;
+    /** Squeeze the brakes. Drops you back toward the left edge of the screen. */
+    brake: boolean;
     /** Edge-triggered: A. */
     fire: boolean;
     weapon: string;
 }
 
-export const NO_INPUT: RaceInput = { left: false, right: false, tuck: false, ollie: false, fire: false, weapon: '' };
+export const NO_INPUT: RaceInput = {
+    left: false, right: false, up: false, down: false,
+    tuck: false, ollie: false, brake: false, fire: false, weapon: '',
+};
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 /** Deterministic LCG kept on the state, so a scripted run replays exactly. */
@@ -468,7 +491,7 @@ export function createRaceState(opts: {
     const s: RaceState = {
         rig, hasBoard: opts.hasBoard, fitness,
         seed: (opts.seed ?? 0x5eed) >>> 0,
-        t: 0, z: 0, speed: 17, topSpeed: 17, laneF: 1.5,
+        t: 0, z: 0, speed: 17, topSpeed: 17, laneF: 1.5, px: PLAYER_X,
         // Quadratic drag tuned so the rig's stated cruise / tuck speeds are its
         // actual terminal velocities. Tucking raises the ceiling by lowering
         // drag, so the gain is a real physics change and not a bolt-on bonus.
@@ -561,7 +584,7 @@ function nearMiss(s: RaceState, o: Obs) {
     s.speed += boost;
     s.flash = s.combo > 1 ? `CLOSE x${s.combo}` : 'CLOSE CALL';
     s.flashT = 0.7;
-    addSpark(s, PLAYER_X + 9, laneY(s.laneF) - 6, '✨');
+    addSpark(s, s.px + 9, laneY(s.laneF) - 6, '✨');
 }
 
 function crash(s: RaceState, o: Obs) {
@@ -589,7 +612,7 @@ function crash(s: RaceState, o: Obs) {
     s.flashT = 0.9;
     s.airT = 0;
     s.airH = 0;
-    addSpark(s, PLAYER_X + 8, laneY(s.laneF) - 8, '💢');
+    addSpark(s, s.px + 8, laneY(s.laneF) - 8, '💢');
 }
 
 function land(s: RaceState) {
@@ -620,7 +643,7 @@ function land(s: RaceState) {
             s.flash = clean ? 'CLEAN LANDING' : 'sketchy landing';
         }
         s.flashT = 0.8;
-        addSpark(s, PLAYER_X, laneY(s.laneF), '💨');
+        addSpark(s, s.px, laneY(s.laneF), '💨');
     }
     s.airFromRamp = false;
 }
@@ -649,7 +672,7 @@ function hitThief(s: RaceState, w: Weapon) {
     s.crashIn = Math.min(s.crashIn, 0.9 + rnd(s) * 0.9);
     s.talk = pick(s, TALK_HIT);
     s.talkT = 1.6;
-    const tx = clamp(PLAYER_X + s.gap * GAP_PX, PLAYER_X + 14, 302);
+    const tx = clamp(s.px + s.gap * GAP_PX, s.px + 14, 302);
     addSpark(s, tx, laneY(s.thiefLane) - 10, w.glyph);
 }
 
@@ -711,7 +734,7 @@ function stepShots(s: RaceState, dt: number) {
         sh.travel += v * dt;
 
         if (sh.travel >= sh.stopAt) {
-            addSpark(s, PLAYER_X + sh.travel * GAP_PX, laneY(sh.lane) - 6, '✖');
+            addSpark(s, s.px + sh.travel * GAP_PX, laneY(sh.lane) - 6, '✖');
             if (w.returns) { sh.back = true; sh.travel = sh.stopAt; } else s.shots.splice(i, 1);
             continue;
         }
@@ -764,7 +787,7 @@ function stepThief(s: RaceState, dt: number) {
         s.crashT = Math.max(s.crashT, 0.65 + rnd(s) * 0.35);
         s.talk = pick(s, TALK_CRASH);
         s.talkT = 1.5;
-        const tx = clamp(PLAYER_X + s.gap * GAP_PX, PLAYER_X + 14, 302);
+        const tx = clamp(s.px + s.gap * GAP_PX, s.px + 14, 302);
         addSpark(s, tx, laneY(s.thiefLane) - 6, '🗑️');
         s.crashIn = (3.6 + rnd(s) * 3.6) * (1 - s.rattle / 400);
     }
@@ -864,13 +887,40 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
     if (s.oilT > 0) steer *= 0.18;           // oil = no steering at all
     if (s.airT > 0) steer *= 0.55;
 
-    const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+    // Lanes are stacked up the screen, so the stick axis that moves you between
+    // them is up/down. Steering a vertical row of lanes with left/right was the
+    // original mapping and it fought the picture the whole time: the hand said
+    // sideways and the eye said up. `left`/`right` are kept in the input shape
+    // and read below as brake and drive, which is what a player reaching for
+    // them on a downhill actually means.
+    const dir = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
     if (dir !== 0) {
         s.laneF += dir * steer * dt;
         if (s.airT <= 0) s.speed -= s.rig.carve * dt * (tuck ? 1.5 : 1);
     }
     if (s.wob > 0) s.laneF += (rnd(s) - 0.5) * s.wob * 3.6 * dt;
     s.laneF = clamp(s.laneF, 0, LANES - 1);
+
+    // --- brake and drive ----------------------------------------------------
+    //
+    // Left scrubs speed, right leans on it. Both also move the rider along the
+    // screen, and that is the point: the picture has to show what the control
+    // did or the control may as well not exist. Driving forward buys you sight
+    // of the road — the further up the screen you sit, the more street you can
+    // read before it arrives — so committing is paid for in the one currency
+    // this game actually trades in, which is reaction time.
+    const drive = (inp.right ? 1 : 0) - (inp.left || inp.brake ? 1 : 0);
+    if (drive < 0) {
+        // Braking on oil does nothing, the same way steering on oil does
+        // nothing. A slick should feel like a loss of authority, not a
+        // slightly worse version of normal driving.
+        s.speed -= (s.oilT > 0 ? 3 : 26) * dt;
+    } else if (drive > 0 && s.airT <= 0) {
+        s.speed += 5 * dt;
+    }
+    const wantX = drive > 0 ? PLAYER_X_FWD : drive < 0 ? PLAYER_X_BACK : PLAYER_X;
+    const dx = wantX - s.px;
+    s.px += clamp(dx, -DRIFT_RATE * dt, DRIFT_RATE * dt);
 
     // --- ollie ------------------------------------------------------------
     // The loudest half of the longboard branch. With a deck, `up` is a real
@@ -1224,7 +1274,7 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // --- obstacles (far lanes first so nearer things overlap them) --------
     const sorted = s.obstacles.slice().sort((a, b) => a.lane - b.lane);
     for (const o of sorted) {
-        const x = PLAYER_X + (o.z - s.z) * PX_PER_M;
+        const x = s.px + (o.z - s.z) * PX_PER_M;
         if (x < -40 || x > W + 46) continue;
         drawObstacle(ctx, o, x, laneY(o.lane), laneScale(o.lane), s.t);
     }
@@ -1233,8 +1283,8 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // During the catch cinematic he eases in alongside the player instead of
     // sitting at the frozen gap distance — a real "you pull level with him"
     // moment instead of the number just hitting zero off-screen.
-    let tx = clamp(PLAYER_X + s.gap * GAP_PX, PLAYER_X + 14, 302);
-    if (catchT > 0) tx = tx + (PLAYER_X + 20 - tx) * catchEase;
+    let tx = clamp(s.px + s.gap * GAP_PX, s.px + 14, 302);
+    if (catchT > 0) tx = tx + (s.px + 20 - tx) * catchEase;
     const ty = laneY(s.thiefLane);
     const tsc = laneScale(s.thiefLane);
     const rattled = s.thiefStun > 0 || s.crashT > 0;
@@ -1271,16 +1321,16 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const wipe = s.outcome === 'wipeout' ? Math.min(1.6, s.wipe * 2.4) : 0;
     ctx.save();
     if (wipe > 0) {
-        ctx.translate(PLAYER_X, py);
+        ctx.translate(s.px, py);
         ctx.rotate(wipe * 1.5);
-        ctx.translate(-PLAYER_X, -py);
+        ctx.translate(-s.px, -py);
     }
-    if (s.airH > 1) shadow(ctx, PLAYER_X, py + 1, 9 * psc, 3 * psc, 0.3);
+    if (s.airH > 1) shadow(ctx, s.px, py + 1, 9 * psc, 3 * psc, 0.3);
     const ry = py - s.airH;
     const roll = s.wob * Math.sin(s.t * 26) * 0.07;
-    if (s.hasBoard) drawBoard(ctx, PLAYER_X, ry, psc, roll);
-    else drawTrolley(ctx, PLAYER_X, ry, psc, '#3d4a58', roll, s.t * (4 + s.speed * 0.5));
-    actor(ctx, 'player', PLAYER_X, ry - (s.hasBoard ? 3 : 7) * psc, {
+    if (s.hasBoard) drawBoard(ctx, s.px, ry, psc, roll);
+    else drawTrolley(ctx, s.px, ry, psc, '#3d4a58', roll, s.t * (4 + s.speed * 0.5));
+    actor(ctx, 'player', s.px, ry - (s.hasBoard ? 3 : 7) * psc, {
         height: 26 * psc, facing: 1,
         stride: s.t * 2.4,
         armUp: s.cool > 0.2 || handEase > 0.6 ? 1 : 0,
@@ -1530,11 +1580,18 @@ const CartRace: React.FC<{
 
         // Tuck is held (B or down); ollie and throw are edge-triggered so a held
         // finger on a phone doesn't machine-gun the weapon rail.
+        // Up/down cross the street because the lanes are drawn stacked;
+        // left/right brake and drive because that is what a hand reaches for
+        // on a hill. Jump is its own button now rather than doubling up on the
+        // d-pad, which is what freed up/down to mean the lane at all.
         stepRace(s, {
             left: i.left,
             right: i.right,
-            tuck: i.b || i.down,
-            ollie: consume('up'),
+            up: i.up,
+            down: i.down,
+            tuck: i.b,
+            brake: i.left,
+            ollie: consume('c'),
             fire: consume('a'),
             weapon: selRef.current,
         }, dt);
@@ -1586,7 +1643,7 @@ const CartRace: React.FC<{
             running={done === null}
             onFrame={onFrame}
             onInput={set}
-            actions={['Throw', 'Tuck']}
+            actions={['Throw', 'Tuck', 'Jump']}
             vertical
             onQuit={onQuit}
             quitLabel="Let Him Go"
