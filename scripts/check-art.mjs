@@ -146,6 +146,18 @@ function specSizes() {
 
 // --- the check --------------------------------------------------------------
 
+/**
+ * Ids that are meant to be opaque from edge to edge.
+ *
+ * A character sprite whose border is fully opaque is on a matte and will paint
+ * a box. A tiling cabin wall whose border is fully opaque is simply a wall —
+ * the whole job of `dress-windowwall` is to be a continuous surface, and the
+ * only transparent part of it is the window aperture in the middle, which the
+ * border test never sees. Flagging those as broken would train whoever is
+ * delivering to ignore the checker, which is worse than not having one.
+ */
+const FULL_BLEED = /^(dress-|bg-[a-z]+-(far|mid|near)$|.*wall$|.*floor$|belt-segment$)/;
+
 const spec = specSizes();
 if (!existsSync(FOLDER)) {
     console.log(`\nNo folder at ${FOLDER} yet — create it and drop PNGs in.\n`);
@@ -185,8 +197,14 @@ for (const file of files.sort()) {
         for (let y = 0; y < png.height; y++) { edge.push(alpha[y * png.width], alpha[y * png.width + png.width - 1]); }
         const opaqueEdge = edge.filter(a => a > 250).length / edge.length;
         const anyClear = alpha.some(a => a < 16);
-        if (opaqueEdge > 0.9) problems.push(`background is SOLID (${Math.round(opaqueEdge * 100)}% of the border is opaque) — the cabin is near-black, so this paints a box`);
-        else if (!anyClear) problems.push('no transparent pixels anywhere — the background is filled in');
+        const fullBleed = FULL_BLEED.test(id);
+        if (opaqueEdge > 0.9 && !fullBleed) {
+            problems.push(`background is SOLID (${Math.round(opaqueEdge * 100)}% of the border is opaque) — the cabin is near-black, so this paints a box. \`node scripts/prep-art.mjs <file>\` keys it out.`);
+        } else if (opaqueEdge > 0.9) {
+            notes.push('opaque edge to edge, which is right for a tiling surface');
+        } else if (!anyClear && !fullBleed) {
+            problems.push('no transparent pixels anywhere — the background is filled in');
+        }
     }
 
     // 2. Frame slicing.
