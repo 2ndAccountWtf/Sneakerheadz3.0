@@ -33,6 +33,14 @@ const residentTexture = (kind: string): string =>
 
 const crossingTexture = (kind: string): string => T(`cross-${kind}`);
 
+/**
+ * The balk — the one thing a crossing does mid-aisle — is its own sheet, so a
+ * camel ducking under the overhead bins is drawn rather than implied by
+ * squashing the walk cycle. Falls back to the walk when that art has not
+ * arrived, which is most of them at the time of writing.
+ */
+const balkTexture = (kind: string): string => T(`cross-${kind}-balk`);
+
 export interface BackdropView {
     residents: Img[];
     /** Reused across crossings; `active` marks the ones on screen this frame. */
@@ -103,15 +111,19 @@ export function stepCrossings(
             img = scene.add.image(0, 0, crossingTexture(c.kind)).setOrigin(0.5, 1);
             view.pool.push(img);
         }
-        img.setTexture(crossingTexture(c.kind));
+        const balk = balkTexture(c.kind);
+        const useBalk = c.balked && scene.textures.exists(balk);
+        img.setTexture(useBalk ? balk : crossingTexture(c.kind));
         img.setPosition(c.x, c.y);
         img.setDepth(c.depth);
         // Art is authored walking left to right, so the other direction is a
         // mirror. Nothing in the set is asymmetric by accident.
         img.setFlipX(c.facing < 0);
-        // A balked crossing is standing still doing its bit; a shrug of scale
-        // is enough to say "this one has stopped" without an extra sprite.
-        img.setScale(c.balked ? 1.04 : 1, c.balked ? 0.96 : 1);
+        // With drawn balk art the sprite says it on its own; without it, a
+        // shrug of scale is the stand-in so a stopped crossing still reads as
+        // having stopped for a reason.
+        if (useBalk) img.setScale(1, 1);
+        else img.setScale(c.balked ? 1.04 : 1, c.balked ? 0.96 : 1);
         img.setVisible(true);
     }
     // Anything the pool is still holding beyond this frame's traffic is hidden
