@@ -301,6 +301,30 @@ export function bakeTextures(scene: Scene) {
         fillRect(g, 4, 0, 34, 2, C.line);
     });
 
+    // --- Furniture you can stand on.
+    //
+    // Deliberately flat, hard-topped and one pixel of highlight along the top
+    // edge: a platform whose landing surface is ambiguous is a platform the
+    // player misses, and in a cabin drawn in near-blacks the top edge is the
+    // only thing saying "here, this line, this is the floor now".
+    bake(scene, T('ledge'), 16, 8, g => {
+        fillRect(g, 0, 0, 16, 8, C.raised);
+        fillRect(g, 0, 0, 16, 1, C.line);
+    });
+    bake(scene, T('seatrow'), 16, 8, g => {
+        // One-way, and it has to look it: the underside is open so that jumping
+        // up through it reads as intended rather than as a collision bug.
+        fillRect(g, 0, 0, 16, 3, C.raised);
+        fillRect(g, 0, 0, 16, 1, C.accent);
+        fillRect(g, 2, 4, 12, 1, C.faint);
+    });
+    bake(scene, T('drape'), 16, 26, g => {
+        fillRect(g, 0, 0, 16, 26, C.warn);
+        fillRect(g, 0, 0, 16, 2, C.line);
+        fillRect(g, 3, 4, 2, 20, C.bg);
+        fillRect(g, 11, 4, 2, 20, C.bg);
+    });
+
     // --- Props
     bake(scene, T('trolley'), 24, 26, g => {
         fillRect(g, 1, 0, 22, 22, C.raised);

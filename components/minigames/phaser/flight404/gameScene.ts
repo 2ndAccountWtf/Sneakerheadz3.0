@@ -28,6 +28,12 @@ import {
 } from './content';
 import { T, TG, C, MONO } from './textures';
 import { makeFigureFactory, type BlockFigure, type Kit } from './figure';
+import { layoutFor } from './layout';
+import {
+    buildPlatforms, clearPlatforms, footingFlags, apply, lands, harms,
+    type PlatformSet,
+} from './platforms';
+import { TILE, has } from './terrain';
 import { REG, type F404Input, type F404Result } from './bridge';
 import type { HudPayload } from './uiScene';
 
@@ -183,6 +189,18 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private hostiles!: PhaserNS.Physics.Arcade.Group;
         private pickups!: PhaserNS.Physics.Arcade.Group;
         private trolleys!: PhaserNS.Physics.Arcade.StaticGroup;
+        /** The section's furniture. Rebuilt per cabin; see `platforms.ts`. */
+        private terrain: PlatformSet | null = null;
+        /** Player feet at the start of the frame, for the one-way rule. */
+        private feetWere = FLOOR_Y;
+        /**
+         * Seconds left of dropping through a seat.
+         *
+         * Down+jump on a one-way surface has to suppress the collision for
+         * longer than one frame, or the player falls four pixels and lands on
+         * the same seat again — which reads as the input being ignored.
+         */
+        private dropThrough = 0;
         private boss: Boss | null = null;
         /** Colliders that only exist while Yasser does. */
         private bossColliders: PhaserNS.Physics.Arcade.Collider[] = [];
@@ -276,6 +294,21 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.buildParticles();
             this.buildPlayer();
             this.buildColliders();
+
+            // A handle for automated verification, and nothing else.
+            //
+            // The climb cannot be checked from outside the canvas: a screenshot
+            // shows a figure somewhere in a dark cabin and proves nothing about
+            // whether it is resting on a body or falling past one. This exposes
+            // the scene so a Playwright run can read the player's feet and the
+            // flags underneath them directly.
+            //
+            // `import.meta.env.DEV` is a literal at build time, so the whole
+            // block is eliminated from the production bundle rather than
+            // shipping a global that points at the running game.
+            if (import.meta.env.DEV) {
+                (window as unknown as Record<string, unknown>).__F404 = this;
+            }
             this.loadSection(0);
 
             // PHASER: `startFollow` + `setDeadzone` + `setBounds`. The camera
@@ -415,6 +448,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.mooks.clear(true, true);
             this.hostages.clear(true, true);
             this.trolleys.clear(true, true);
+            clearPlatforms(this.terrain);
+            this.terrain = null;
             this.shots.clear(true, true);
             this.hostiles.clear(true, true);
             this.melee.clear(true, true);
@@ -440,6 +475,28 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.cameras.main.setBounds(0, 0, def.length, VIEW_H);
 
             this.buildScenery(def.length, idx);
+
+            // The upstairs. Geometry, reachability and the flag vocabulary all
+            // live in `layout.ts` / `terrain.ts`; this is the one line that
+            // turns them into something you can stand on.
+            this.terrain = buildPlatforms(this, layoutFor(idx, () => this.rng.frac()));
+            this.physics.add.collider(this.player, this.terrain.solid);
+            this.physics.add.collider(this.mooks, this.terrain.solid);
+            this.physics.add.collider(this.mooks, this.terrain.fences);
+            // Seats are jumped up through, so the collision is conditional. The
+            // check is on where the feet *were*, not on velocity: at the apex of
+            // a jump velocity is zero for one frame, and a velocity-only test
+            // lets the player land on a seat back from underneath.
+            this.physics.add.collider(
+                this.player, this.terrain.oneWay, undefined,
+                (obj, plat) => {
+                    const b = body(obj as BlockFigure);
+                    const img = plat as unknown as PhaserNS.GameObjects.Image;
+                    if (this.dropThrough > 0) return false;
+                    return lands(img.getData('flags') as number, this.feetWere, img.y, b.velocity.y);
+                },
+                this,
+            );
 
             for (const tx of def.trolleys) {
                 const img = this.trolleys.create(tx, FLOOR_Y, T('trolley')) as Img;
@@ -1732,6 +1789,13 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             }
 
             const onGround = b.blocked.down || b.touching.down;
+            this.dropThrough = Math.max(0, this.dropThrough - dt);
+
+            // What is underfoot, and what it does about it. `platforms.ts` owns
+            // the table; the scene only asks.
+            const under = onGround ? footingFlags(this.terrain, this.player.x, this.player.y) : 0;
+            if (harms(under) && this.pInvuln <= 0) this.hurtPlayer(4, this.player.x);
+
             const wasCrouch = this.pCrouch;
             this.pCrouch = inp.down && onGround;
             this.pAimUp = inp.up;
@@ -1759,10 +1823,19 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 this.pFacing = dir > 0 ? 1 : -1;
                 this.pStride = (this.pStride + dt * 2.4) % 1;
             } else {
-                b.setVelocityX(b.velocity.x * (onGround ? 0.72 : 0.94));
+                b.setVelocityX(onGround ? apply(under, b.velocity.x, false) : b.velocity.x * 0.94);
                 this.pStride = 0;
             }
-            if (inp.jump && onGround && !this.pCrouch) b.setVelocityY(JUMP_V);
+            // A belt carries you whether or not you are walking, which is the
+            // whole joke of a galley that fights you on the way forward.
+            if (onGround && dir !== 0) b.setVelocityX(apply(under, b.velocity.x, true));
+            if (inp.jump && onGround && this.pCrouch && has(under, TILE.ONE_WAY)) {
+                // Crouched on a seat and pressing jump: go down, not up.
+                this.dropThrough = 0.25;
+                b.setVelocityY(30);
+            } else if (inp.jump && onGround && !this.pCrouch) {
+                b.setVelocityY(JUMP_V);
+            }
             if (inp.fire) this.fire();
 
             // --- pose
@@ -1788,6 +1861,10 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 .setPosition(this.player.x + this.pFacing * 12, this.player.y - 22);
             this.boltIcon?.setVisible(this.pSpeedT > 0)
                 .setPosition(this.player.x - this.pFacing * 10, this.player.y - 26);
+
+            // Last thing each frame, so the one-way process callback next frame
+            // is comparing against where the feet actually started.
+            this.feetWere = this.player.y;
         }
 
         private stepHostages(dt: number) {
