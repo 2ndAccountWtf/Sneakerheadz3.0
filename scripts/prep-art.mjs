@@ -22,7 +22,8 @@
  * background colour, because anything more would be a filter applied to
  * somebody else's drawing without asking.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { decodePng, encodePng } from './lib/png.mjs';
 
 const args = process.argv.slice(2);
@@ -31,8 +32,40 @@ const flag = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[
 const has = n => args.includes(`--${n}`);
 
 if (!input) {
-    console.log('usage: node scripts/prep-art.mjs <in.png> [--frames N] [--key] [--scale F] [--out path]');
+    console.log('usage: node scripts/prep-art.mjs <in.png|folder> [--frames N] [--scale F] [--out path]');
+    console.log('       a folder prepares every PNG in it, taking the frame count from the @N in each name');
     process.exit(1);
+}
+
+/**
+ * A folder prepares everything in it in one go.
+ *
+ * Art arrives in batches, and asking somebody to run a command per file is
+ * asking them to skip the command. The frame count comes from each filename's
+ * `@N`, which is the same rule the game itself uses, so a correctly named drop
+ * needs no arguments at all.
+ */
+if (statSync(input).isDirectory()) {
+    const dest = flag('out', 'assets/art/flight404');
+    mkdirSync(dest, { recursive: true });
+    const files = readdirSync(input).filter(f => /\.png$/i.test(f));
+    if (!files.length) { console.log(`\nNo PNGs in ${input}.\n`); process.exit(0); }
+    console.log(`\nPreparing ${files.length} file(s) from ${input} into ${dest}\n`);
+    let ok = 0;
+    for (const f of files.sort()) {
+        try {
+            const m = basename(f).replace(/\.png$/i, '').match(/@(\d+)$/);
+            const argv = [process.argv[0], process.argv[1], join(input, f), '--out', join(dest, f)];
+            if (m) argv.push('--frames', m[1]);
+            const { execFileSync } = await import('node:child_process');
+            execFileSync(process.argv[0], argv.slice(1), { stdio: 'inherit' });
+            ok++;
+        } catch (e) {
+            console.log(`  ! ${f}: ${e.message.split('\n')[0]}`);
+        }
+    }
+    console.log(`\n${ok}/${files.length} prepared. Now run: node scripts/check-art.mjs\n`);
+    process.exit(0);
 }
 
 const img = decodePng(readFileSync(input));
@@ -105,10 +138,19 @@ for (const s of spans) {
 }
 console.log(`  found ${merged.length} ink column-group(s)`);
 
-const wanted = Number(flag('frames', merged.length || 1));
-let frames = merged;
-if (merged.length !== wanted) {
-    console.log(`  ${merged.length} groups but --frames ${wanted}: falling back to even division`);
+/**
+ * No `--frames` means one frame, not "however many ink groups I found".
+ *
+ * This is the same rule the game uses: a file without an `@N` in its name is a
+ * single sprite. Guessing from the drawing instead would shred a tiling cabin
+ * wall into six frames the first time it had six windows in it — which it did,
+ * the first time this ran over a folder.
+ */
+const wanted = args.includes('--frames') ? Number(flag('frames', 1)) : 1;
+let frames = wanted === 1 ? [[Math.min(...merged.map(m => m[0])), Math.max(...merged.map(m => m[1]))]] : merged;
+if (!merged.length) frames = [[0, img.width - 1]];
+else if (wanted > 1 && merged.length !== wanted) {
+    console.log(`  ${merged.length} ink groups but --frames ${wanted}: falling back to even division`);
     const cw = img.width / wanted;
     frames = [...Array(wanted)].map((_, i) => [Math.round(i * cw), Math.round((i + 1) * cw) - 1]);
 }
