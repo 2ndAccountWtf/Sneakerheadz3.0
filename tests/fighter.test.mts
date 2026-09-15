@@ -21,6 +21,7 @@
 import assert from 'node:assert/strict';
 import {
     createFight, stepFight, startAttack, blankInput, seeded,
+    bufferFramesFor, BUFFER_FRAMES, BUFFER_MIN, BUFFER_MAX, FOCUS_BASELINE,
     hitbox, hurtbox, movesFor,
     type FightState, type FightInput, type Fighter,
 } from '../components/minigames/StreetFighter.tsx';
@@ -379,6 +380,63 @@ t('holding a guard beats standing there taking it', () => {
 t('neither passive fighter ever wins a match', () => {
     // Fine that they lose. They should never fluke a win out of the AI.
     assert.equal(series(PASSIVE, 8).wins, 0, 'doing nothing won a fight');
+});
+
+console.log('\nfocus steadies your own hands');
+
+t('an ordinary head fights exactly as it did before', () => {
+    // The anchor that keeps the spacing pass's balance intact: focus 60 is the
+    // baseline, so every measurement in that pass still describes this build.
+    assert.equal(bufferFramesFor(FOCUS_BASELINE), BUFFER_FRAMES);
+    assert.equal(bufferFramesFor(), BUFFER_FRAMES, 'an unknown focus is not treated as ordinary');
+});
+
+t('a sharper player gets a more forgiving window, a duller one less', () => {
+    assert.ok(bufferFramesFor(100) > BUFFER_FRAMES, 'coffee bought nothing');
+    assert.ok(bufferFramesFor(0) < BUFFER_FRAMES, 'a bad night costs nothing');
+    // Monotonic, so the stat always reads in the direction the player expects.
+    let prev = 0;
+    for (let f = 0; f <= 100; f += 5) {
+        const w = bufferFramesFor(f);
+        assert.ok(w >= prev, `focus ${f} narrowed the window`);
+        prev = w;
+    }
+});
+
+t('focus can never buy a window that breaks the game', () => {
+    for (const f of [-500, -1, 0, 50, 100, 101, 9999, NaN]) {
+        const w = bufferFramesFor(f);
+        if (Number.isNaN(f)) { assert.ok(w >= BUFFER_MIN && w <= BUFFER_MAX, 'NaN focus escaped the clamp'); continue; }
+        assert.ok(w >= BUFFER_MIN && w <= BUFFER_MAX, `focus ${f} gave a ${w}-frame window`);
+    }
+});
+
+t('the edge is the player\'s alone — the AI keeps the baseline', () => {
+    // Sharpening up must not sharpen the opponent, or the stat buys nothing.
+    const s = createFight({ opponent: 'Foe', weapon: FISTS, rng: seeded(3), focus: 100 });
+    assert.ok(s.p.bufFrames > BUFFER_FRAMES, 'a focused player got the baseline window');
+    assert.equal(s.f.bufFrames, BUFFER_FRAMES, 'the AI got the player\'s coffee');
+});
+
+t('a focused press survives a longer lockout than a foggy one', () => {
+    // The mechanical payoff, measured rather than asserted from the constant:
+    // how long a press can wait and still come out.
+    const survives = (focus: number, lockFrames: number): boolean => {
+        const s = createFight({ opponent: 'Foe', weapon: FISTS, rng: seeded(11), focus });
+        while (s.phase === 'intro') stepFight(s, blankInput(), DT);
+        s.p.state = 'hitstun';
+        s.p.hitstun = lockFrames;
+        stepFight(s, press('a'), DT);
+        for (let i = 0; i < lockFrames + 12; i++) {
+            stepFight(s, blankInput(), DT);
+            if (stateOf(s.p) === 'attack') return true;
+        }
+        return false;
+    };
+    // A window a foggy player misses and a sharp one catches.
+    const gap = BUFFER_FRAMES + 1;
+    assert.equal(survives(100, gap), true, 'a sharp player lost a press inside their own window');
+    assert.equal(survives(0, gap), false, 'a foggy player kept a press past their window');
 });
 
 console.log(`\n${pass} fighter checks passed.\n`);

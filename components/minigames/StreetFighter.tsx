@@ -237,6 +237,12 @@ export interface Fighter {
      * fight and it was the one most likely to be thrown away.
      */
     buf: { a: number; b: number; up: number };
+    /**
+     * How many frames a press of this fighter's waits. The player's comes from
+     * `Player.focus`; the AI always runs the baseline, so sharpening up is a real
+     * edge rather than something the opponent gets for free.
+     */
+    bufFrames: number;
     /** Frames of dash momentum left. */
     dash: number;
     /** Frames left for a second forward tap to register as a dash. */
@@ -368,6 +374,11 @@ export interface FightConfig {
     foeHp?: number;
     /** 0..0.2. Street cred buys a modest real edge, as the text version did. */
     credEdge?: number;
+    /**
+     * `Player.focus`, 0-100. Widens or narrows the player's own input window —
+     * see `bufferFramesFor`. Only the player's; the AI keeps the baseline.
+     */
+    focus?: number;
     rng?: () => number;
 }
 
@@ -383,6 +394,7 @@ function makeFighter(isPlayer: boolean, name: string, x: number, hp: number, wea
         slow: 0, flash: 0, blockFlash: 0,
         weapon, moves: movesFor(weapon), dealt: 0,
         buf: { a: 0, b: 0, up: 0 },
+        bufFrames: BUFFER_FRAMES,
         dash: 0, tapWin: 0, fwdWas: false,
     };
 }
@@ -408,6 +420,9 @@ export function createFight(cfg: FightConfig): FightState {
         ammoBank: { [cfg.weapon.id]: cfg.weapon.uses ?? Infinity },
         stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0 },
     };
+    // Sharpness is the player's edge alone. A coffee before a fight buys a more
+    // forgiving window on your own presses; it does nothing for the other guy.
+    s.p.bufFrames = bufferFramesFor(cfg.focus);
     return s;
 }
 
@@ -570,11 +585,42 @@ function applyHit(s: FightState, atk: Fighter, def: Fighter, m: MoveDef, at: Box
  */
 export const BUFFER_FRAMES = 7;
 
+/** The narrowest and widest the window is ever allowed to get. */
+export const BUFFER_MIN = 4;
+export const BUFFER_MAX = 10;
+/** The focus this game is balanced at: 60 gives exactly `BUFFER_FRAMES`. */
+export const FOCUS_BASELINE = 60;
+
+/**
+ * How forgiving the input window is, given how sharp the player is.
+ *
+ * `Player.focus` is a real 0-100 stat that coffee and gum move, and until now
+ * only the darts board read it — nineteen AM/PM items pushed a number that one
+ * mini-game out of six cared about. This is the fighter's answer, and it is the
+ * right shape for a fighting game: focus does not make your punches stronger or
+ * the opponent slower, it makes *your own hands* more reliable. A press a few
+ * frames early still comes out.
+ *
+ * Anchored at 60 so the balance measured in the spacing pass is untouched for a
+ * player of ordinary sharpness: focus 60 is 7 frames, exactly as before. Coffee
+ * buys up to 9, a bad night costs you down to 4.
+ */
+export function bufferFramesFor(focus = FOCUS_BASELINE): number {
+    // A clamp alone does not survive NaN — Math.max(4, NaN) is NaN, and a NaN
+    // window silently disables buffering altogether, which would read as the
+    // input bug this whole mechanism exists to fix. A corrupt save is enough to
+    // produce one, so anything that is not a real number fights as ordinary.
+    const sharp = Number.isFinite(focus) ? focus : FOCUS_BASELINE;
+    const shifted = BUFFER_FRAMES + (sharp - FOCUS_BASELINE) / 20;
+    return Math.max(BUFFER_MIN, Math.min(BUFFER_MAX, Math.round(shifted)));
+}
+
 /** Remember a press so it can fire the first frame the fighter is able to act. */
 export function bufferPresses(f: Fighter, cmd: FightInput) {
-    if (cmd.aPressed) f.buf.a = BUFFER_FRAMES;
-    if (cmd.bPressed) f.buf.b = BUFFER_FRAMES;
-    if (cmd.upPressed) f.buf.up = BUFFER_FRAMES;
+    const w = f.bufFrames;
+    if (cmd.aPressed) f.buf.a = w;
+    if (cmd.bPressed) f.buf.b = w;
+    if (cmd.upPressed) f.buf.up = w;
 }
 
 /**
@@ -1667,6 +1713,8 @@ const StreetFighter: React.FC<{
             foeHp: 100,
             // Street cred is a modest real edge, exactly as the text version did.
             credEdge: Math.min(0.2, player.streetCred / 1000),
+            // Coffee, gum, a clear head. Reads the same stat the darts board does.
+            focus: player.focus,
         });
     }
 
