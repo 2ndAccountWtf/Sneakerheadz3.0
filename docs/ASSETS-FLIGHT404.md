@@ -1,3 +1,121 @@
+# Flight 404 — what is still needed
+
+**Read this section first. It supersedes the framing notes further down.**
+
+The cabin is now **one row of scenery standing behind the action**, and the
+game is played on an **aisle in front of it**. That single change fixes the
+scale problem that made the first delivery read wrong, and it changes what some
+of the remaining art has to be.
+
+```
+  y=0    ───────────────────────────────────────────  top of screen
+         (ceiling / dark)
+  y=48   ┌─────────────────────────────────────────┐
+         │  THE CABIN — one row, background         │  bg-<section>-mid
+         │  windows, seat backs, overhead bins      │  bg-<section>-far
+  y=128  └─────────────────────────────────────────┘  ← CABIN_BASE
+         ░░░ THE AISLE — everything playable ░░░       player, enemies,
+  y=164  ═════════════════════════════════════════     crates, food, livestock
+         (foreground lip)                              ← FLOOR_Y
+  y=198  ───────────────────────────────────────────  bottom of screen
+```
+
+**One rule the player learns: if it is on the aisle, it is real.** Anything in
+the cabin band is scenery and can never be shot, tripped over or stood on. That
+is why the background can be as detailed as you like without confusing anybody.
+
+## Scale, settled
+
+The screen is **352 × 198 world units**, drawn on a 960 × 540 canvas, so **1
+world unit = 2.727 device pixels**. The player is **28 units** (~175cm), which
+makes **1 unit ≈ 6cm**.
+
+| thing | world units | pixels, if you draw at 2.727× |
+|---|---|---|
+| the player, standing | 28 | 76 |
+| the aisle, floor to cabin base | 36 | 98 |
+| the cabin band, top to base | 80 | 218 |
+| a crate on the aisle | 20 | 55 |
+| a donkey crossing | 22 | 60 |
+
+Full-width strips stay **960 × 540** and are placed by the code.
+
+## 1. Still missing — 16 files
+
+These are on the list already and have not arrived. The crossings are the
+"random stuff that gets in your way" — they run down the aisle, in front of the
+cabin, and the player has to deal with them.
+
+**Crossings** (walk cycle + one balk beat each, facing right, mirrored in code):
+
+| id | size | frames |
+|---|---|---|
+| `cross-donkey` | 26 × 22 | 6 |
+| `cross-sheep` | 34 × 18 | 6 |
+| `cross-camel` | 32 × 34 | 8 |
+| `cross-goats` | 30 × 18 | 6 |
+| `cross-chickens` | 26 × 12 | 8 |
+| `cross-cart` | 30 × 24 | 6 |
+| `cross-tea` | 20 × 28 | 6 |
+| `cross-rug` | 44 × 26 | 6 |
+| `cross-bread` | 22 × 30 | 6 |
+| `cross-bicycle` | 26 × 24 | 6 |
+
+**Background residents** (stand still in the cabin band, never react):
+
+| id | size | frames |
+|---|---|---|
+| `bg-coffee-crew` | 34 × 26 | 6 |
+| `bg-donkey` | 26 × 22 | 6 |
+| `bg-sheep` | 30 × 18 | 6 |
+| `bg-porter` | 20 × 32 | 6 |
+| `bg-argument` | 28 × 26 | 6 |
+| `bg-duck` | — | 3 |
+
+## 2. Needs re-cutting — the near layer
+
+`bg-<section>-near` as delivered is a **full row of seat backs half a screen
+tall**. At this framing it stands between the camera and the aisle: the player
+fights behind a wall of upholstery and cannot see what they are shooting. It is
+currently **not drawn at all**, which is why the bottom of the screen is empty.
+
+Re-cut as a **thin foreground lip**: the very tops of the nearest seat backs, no
+more than **30 world units (82px)** tall, sitting along the bottom edge with
+transparency above. It should read as "the row you are running past", not as a
+room you are behind.
+
+## 3. New — the aisle itself
+
+The strip the game is played on has no art at all yet. This is the most
+valuable single file on this list, because it is on screen for the entire game.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `dress-aisle` | 64 × 40 | 1 | Tileable horizontally. Carpet, runner, the odd stain. The top edge is where the cabin base meets it and the bottom is the screen edge. |
+| `dress-aisle-wrecked` | 64 × 40 | 1 | Same, after a section has been fought through. Used in later cabins. |
+
+## 4. New — obstacles on the aisle
+
+Things the player has to get around, on their own plane. Each needs a rest pose
+and a knocked-over pose; the game already has the physics for spilling food.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `aisle-crate` | 20 × 20 | 1 | Cover you can shoot away. `crate.png` already delivered — this is the aisle-scale version if it reads too small. |
+| `aisle-luggage` | 24 × 18 | 1 | A case somebody abandoned. Trip hazard. |
+| `aisle-cart` | 22 × 26 | 1 | Parked drinks trolley. Already delivered as `cart.png`. |
+| `aisle-spill` | 30 × 8 | 3 | A slick you slide on. The hummus system already draws one; this is the authored version. |
+| `aisle-crate-broken` | 24 × 20 | 4 | Bursting apart. |
+| `aisle-luggage-open` | 28 × 18 | 4 | Contents everywhere. |
+
+## What is already delivered and working
+
+107 files, all loading. The cabins, the characters, the props, the drops, the
+explosions, the food and the enemy cast are in the game and animating. Run
+`npm run art` after any drop to see what landed.
+
+---
+
 # Flight 404 — asset list
 
 Everything the cabin overhaul needs, itemised. Delivery rules (format, palette,

@@ -17,6 +17,9 @@
  * Regenerate with `npm run art:frames` after editing the asset list.
  */
 export const SHEET_FRAMES: Record<string, number> = {
+    'aisle-crate-broken': 4,
+    'aisle-luggage-open': 4,
+    'aisle-spill': 3,
     'belt-segment': 4,
     'bg-argument': 6,
     'bg-balcony': 4,
