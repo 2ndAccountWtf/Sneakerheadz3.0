@@ -75,7 +75,28 @@ export const ART_SCALE = ZOOM;
  * it is smaller. The cabin plates therefore tile upward from the floor line
  * rather than being stretched, which is what `buildScenery` does with this.
  */
-export const PLATE_SHRINK = 2.3;
+export const PLATE_SHRINK = 1;
+
+/**
+ * How much bigger a drawn character is than its collision box.
+ *
+ * The delivered cabins are framed for a more zoomed-in game than this one: a
+ * seat back in a plate is about 70 world units and the player's body is 26, so
+ * he reads as knee-high. Shrinking the plates to fix that breaks them, because
+ * a plate is a composition — ceiling, window band, seats, floor, once — and
+ * anything that makes it smaller either crops it or tiles it into a
+ * double-decker aeroplane with no identifiable floor.
+ *
+ * So the drawing grows instead of the cabin shrinking. Only the sprite is
+ * scaled; the arcade body, the jump arc, the tier heights and every test stay
+ * in world units and are untouched. A sprite larger than its hitbox is the
+ * forgiving direction — shots that look like they should miss do miss — and it
+ * is what most of this genre does anyway.
+ *
+ * This is a stopgap for art framed at the wrong zoom, not a permanent feature:
+ * re-framed plates want it back at 1.
+ */
+export const FIGURE_SCALE = 1.7;
 
 /** The aisle carpet — every character's feet line, and the arcade world floor. */
 export const FLOOR_Y = 164;

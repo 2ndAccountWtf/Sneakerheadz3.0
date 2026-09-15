@@ -605,6 +605,67 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
          * delivered set rather than a palette entry, and it fails to the right
          * colour instead of to a visible one.
          */
+        /**
+         * The size to draw a delivered texture at, in world units.
+         *
+         * Art arrives either at world size or at ART_SCALE, and the difference
+         * is a factor of 2.7 — which is the difference between a health pickup
+         * and a health pickup the size of a seat. Rather than demand a
+         * convention in the filename, the reading nearest the size the game
+         * asked for wins, and a texture that is neither is drawn at the asked
+         * size. Coded placeholders have no natural size and fall through to the
+         * same answer.
+         */
+        private artSize(key: string, w: number, h: number): [number, number] {
+            const tex = this.textures.get(key);
+            const src = tex?.getSourceImage() as { width: number; height: number } | undefined;
+            if (!src?.height) return [w, h];
+            const frames = Math.max(1, tex.frameTotal - 1);
+            const natW = src.width / frames;
+            const natH = src.height;
+            const near = Math.abs(natH - h) <= Math.abs(natH / ZOOM - h);
+            const k = near ? 1 : 1 / ZOOM;
+            // Only trust the art's own proportions when they are in the right
+            // ballpark; anything wilder is a mis-sized delivery and the game's
+            // own number is the safer answer.
+            const outH = natH * k;
+            return outH > h * 0.4 && outH < h * 3 ? [natW * k, outH] : [w, h];
+        }
+
+        /**
+         * Which rows of a plate actually have anything drawn on them.
+         *
+         * Delivered plates are mostly empty canvas — about 59% transparent —
+         * and the drawing sits in a band somewhere in the middle. Placing the
+         * whole 540px image puts that band wherever the exporter happened to
+         * leave it; placing the *band* puts it on the floor.
+         *
+         * Sampled rather than decoded, because this runs per section at load
+         * and the answer only needs to be right to within a row or two.
+         */
+        private contentBand(key: string): { top: number; h: number } {
+            const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
+            if (!src?.height) return { top: 0, h: 1 };
+            const ROWS = 60, COLS = 12;
+            let first = -1, last = -1;
+            for (let r = 0; r < ROWS; r++) {
+                const y = Math.min(src.height - 1, Math.floor((r + 0.5) * src.height / ROWS));
+                let ink = false;
+                for (let c = 0; c < COLS && !ink; c++) {
+                    const x = Math.min(src.width - 1, Math.floor((c + 0.5) * src.width / COLS));
+                    const px = this.textures.getPixel(x, y, key);
+                    if (px && px.alpha > 24) ink = true;
+                }
+                if (ink) { if (first < 0) first = r; last = r; }
+            }
+            if (first < 0) return { top: 0, h: 1 };
+            const top = first / ROWS;
+            // One row of slack at the bottom, so a band that ends on a sampled
+            // row is not clipped by the rounding.
+            const bottom = Math.min(1, (last + 1.5) / ROWS);
+            return { top, h: Math.max(0.05, bottom - top) };
+        }
+
         private wallTone(key: string): number {
             let r = 0, g = 0, b = 0, n = 0;
             const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
@@ -654,25 +715,40 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
              * whole "a half-delivered set is not a broken build" promise, and it
              * is one `if`.
              */
-            const plate = (suffix: string, factor: number, depth: number): boolean => {
+            /**
+             * One delivered plate, placed on the floor line.
+             *
+             * The obvious thing — shrink it and tile it to fill the screen —
+             * is wrong, and wrong in a way that is worth writing down because
+             * it looked plausible in code. A cabin plate is a *composition*:
+             * ceiling, window band, seat backs, floor, in that order, once.
+             * Tiling it vertically stacks that composition, so the player sees
+             * windows above and below at the same time, seats facing two ways,
+             * and no floor they can identify. It reads as a double-decker
+             * aeroplane with the lights off.
+             *
+             * So each plate is cropped to the band it actually draws in and
+             * anchored to the row that has to line up — the aisle the player
+             * walks along. It tiles horizontally, because a cabin genuinely
+             * does repeat along its length, and never vertically, because it
+             * does not repeat upward.
+             */
+            const plate = (suffix: string, factor: number, depth: number, sitOn: number): boolean => {
                 const key = T(`bg-${def.art}-${suffix}`);
                 if (!this.textures.exists(key)) return false;
 
-                // Shrunk to put the drawn furniture on the same scale as the
-                // characters — see PLATE_SHRINK. The sprite still covers the
-                // whole view and the texture simply repeats inside it, so the
-                // cabin gains windows across instead of gaining a gap.
+                const band = this.contentBand(key);
+                const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
                 const scale = 1 / (ZOOM * PLATE_SHRINK);
-                const ts = this.add.tileSprite(0, 0, VIEW_W, VIEW_H, key).setOrigin(0, 0);
+                const drawnH = src.height * band.h * scale;
+
+                const ts = this.add.tileSprite(0, sitOn - drawnH, VIEW_W, drawnH, key).setOrigin(0, 0);
                 ts.setTileScale(scale, scale);
-                // Tiling starts from the floor rather than from the top of the
-                // screen, so the one row that has to line up — the one the
-                // player walks along — always does, and any repeat happens up
-                // in the ceiling where nothing is standing.
-                ts.tilePositionY = -(VIEW_H - FLOOR_Y) / scale;
+                // Show only the band that has ink in it, so the empty canvas
+                // above and below the drawing never becomes a visible seam.
+                ts.tilePositionY = src.height * band.top;
                 ts.setDepth(depth);
                 ts.setData('factor', factor);
-                ts.setData('full', true);
                 this.layers.push(ts);
                 return true;
             };
@@ -691,10 +767,13 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // Far is almost still, mid drifts, near keeps pace with the player
             // and draws in *front* of everything — it is the row of seats you
             // run behind, which is what gives a flat cabin any depth at all.
+            // far and mid are the cabin itself, so they stand on the aisle.
+            // near is the row of seats the player runs behind, so it hangs off
+            // the bottom of the screen rather than off the floor.
             const drawn = [
-                plate('far', 0.22, -8),
-                plate('mid', 0.55, -6),
-                plate('near', 1.06, 50),
+                plate('far', 0.22, -8, FLOOR_Y),
+                plate('mid', 0.55, -6, FLOOR_Y),
+                plate('near', 1.06, 50, VIEW_H + 2),
             ];
             if (drawn.some(Boolean)) {
                 // Anything the delivered set is missing still comes from the
@@ -1404,10 +1483,19 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const r = this.rng.frac();
             if (r > 0.68) return;
             const kind = r < 0.46 ? 'bureka' : 'redbull';
-            const k = this.pickups.get(x, FLOOR_Y - 40, kind === 'bureka' ? TG('bureka') : TG('juice')) as Img;
+            // The delivered drop art wins over the emoji glyph when it exists.
+            // `drop-health` and `drop-speed` are the asset-list names for these
+            // two; the glyphs stay as the fallback so a partial delivery is
+            // still a playable game.
+            const art = kind === 'bureka' ? T('drop-health') : T('drop-speed');
+            const key = this.textures.exists(art)
+                ? art
+                : (kind === 'bureka' ? TG('bureka') : TG('juice'));
+            const k = this.pickups.get(x, FLOOR_Y - 40, key) as Img;
             if (!k) return;
+            k.setTexture(key);
             k.setActive(true).setVisible(true).setDepth(12);
-            k.setDisplaySize(10, 10);
+            k.setDisplaySize(...this.artSize(key, 10, 10));
             k.setData('kind', kind);
             const b = body(k);
             b.setEnable(true);

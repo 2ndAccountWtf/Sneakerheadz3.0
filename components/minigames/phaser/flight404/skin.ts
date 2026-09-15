@@ -26,7 +26,7 @@
 import type * as PhaserNS from 'phaser';
 import { T } from './textures';
 import { animKey } from './artLoader';
-import { ZOOM } from './content';
+import { ZOOM, FIGURE_SCALE } from './content';
 import type { BlockFigure } from './figure';
 
 /** What each role can be doing, and the sprite id for it. */
@@ -141,7 +141,9 @@ export function attachSkin(
             // both deliveries look right without a flag in the filename.
             const texH = sprite.frame.height;
             const scale = Math.abs(texH - height) <= Math.abs(texH / ZOOM - height) ? 1 : 1 / ZOOM;
-            sprite.setScale(scale);
+            // Feet stay on the floor because the origin is the feet, so growing
+            // a figure lifts its head rather than sinking it through the aisle.
+            sprite.setScale(scale * FIGURE_SCALE);
         },
     };
     skin.play('idle', 1);
