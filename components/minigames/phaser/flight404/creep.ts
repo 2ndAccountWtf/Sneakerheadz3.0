@@ -37,6 +37,23 @@ export interface CreepTier {
     density: number;
     /** Scenery strips this tier dresses the cabin with. */
     dressing: string[];
+    /**
+     * Which of the admitted kinds are the *joke* rather than the furniture, and
+     * how many of them one section may hold.
+     *
+     * Density alone cannot express this. A tier needs enough bodies in it to
+     * feel busier than the tier before — that is the escalation, and it is
+     * measured on density at a fixed length — but "busier" and "weirder" are
+     * not the same axis, and the `wrong` tier is precisely where they come
+     * apart. Six people in a galley is correct. Two donkeys in it is not: the
+     * second one answers the question the first one asked.
+     *
+     * So the budget stays, and the anomalies are rationed inside it. Everything
+     * admitted and not listed here is a staple, and staples fill whatever the
+     * ration does not. Absent means no rationing — by `shuk` the weirdness is
+     * the furniture and there is nothing left to ration.
+     */
+    ration?: { kinds: ActorKind[]; max: number };
 }
 
 export const CREEP: Record<Creep, CreepTier> = {
@@ -55,12 +72,19 @@ export const CREEP: Record<Creep, CreepTier> = {
      * Still recognisably an aircraft, with exactly one thing in it that has no
      * business being there. One is the correct number: two men and a donkey is
      * a bazaar, one man and a donkey is a question.
+     *
+     * The cabin is fuller than the last one — that is the escalation, and it
+     * has to be visible — but the extra bodies are passengers. Only one of them
+     * is the joke, and the ration below is what keeps it that way. Without it
+     * this tier shipped two donkeys and a coffee service, which is the next
+     * tier arriving a section early and the question never being asked.
      */
     wrong: {
         reads: 'I am on a plane. Why is there a donkey.',
         admits: ['balcony', 'coffee', 'donkey', 'sweeper'],
         density: 0.9,
         dressing: ['seats', 'bins', 'galleywall', 'carpet', 'rug'],
+        ration: { kinds: ['coffee', 'donkey', 'sweeper'], max: 1 },
     },
 
     /**
@@ -87,6 +111,24 @@ export const CREEP: Record<Creep, CreepTier> = {
 };
 
 export const admits = (c: Creep, kind: ActorKind): boolean => CREEP[c].admits.includes(kind);
+
+/** Is this kind the joke in this tier, rather than the furniture around it? */
+export const isAnomaly = (c: Creep, kind: ActorKind): boolean =>
+    CREEP[c].ration?.kinds.includes(kind) ?? false;
+
+/** How many jokes one section of this tier may hold. */
+export const anomalyBudget = (c: Creep): number => CREEP[c].ration?.max ?? Infinity;
+
+/**
+ * What fills a section once its ration is spent. The staples are whatever the
+ * tier admits and does not ration; a tier that rations everything it admits
+ * would have nothing to fall back on, so that is a mistake worth catching here
+ * rather than as an empty background at run time.
+ */
+export const staples = (c: Creep): ActorKind[] => {
+    const rest = CREEP[c].admits.filter((k) => !isAnomaly(c, k));
+    return rest.length ? rest : CREEP[c].admits;
+};
 
 /** How many background actors a section of this length should carry. */
 export const actorBudget = (c: Creep, length: number): number =>

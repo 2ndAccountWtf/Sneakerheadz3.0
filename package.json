@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx tests/engine.test.mts && tsx tests/world.test.mts && tsx tests/digestion.test.mts && tsx tests/market.test.mts && tsx tests/money.test.mts && tsx tests/npc.test.mts && tsx tests/hoops.test.mts && tsx tests/hoops-roster.test.mts && tsx tests/hoops-attributes.test.mts && tsx tests/ampm.test.mts && tsx tests/rumors.test.mts && tsx tests/content.test.mts && tsx tests/bust.test.mts && tsx tests/hooks.test.mts && tsx tests/save.test.mts && tsx tests/authenticity.test.mts && tsx tests/fighter.test.mts && tsx tests/rep-economy.test.mts && tsx tests/hospital.test.mts && tsx tests/flight404.test.mts && tsx tests/flight404-projectiles.test.mts && tsx tests/flight404-cast.test.mts && tsx tests/flight404-assets.test.mts"
+    "test": "tsx tests/engine.test.mts && tsx tests/world.test.mts && tsx tests/digestion.test.mts && tsx tests/market.test.mts && tsx tests/money.test.mts && tsx tests/npc.test.mts && tsx tests/hoops.test.mts && tsx tests/hoops-roster.test.mts && tsx tests/hoops-attributes.test.mts && tsx tests/ampm.test.mts && tsx tests/rumors.test.mts && tsx tests/content.test.mts && tsx tests/bust.test.mts && tsx tests/hooks.test.mts && tsx tests/save.test.mts && tsx tests/authenticity.test.mts && tsx tests/fighter.test.mts && tsx tests/rep-economy.test.mts && tsx tests/hospital.test.mts && tsx tests/flight404.test.mts && tsx tests/flight404-projectiles.test.mts && tsx tests/flight404-cast.test.mts && tsx tests/flight404-assets.test.mts && tsx tests/flight404-backdrop.test.mts"
   },
   "dependencies": {
     "phaser": "^4.2.1",
