@@ -31,6 +31,11 @@ import {
 } from '../components/minigames/phaser/flight404/spawners.ts';
 import { GRAVITY, JUMP_V, FLOOR_Y, BIN_FEET, PLAYER_H } from '../components/minigames/phaser/flight404/content.ts';
 import { rngFor } from '../utils/rng.ts';
+import { SECTIONS } from '../components/minigames/phaser/flight404/content.ts';
+import {
+    CREEP, CREEP_ORDER, creepRank, admits, actorBudget, neverRetreats, firstTurn,
+    type Creep,
+} from '../components/minigames/phaser/flight404/creep.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -240,6 +245,89 @@ t('a ducking actor performs nothing until it stands up', () => {
     let s = { ...openActor({ kind: 'coffee', x: 0 }, rngFor('q')), timer: 0, ducking: DUCK.hold };
     const r = stepActor(s, 1 / 60, rngFor('q2'));
     assert.equal(r.beat, null, 'it performed its bit while face-down');
+});
+
+console.log('\nthe plane slowly stops being a plane');
+
+t('the weirdness never retreats', () => {
+    // The rule the whole joke rests on. Going back to a normal cabin after a
+    // shuk does not read as variety, it reads as the level forgetting itself —
+    // and it spends an escalation you cannot get back.
+    const order = SECTIONS.map(s => s.creep);
+    assert.ok(neverRetreats(order), `the curve goes backwards: ${order.join(' -> ')}`);
+});
+
+t('it starts as an ordinary plane, and ends as neither', () => {
+    // If section one is already a bazaar there is no "wait, what" to have.
+    assert.equal(SECTIONS[0].creep, 'plane', 'the first section spends the joke before it is set up');
+    assert.equal(SECTIONS[SECTIONS.length - 1].creep, 'bedlam', 'it never fully arrives anywhere');
+});
+
+t('the wait-what lands early enough to matter', () => {
+    // A turn that arrives in the last section is a turn nobody sees.
+    const turn = firstTurn(SECTIONS.map(s => s.creep));
+    assert.ok(turn > 0, 'nothing is ever normal, so nothing is ever strange');
+    assert.ok(turn <= 2, `the first strange thing is section ${turn + 1} — too late to be a turn`);
+});
+
+t('the curve actually climbs rather than sitting flat', () => {
+    const ranks = SECTIONS.map(s => creepRank(s.creep));
+    assert.ok(Math.max(...ranks) - Math.min(...ranks) >= 2, 'the level barely changes across its whole length');
+});
+
+t('a donkey cannot appear before the joke is set up', () => {
+    // One wrong thing at a time. A donkey in Economy spends the turn early.
+    assert.equal(admits('plane', 'donkey'), false, 'there is a donkey in row 30');
+    assert.equal(admits('plane', 'shawarma'), false, 'somebody is carving in Economy');
+    assert.equal(admits('wrong', 'donkey'), true, 'the turn has nothing strange in it');
+});
+
+t('the market only opens once the cabin has lost', () => {
+    assert.equal(admits('wrong', 'shawarma'), false, 'a full stand appeared during the hint');
+    assert.equal(admits('shuk', 'shawarma'), true);
+    assert.equal(admits('shuk', 'sheep'), true);
+});
+
+t('every tier admits something, and later tiers admit more', () => {
+    let last = -1;
+    for (const c of CREEP_ORDER) {
+        const n = CREEP[c].admits.length;
+        assert.ok(n > 0, `${c} has an empty world`);
+        assert.ok(n >= last, `${c} admits fewer kinds than the tier before it`);
+        last = n;
+    }
+});
+
+t('the cabin gets more crowded as it gets stranger', () => {
+    for (let i = 1; i < CREEP_ORDER.length; i++) {
+        assert.ok(CREEP[CREEP_ORDER[i]].density > CREEP[CREEP_ORDER[i - 1]].density,
+            `${CREEP_ORDER[i]} is no busier than ${CREEP_ORDER[i - 1]}`);
+    }
+});
+
+t('every section gets a workable number of actors', () => {
+    for (const s of SECTIONS) {
+        const n = actorBudget(s.creep, s.length);
+        assert.ok(n >= 1, `${s.name} has an empty background`);
+        assert.ok(n < 60, `${s.name} wants ${n} actors — that is a crowd, not a background`);
+    }
+});
+
+t('every tier says what the player should be thinking', () => {
+    // The design intent lives with the data, so a later pass cannot quietly
+    // dress a tier against the wrong feeling.
+    for (const c of CREEP_ORDER) assert.ok(CREEP[c].reads.length > 8, `${c} has no stated intent`);
+});
+
+t('every section is dressed with something', () => {
+    for (const c of CREEP_ORDER) assert.ok(CREEP[c].dressing.length > 0, `${c} is an empty room`);
+});
+
+t('a retreating order is caught, not tolerated', () => {
+    // Guard the guard: if neverRetreats always returned true it would prove
+    // nothing about the sections above.
+    assert.equal(neverRetreats(['plane', 'shuk', 'wrong'] as Creep[]), false);
+    assert.equal(neverRetreats(['plane', 'plane', 'shuk'] as Creep[]), true, 'two of the same tier is a longer stretch, not a retreat');
 });
 
 console.log('\nthings that break');

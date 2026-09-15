@@ -151,6 +151,12 @@ export interface SectionDef {
     /** Unpowered stretch — see the darkness model in gameScene.ts. */
     dark: boolean;
     boss?: boolean;
+    /**
+     * How far this stretch has stopped being a plane. See `creep.ts` — the
+     * level is a gradient from "I am on a plane" to "this is a market and I am
+     * also still on a plane", and it only ever goes up.
+     */
+    creep: import('./creep').Creep;
     mooks: SpawnDef[];
     hostages: number[];
     /** Drinks trolleys parked in the aisle; real static bodies, real cover. */
@@ -161,7 +167,9 @@ export const SECTIONS: SectionDef[] = [
     {
         name: 'ECONOMY',
         tag: 'ROWS 30-44 — THE SMELL IS TAHINI',
-        length: 760, dark: false,
+        // A plane. Nothing is wrong yet, and nothing should be: this section
+        // exists so the next one can be wrong. The tahini is the only clue.
+        length: 760, dark: false, creep: 'plane',
         mooks: [
             { kind: 'charger', x: 210 },
             { kind: 'thrower', x: 330, perch: true },
@@ -175,7 +183,11 @@ export const SECTIONS: SectionDef[] = [
     {
         name: 'THE GALLEY',
         tag: 'POWER IS OUT — SOMEONE PULLED A BREAKER',
-        length: 640, dark: true,
+        // The turn. Still an aircraft galley, except a man is brewing coffee on
+        // a fingjan next to his donkey and has not acknowledged the power cut.
+        // One wrong thing, not five — one man and a donkey is a question, two
+        // men and a donkey is a bazaar and the joke is spent early.
+        length: 640, dark: true, creep: 'wrong',
         mooks: [
             { kind: 'trolley', x: 190 },
             { kind: 'charger', x: 300 },
@@ -189,7 +201,9 @@ export const SECTIONS: SectionDef[] = [
     {
         name: 'BUSINESS CLASS',
         tag: 'THE LIE-FLATS ARE FULLY OCCUPIED',
-        length: 820, dark: false,
+        // The cabin has lost. Cloth strung between the lie-flats, a shawarma
+        // spit where the bar cart was, stalls in the aisle, everybody talking.
+        length: 820, dark: false, creep: 'shuk',
         mooks: [
             { kind: 'charger', x: 200 },
             { kind: 'thrower', x: 290, perch: true },
@@ -205,7 +219,8 @@ export const SECTIONS: SectionDef[] = [
     {
         name: 'THE COCKPIT',
         tag: 'HE IS SHOUTING AT THE AUTOPILOT',
-        length: VIEW_W, dark: false, boss: true,
+        // Everyone is here and nobody is helping.
+        length: VIEW_W, dark: false, boss: true, creep: 'bedlam',
         mooks: [],
         hostages: [],
         trolleys: [300],
