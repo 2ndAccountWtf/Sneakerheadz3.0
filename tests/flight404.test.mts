@@ -14,10 +14,16 @@
 import assert from 'node:assert/strict';
 import {
     JUMP_PEAK, MAX_STEP, HOP_MARGIN, TIER, canHop, unreachable, surfaces,
-    blocksRunning, headroom, moverAt, isRideable,
-    PROP_HP, PROP_DROP_CHANCE,
-    type PlatformDef, type MoverDef, type PropKind,
+    blocksRunning, headroom, type PlatformDef,
 } from '../components/minigames/phaser/flight404/terrain.ts';
+import {
+    PROP_HP, PROP_DROP_CHANCE, PROP_BLAST, PROP_ART, artFor, isHurt, type PropKind,
+} from '../components/minigames/phaser/flight404/props.ts';
+import { EXPLOSIONS, caughtInBlast } from '../components/minigames/phaser/flight404/explosions.ts';
+import { moverAt, isRideable, cycleTime, type MoverDef } from '../components/minigames/phaser/flight404/movers.ts';
+import {
+    openSpawner, stepSpawner, spent, inRange, DEFAULT_RANGE, type SpawnerDef,
+} from '../components/minigames/phaser/flight404/spawners.ts';
 import { GRAVITY, JUMP_V, FLOOR_Y, BIN_FEET, PLAYER_H } from '../components/minigames/phaser/flight404/content.ts';
 
 let pass = 0;
@@ -134,6 +140,49 @@ t('a seat-back screen is destroyed for pleasure, not for loot', () => {
     assert.equal(PROP_DROP_CHANCE.monitor, 0, 'the screens became a farming strategy');
 });
 
+t('a prop looks damaged before it dies', () => {
+    // The three-state shape, taken from how the Metal Slug clones model
+    // obstacles: idle -> hit -> blast. A thing that vanishes at full health
+    // gives the player nothing to read.
+    assert.equal(artFor('cart', PROP_HP.cart), PROP_ART.cart.idle, 'an untouched trolley already looks wrecked');
+    assert.equal(artFor('cart', 1), PROP_ART.cart.hit, 'a nearly-dead trolley still looks fine');
+    assert.equal(isHurt('cart', PROP_HP.cart), false);
+    assert.equal(isHurt('cart', 1), true);
+});
+
+t('every prop names a blast from the shared library', () => {
+    const kinds: PropKind[] = ['crate', 'cart', 'cooler', 'binDoor', 'monitor'];
+    for (const k of kinds) {
+        assert.ok(EXPLOSIONS[PROP_BLAST[k]], `${k} explodes with something that does not exist`);
+    }
+});
+
+t('the heavy props go out on the big blast', () => {
+    assert.equal(PROP_BLAST.cart, 'big');
+    assert.equal(PROP_BLAST.cooler, 'big');
+    assert.equal(PROP_BLAST.monitor, 'tiny', 'a seat screen levelled the cabin');
+});
+
+console.log('\nblasts');
+
+t('a bigger blast shakes harder, hurts wider and lasts longer', () => {
+    const [tiny, small, big] = [EXPLOSIONS.tiny, EXPLOSIONS.small, EXPLOSIONS.big];
+    assert.ok(big.shake > small.shake && small.shake > tiny.shake, 'shake is not ordered');
+    assert.ok(big.hurtRadius > small.hurtRadius, 'the big one is not more dangerous');
+    assert.ok(big.duration > small.duration && small.duration > tiny.duration, 'duration is not ordered');
+});
+
+t('a cosmetic blast cannot hurt anybody', () => {
+    assert.equal(EXPLOSIONS.tiny.hurtRadius, 0);
+    assert.equal(EXPLOSIONS.tiny.damage, 0);
+    assert.equal(caughtInBlast('tiny', 0), false, 'breaking a screen injured somebody');
+});
+
+t('standing outside the radius is safe, inside is not', () => {
+    assert.equal(caughtInBlast('big', EXPLOSIONS.big.hurtRadius - 1), true);
+    assert.equal(caughtInBlast('big', EXPLOSIONS.big.hurtRadius + 1), false);
+});
+
 console.log('\nthings that move');
 
 const belt: MoverDef = { kind: 'belt', from: 100, to: 300, y: TIER.counter, speed: 50, dwell: 1 };
@@ -178,6 +227,79 @@ t('a runaway trolley is not something you stand on', () => {
     assert.equal(isRideable({ kind: 'runaway', from: 0, to: 100, speed: 90 }), false);
     assert.equal(isRideable(belt), true);
     assert.equal(isRideable({ kind: 'binSwing', from: 0, to: 20, speed: 10 }), true);
+});
+
+console.log('\nwaves, instead of a memorisable gauntlet');
+
+const def: SpawnerDef = { x: 300, roster: ['charger', 'thrower'], interval: 2, total: 4 };
+
+t('a spawner sleeps until the player is near', () => {
+    let s = openSpawner(def);
+    for (let i = 0; i < 40; i++) {
+        const r = stepSpawner(s, 1 / 60, 0);   // player miles away
+        s = r.state;
+        assert.equal(r.spawn, null, 'it produced from across the cabin');
+    }
+    assert.equal(s.awake, false);
+});
+
+t('it never produces on the frame it wakes', () => {
+    // Arriving the instant you cross an invisible line reads as a cheat.
+    const r = stepSpawner(openSpawner(def), 1 / 60, def.x);
+    assert.equal(r.state.awake, true, 'it did not wake up next to the player');
+    assert.equal(r.spawn, null, 'an enemy appeared the moment the trigger tripped');
+});
+
+t('once awake it produces on its interval, and then stops', () => {
+    let s = openSpawner(def);
+    let made = 0;
+    for (let i = 0; i < 60 * 60; i++) {
+        const r = stepSpawner(s, 1 / 60, def.x);
+        s = r.state;
+        if (r.spawn) made++;
+    }
+    assert.equal(made, def.total, `a wave of ${def.total} produced ${made}`);
+    assert.equal(spent(s), true, 'the spawner is still hungry');
+});
+
+t('a wave is readable — the roster comes round in order', () => {
+    let s = openSpawner(def);
+    const seen: string[] = [];
+    for (let i = 0; i < 60 * 60 && seen.length < 4; i++) {
+        const r = stepSpawner(s, 1 / 60, def.x);
+        s = r.state;
+        if (r.spawn) seen.push(r.spawn);
+    }
+    assert.deepEqual(seen, ['charger', 'thrower', 'charger', 'thrower'], `got ${seen.join(',')}`);
+});
+
+t('two spawners in one section do not fire in lockstep', () => {
+    // Staggered on open, so a section does not arrive in one lump.
+    assert.ok(openSpawner(def).timer > 0, 'a spawner opens ready to fire');
+    assert.ok(openSpawner(def).timer < def.interval, 'a spawner opens a full interval behind');
+});
+
+t('range is honoured, and has a default', () => {
+    const s = openSpawner({ ...def, range: undefined });
+    assert.equal(inRange(s, def.x + DEFAULT_RANGE - 1), true);
+    assert.equal(inRange(s, def.x + DEFAULT_RANGE + 1), false);
+    // From either side — a spawner behind you is the point.
+    assert.equal(inRange(s, def.x - DEFAULT_RANGE + 1), true);
+});
+
+t('a spent spawner stays quiet forever', () => {
+    let s = { ...openSpawner(def), produced: def.total };
+    for (let i = 0; i < 600; i++) {
+        const r = stepSpawner(s, 1 / 60, def.x);
+        s = r.state;
+        assert.equal(r.spawn, null, 'a spent spawner started up again');
+    }
+});
+
+t('a mover reports its own cycle time', () => {
+    const belt2: MoverDef = { kind: 'belt', from: 0, to: 200, speed: 50, dwell: 1 };
+    assert.equal(cycleTime(belt2), (200 / 50 + 1) * 2);
+    assert.equal(cycleTime({ kind: 'belt', from: 5, to: 5, speed: 10 }), 0);
 });
 
 console.log(`\n${pass} flight-404 checks passed.\n`);
