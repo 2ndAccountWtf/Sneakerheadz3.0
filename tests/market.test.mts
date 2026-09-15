@@ -23,7 +23,7 @@ import {
     scarcityFor, localStock, referenceAsk, addLocalStock,
 } from '../systems/market/simulate.ts';
 import { tagsFor } from '../systems/market/taxonomy.ts';
-import { getCityMarketPrice, getSellPrice } from '../systems/pricing.ts';
+import { getCityMarketPrice, getSellPrice, honestBid } from '../systems/pricing.ts';
 import { gameReducer } from '../hooks/useGame.ts';
 import { CITY_PROFILES, profileFor } from '../systems/market/cityProfiles.ts';
 
@@ -425,13 +425,16 @@ t('a city with nothing on the shelf still knows what a shoe is worth', () => {
  * `pricing.ts` takes a whole GameState and most of these checks only have a
  * market.
  *
- * A duplicate is a liability, and this one already cost us. For a long time
- * `getCityMarketPrice` did something else entirely — `max(posted price)`, no
- * scarcity, no spread, no cap — so the same-city round trip these checks call
- * impossible was live in the game at up to +27%. They passed throughout,
- * because they were only ever testing this local copy. The section at the end
- * of this file drives the actual function, and that is the one that would have
- * caught it.
+ * Read the divergence carefully, because it is now intentional. This helper is
+ * the *honest* formula — it matches `systems/pricing.ts#honestBid`, and the
+ * checks below that use it describe a market with the spread closed. The
+ * function the game actually calls, `getCityMarketPrice`, deliberately does not:
+ * it pays the highest posted shelf while you buy at the lowest, which is the
+ * Red October glitch, kept on purpose. See "the Red October glitch, on purpose"
+ * at the end of this file, whose checks fail if that glitch is ever removed.
+ *
+ * So: checks built on this helper are about the market's *shape*. Checks about
+ * what the player can actually do with money must call the real function.
  */
 const BID_ASK = 0.9;
 const sellValue = (market: ReturnType<typeof seedWorld>[string], sneakerId: string): number => {
@@ -716,13 +719,14 @@ t('Tel Aviv is the cheap deep market and Paris is the thin expensive one', () =>
     assert.ok(profileFor('tel-aviv').fakeRate > profileFor('paris').fakeRate);
 });
 
-console.log('\nthe real sell price, not a copy of it');
+console.log('\nthe Red October glitch, on purpose');
 
-t('you cannot buy a pair and sell it back in the same city for a profit', () => {
-    // The check that matters, against the function the game actually calls.
-    // `getCityMarketPrice` is what every sell path reads — the bag's Sell
-    // button, the street screen, the collectors screen — so this is the rule as
-    // the player meets it, not as a test helper restates it.
+t('the same-city flip still pays, because it is meant to', () => {
+    // A money glitch, kept deliberately. `getCityMarketPrice` pays the highest
+    // posted shelf price while you buy at the lowest, so the ±6% tab spread is
+    // free money to anyone who notices. This check FAILS IF THE GLITCH GOES
+    // AWAY: it exists so a future tidy-up of that function cannot quietly
+    // remove a thing the game wants.
     let tested = 0;
     let profitable = 0;
     let best = -Infinity;
@@ -749,40 +753,56 @@ t('you cannot buy a pair and sell it back in the same city for a profit', () => 
     }
 
     assert.ok(tested > 300, `only ${tested} buyable models — the check proves little`);
-    assert.equal(profitable, 0, `${profitable} of ${tested} models flip on the spot for a profit`);
-    assert.ok(best < 0, `the best same-city round trip makes ${(best * 100).toFixed(1)}%`);
+    assert.ok(profitable > 0, 'the same-city flip no longer pays — the glitch has been patched out');
+    assert.ok(best > 0.1, `the best flip only makes ${(best * 100).toFixed(1)}% — the glitch has been watered down`);
+    // And a ceiling, so "deliberate exploit" never drifts into "the only way to
+    // play". If this trips, the spread has widened somewhere it should not.
+    assert.ok(best < 0.6, `the best flip makes ${(best * 100).toFixed(1)}% — that is past a glitch and into a printer`);
+    assert.ok(profitable / tested < 0.4, `${Math.round(100 * profitable / tested)}% of models flip — it should be a secret, not the whole board`);
 });
 
-t('the bid is never above the cheapest shelf in town', () => {
-    // The structural half of the same rule: whatever scarcity is doing, nobody
-    // pays you more than the shop down the road is charging.
-    const markets = seedWorld(rng(34));
-    for (const c of CITIES) {
-        const state = {
-            markets, currentCityId: c.id, day: 1,
-            activeMarketSignals: [], player: { buffs: [], inventory: [] },
-        } as never;
+t('the honest formula is still there and still closes the spread', () => {
+    // `honestBid` is the swap-in if the glitch is ever retired. Kept as live,
+    // tested code rather than prose in a commit message.
+    let tested = 0;
+    let profitable = 0;
+    let best = -Infinity;
 
-        for (const sn of SNEAKERS) {
-            const posted = referenceAsk(markets[c.id], sn.id);
-            if (posted === undefined) continue;
-            const bid = getCityMarketPrice(state, sn.id);
-            if (bid === undefined) continue;
-            assert.ok(bid <= posted, `${c.id}/${sn.id}: bid ${bid} beats the ${posted} shelf`);
+    for (const seed of [33, 34]) {
+        const markets = seedWorld(rng(seed));
+        for (const c of CITIES) {
+            const state = {
+                markets, currentCityId: c.id, day: 1,
+                activeMarketSignals: [], player: { buffs: [], inventory: [] },
+            } as never;
+            for (const sn of SNEAKERS) {
+                const ask = bestAsk(markets[c.id], sn.id);
+                if (ask === undefined) continue;
+                const bid = honestBid(state, sn.id);
+                if (bid === undefined) continue;
+                tested++;
+                if (bid > ask) profitable++;
+                best = Math.max(best, (bid - ask) / ask);
+            }
         }
     }
+
+    assert.ok(tested > 100, `only ${tested} models priced`);
+    assert.equal(profitable, 0, `${profitable} of ${tested} flip even under the honest formula`);
+    assert.ok(best < 0, `the honest formula still leaves ${(best * 100).toFixed(1)}% on the table`);
 });
 
-t('every model is worth something everywhere', () => {
-    // The old implementation returned undefined when no listing existed, so a
-    // model nobody in town stocks was worth nothing at all. The index knows.
+t('the honest formula prices a model nobody in town stocks', () => {
+    // The glitch version returns undefined when no listing exists, which is why
+    // `getBagValue` needs a base-price fallback. The honest one reads the index
+    // and always has an answer.
     const markets = seedWorld(rng(12));
     const state = {
         markets, currentCityId: CITIES[0].id, day: 1,
         activeMarketSignals: [], player: { buffs: [], inventory: [] },
     } as never;
     for (const sn of SNEAKERS) {
-        assert.ok((getCityMarketPrice(state, sn.id) ?? 0) > 0, `${sn.id} is worth nothing anywhere`);
+        assert.ok((honestBid(state, sn.id) ?? 0) > 0, `${sn.id} is worth nothing anywhere`);
     }
 });
 

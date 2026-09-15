@@ -79,34 +79,54 @@ export function getSellPrice(marketPrice: number, item: InventoryItem, player: P
 }
 
 /**
- * What the city will pay you for a model today — the bid, not the ask.
+ * What a model fetches in the player's city — the highest posted shelf price.
  *
- * This used to return `max(posted listing prices)`: the most expensive shelf in
- * town, with no scarcity, no spread, no cap, and sold-out listings still
- * counting. Since the per-tab spread is ±6%, that paid *more* than the cheapest
- * pair of the same shoe on the same day in the same city — so 19% of
- * city/model pairs could be bought in one aisle and sold back in the next for
- * up to +27%, no travel and no risk. `tests/market.test.mts` asserts that round
- * trip is impossible, and it passed the whole time, because it checks a formula
- * it defines locally rather than the function the game calls.
+ * ## The Red October glitch, and why it is still here
  *
- * The right formula was already written down here — `BID_ASK`, `localValue`,
- * `scarcityFor` and `referenceAsk` were all imported and never used. This is
- * that formula, finally wired:
+ * This takes `max(posted listing prices)`: the most expensive shelf in town, no
+ * scarcity multiplier, no bid-ask spread, no cap against the cheapest ask, and
+ * sold-out listings still count. The per-tab spread is ±6%, so this pays *more*
+ * than the cheapest pair of the same shoe, on the same day, in the same city.
+ * Buy in one aisle, sell back in the next, keep the difference. Measured over
+ * five seeded worlds: 113 of 581 city/model pairs (19.4%) turn a profit on the
+ * spot, the best at **+27.2%** — a Red October bought at $11,048 and sold back
+ * at $13,217, repeatable, no travel and no risk.
  *
- *   - `localValue` is what the city thinks the model is worth, not what one
- *     shop is asking for it.
- *   - scarcity pays a premium where the shelves are bare, which is the whole
- *     reason to carry stock somewhere.
- *   - `BID_ASK` is the spread a shop lives on.
- *   - and the cap against the cheapest posted ask is what makes the round trip
- *     lose money: you can never be paid more than the shop down the road is
- *     charging, less its cut.
+ * **This is deliberate. Do not "fix" it.** It was patched once, measured, and
+ * then put back on purpose: it is a money glitch in a game about hustling, and
+ * finding it is meant to feel like finding one. `tests/market.test.mts` pins it
+ * — there are checks that *fail if the glitch disappears*, so a future tidy-up
+ * of this function cannot quietly remove it.
  *
- * Signals are applied to both sides before the cap, so a news spike lifts the
- * bid and the ask together and cannot re-open the gap.
+ * The honest sell-side formula is written out directly below and left unused.
+ * `BID_ASK`, `localValue`, `scarcityFor` and `referenceAsk` are imported for it.
+ * If the glitch is ever retired, `honestBid` is the function to swap in: local
+ * value, times scarcity, times the spread, capped under the cheapest posted ask,
+ * with signals applied to both sides so a news spike cannot re-open the gap.
  */
 export function getCityMarketPrice(state: GameState, sneakerId: string): number | undefined {
+    const market = state.markets[state.currentCityId];
+    if (!market) return undefined;
+    const sneaker = SNEAKERS.find(s => s.id === sneakerId);
+    if (!sneaker) return undefined;
+
+    const listings = market.sneakers.filter(s => s.sneakerId === sneakerId && !s.isFake);
+    const pool = listings.length ? listings : market.sneakers.filter(s => s.sneakerId === sneakerId);
+    if (!pool.length) return undefined;
+
+    const best = Math.max(...pool.map(l => l.price));
+    return Math.round(applySignals(best, sneaker, state.activeMarketSignals, state.day, state.player));
+}
+
+/**
+ * The sell-side price with the spread closed — what `getCityMarketPrice` would
+ * be if the Red October glitch above were ever retired.
+ *
+ * Kept exported and tested rather than deleted, so the alternative stays live
+ * code rather than a paragraph of prose in a commit message. Swapping the two
+ * is a one-line change in `getBagValue` and the sell paths.
+ */
+export function honestBid(state: GameState, sneakerId: string): number | undefined {
     const market = state.markets[state.currentCityId];
     if (!market) return undefined;
     const sneaker = SNEAKERS.find(s => s.id === sneakerId);
@@ -119,7 +139,6 @@ export function getCityMarketPrice(state: GameState, sneakerId: string): number 
         applySignals(n, sneaker, state.activeMarketSignals, state.day, state.player);
 
     let bid = signalled(value) * scarcityFor(market, sneakerId).multiplier * BID_ASK;
-
     const posted = referenceAsk(market, sneakerId);
     if (posted !== undefined) bid = Math.min(bid, signalled(posted) * BID_ASK);
 
