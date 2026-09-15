@@ -16,7 +16,7 @@ and nothing breaks while the rest is missing.
 
 - **Format**: PNG, RGBA, no interlacing. Nearest-neighbour only — never
   bicubic-scale pixel art up.
-- **Drop location**: `public/art/<category>/<sprite-id>.png`. The id must match
+- **Drop location**: `assets/art/<category>/<sprite-id>.png`. The id must match
   the table below exactly, lowercase-with-hyphens.
 - **Sprite sheets**: frames laid out **left to right in one row**, every frame
   the same width, zero padding and zero margin between frames. Name it
