@@ -1,0 +1,951 @@
+{
+  "car-sedan": {
+    "logical": [
+      34,
+      19
+    ],
+    "frames": 1,
+    "delivered": [
+      102,
+      57
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "car-taxi": {
+    "logical": [
+      34,
+      19
+    ],
+    "frames": 1,
+    "delivered": [
+      102,
+      57
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "car-van": {
+    "logical": [
+      42,
+      23
+    ],
+    "frames": 1,
+    "delivered": [
+      126,
+      69
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "car-door-open": {
+    "logical": [
+      20,
+      16
+    ],
+    "frames": 3,
+    "delivered": [
+      180,
+      48
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "car-wreck": {
+    "logical": [
+      36,
+      16
+    ],
+    "frames": 1,
+    "delivered": [
+      108,
+      48
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "dog-stray": {
+    "logical": [
+      15,
+      9
+    ],
+    "frames": 6,
+    "delivered": [
+      270,
+      27
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "dog-bark": {
+    "logical": [
+      16,
+      10
+    ],
+    "frames": 4,
+    "delivered": [
+      192,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "cat-street": {
+    "logical": [
+      11,
+      6
+    ],
+    "frames": 6,
+    "delivered": [
+      198,
+      18
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "cat-dart": {
+    "logical": [
+      13,
+      6
+    ],
+    "frames": 4,
+    "delivered": [
+      156,
+      18
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "pigeon-flock": {
+    "logical": [
+      18,
+      9
+    ],
+    "frames": 5,
+    "delivered": [
+      270,
+      27
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "gull": {
+    "logical": [
+      11,
+      6
+    ],
+    "frames": 4,
+    "delivered": [
+      132,
+      18
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "bin-wheelie": {
+    "logical": [
+      10,
+      12
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      36
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "bin-wheelie-down": {
+    "logical": [
+      15,
+      8
+    ],
+    "frames": 1,
+    "delivered": [
+      45,
+      24
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "roadworks": {
+    "logical": [
+      24,
+      14
+    ],
+    "frames": 1,
+    "delivered": [
+      72,
+      42
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "roadworks-lamp": {
+    "logical": [
+      24,
+      14
+    ],
+    "frames": 4,
+    "delivered": [
+      288,
+      42
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "cone": {
+    "logical": [
+      6,
+      7
+    ],
+    "frames": 1,
+    "delivered": [
+      18,
+      21
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "hydrant": {
+    "logical": [
+      6,
+      8
+    ],
+    "frames": 1,
+    "delivered": [
+      18,
+      24
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "hydrant-blown": {
+    "logical": [
+      18,
+      22
+    ],
+    "frames": 5,
+    "delivered": [
+      270,
+      66
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "sprinkler": {
+    "logical": [
+      14,
+      9
+    ],
+    "frames": 6,
+    "delivered": [
+      252,
+      27
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "planter": {
+    "logical": [
+      10,
+      9
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      27
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "hedge-low": {
+    "logical": [
+      24,
+      9
+    ],
+    "frames": 1,
+    "delivered": [
+      72,
+      27
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "mailbox": {
+    "logical": [
+      8,
+      11
+    ],
+    "frames": 1,
+    "delivered": [
+      24,
+      33
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "streetlight": {
+    "logical": [
+      12,
+      46
+    ],
+    "frames": 1,
+    "delivered": [
+      36,
+      138
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "trash-pile": {
+    "logical": [
+      16,
+      8
+    ],
+    "frames": 1,
+    "delivered": [
+      48,
+      24
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "oil-slick": {
+    "logical": [
+      30,
+      7
+    ],
+    "frames": 1,
+    "delivered": [
+      90,
+      21
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "manhole": {
+    "logical": [
+      12,
+      5
+    ],
+    "frames": 1,
+    "delivered": [
+      36,
+      15
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "skate-ramp": {
+    "logical": [
+      22,
+      10
+    ],
+    "frames": 1,
+    "delivered": [
+      66,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "house-bungalow-far": {
+    "logical": [
+      44,
+      34
+    ],
+    "frames": 1,
+    "delivered": [
+      132,
+      102
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "house-bungalow-near": {
+    "logical": [
+      44,
+      34
+    ],
+    "frames": 1,
+    "delivered": [
+      132,
+      102
+    ],
+    "tileable_lr": false,
+    "ground": "top"
+  },
+  "house-twostorey-far": {
+    "logical": [
+      44,
+      46
+    ],
+    "frames": 1,
+    "delivered": [
+      132,
+      138
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "house-twostorey-near": {
+    "logical": [
+      44,
+      46
+    ],
+    "frames": 1,
+    "delivered": [
+      132,
+      138
+    ],
+    "tileable_lr": false,
+    "ground": "top"
+  },
+  "house-apartment-far": {
+    "logical": [
+      48,
+      52
+    ],
+    "frames": 1,
+    "delivered": [
+      144,
+      156
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "house-apartment-near": {
+    "logical": [
+      48,
+      52
+    ],
+    "frames": 1,
+    "delivered": [
+      144,
+      156
+    ],
+    "tileable_lr": false,
+    "ground": "top"
+  },
+  "window-lit": {
+    "logical": [
+      10,
+      10
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "window-open": {
+    "logical": [
+      10,
+      10
+    ],
+    "frames": 2,
+    "delivered": [
+      60,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "door-front": {
+    "logical": [
+      10,
+      14
+    ],
+    "frames": 2,
+    "delivered": [
+      60,
+      42
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "doormat": {
+    "logical": [
+      12,
+      4
+    ],
+    "frames": 1,
+    "delivered": [
+      36,
+      12
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "garage-door": {
+    "logical": [
+      28,
+      20
+    ],
+    "frames": 1,
+    "delivered": [
+      84,
+      60
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "fence-picket": {
+    "logical": [
+      24,
+      10
+    ],
+    "frames": 1,
+    "delivered": [
+      72,
+      30
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "wall-breeze": {
+    "logical": [
+      24,
+      12
+    ],
+    "frames": 1,
+    "delivered": [
+      72,
+      36
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "sky-hills": {
+    "logical": [
+      128,
+      24
+    ],
+    "frames": 1,
+    "delivered": [
+      384,
+      72
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "palm-tall": {
+    "logical": [
+      18,
+      44
+    ],
+    "frames": 1,
+    "delivered": [
+      54,
+      132
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "palm-short": {
+    "logical": [
+      16,
+      26
+    ],
+    "frames": 1,
+    "delivered": [
+      48,
+      78
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "palm-sway": {
+    "logical": [
+      18,
+      44
+    ],
+    "frames": 4,
+    "delivered": [
+      216,
+      132
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "tree-street": {
+    "logical": [
+      20,
+      32
+    ],
+    "frames": 1,
+    "delivered": [
+      60,
+      96
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "grass-verge": {
+    "logical": [
+      32,
+      6
+    ],
+    "frames": 1,
+    "delivered": [
+      96,
+      18
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "road-asphalt": {
+    "logical": [
+      64,
+      18
+    ],
+    "frames": 1,
+    "delivered": [
+      192,
+      54
+    ],
+    "tileable_lr": true,
+    "ground": "texture"
+  },
+  "road-centreline": {
+    "logical": [
+      32,
+      3
+    ],
+    "frames": 1,
+    "delivered": [
+      96,
+      9
+    ],
+    "tileable_lr": true,
+    "ground": "texture"
+  },
+  "road-edgeline": {
+    "logical": [
+      32,
+      2
+    ],
+    "frames": 1,
+    "delivered": [
+      96,
+      6
+    ],
+    "tileable_lr": true,
+    "ground": "texture"
+  },
+  "road-crack": {
+    "logical": [
+      24,
+      6
+    ],
+    "frames": 1,
+    "delivered": [
+      72,
+      18
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "kerb": {
+    "logical": [
+      32,
+      5
+    ],
+    "frames": 1,
+    "delivered": [
+      96,
+      15
+    ],
+    "tileable_lr": true,
+    "ground": "texture"
+  },
+  "pavement": {
+    "logical": [
+      32,
+      8
+    ],
+    "frames": 1,
+    "delivered": [
+      96,
+      24
+    ],
+    "tileable_lr": true,
+    "ground": "texture"
+  },
+  "drain-grate": {
+    "logical": [
+      10,
+      4
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      12
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "trolley-shopping": {
+    "logical": [
+      20,
+      16
+    ],
+    "frames": 4,
+    "delivered": [
+      240,
+      48
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "longboard": {
+    "logical": [
+      22,
+      5
+    ],
+    "frames": 4,
+    "delivered": [
+      264,
+      15
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "trolley-bay": {
+    "logical": [
+      36,
+      18
+    ],
+    "frames": 1,
+    "delivered": [
+      108,
+      54
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "dust-plume": {
+    "logical": [
+      14,
+      10
+    ],
+    "frames": 5,
+    "delivered": [
+      210,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "sun-low": {
+    "logical": [
+      40,
+      40
+    ],
+    "frames": 1,
+    "delivered": [
+      120,
+      120
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "bmx": {
+    "logical": [
+      18,
+      14
+    ],
+    "frames": 4,
+    "delivered": [
+      216,
+      42
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "pizza-box": {
+    "logical": [
+      8,
+      8
+    ],
+    "frames": 4,
+    "delivered": [
+      96,
+      24
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "pizza-box-landed": {
+    "logical": [
+      10,
+      5
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      15
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "pizza-stack": {
+    "logical": [
+      10,
+      12
+    ],
+    "frames": 1,
+    "delivered": [
+      30,
+      36
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "restock-crate": {
+    "logical": [
+      14,
+      12
+    ],
+    "frames": 1,
+    "delivered": [
+      42,
+      36
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "streetlight-glow": {
+    "logical": [
+      40,
+      40
+    ],
+    "frames": 1,
+    "delivered": [
+      120,
+      120
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "impact-star": {
+    "logical": [
+      12,
+      12
+    ],
+    "frames": 5,
+    "delivered": [
+      180,
+      36
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "skid-mark": {
+    "logical": [
+      20,
+      4
+    ],
+    "frames": 1,
+    "delivered": [
+      60,
+      12
+    ],
+    "tileable_lr": true,
+    "ground": "center"
+  },
+  "speed-lines": {
+    "logical": [
+      32,
+      12
+    ],
+    "frames": 3,
+    "delivered": [
+      288,
+      36
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "splash-water": {
+    "logical": [
+      14,
+      10
+    ],
+    "frames": 5,
+    "delivered": [
+      210,
+      30
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "feather-puff": {
+    "logical": [
+      10,
+      8
+    ],
+    "frames": 4,
+    "delivered": [
+      120,
+      24
+    ],
+    "tileable_lr": false,
+    "ground": "center"
+  },
+  "sky-towers": {
+    "logical": [
+      96,
+      40
+    ],
+    "frames": 1,
+    "delivered": [
+      288,
+      120
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "sky-lowrise": {
+    "logical": [
+      96,
+      26
+    ],
+    "frames": 1,
+    "delivered": [
+      288,
+      78
+    ],
+    "tileable_lr": true,
+    "ground": "bottom"
+  },
+  "sky-billboard": {
+    "logical": [
+      26,
+      20
+    ],
+    "frames": 1,
+    "delivered": [
+      78,
+      60
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  },
+  "sky-watertower": {
+    "logical": [
+      20,
+      26
+    ],
+    "frames": 1,
+    "delivered": [
+      60,
+      78
+    ],
+    "tileable_lr": false,
+    "ground": "bottom"
+  }
+}
