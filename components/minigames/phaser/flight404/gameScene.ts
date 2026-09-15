@@ -584,11 +584,60 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 key: string, y: number, h: number, factor: number, depth: number,
             ) => {
                 const ts = this.add.tileSprite(0, y, VIEW_W, h, key).setOrigin(0, 0);
-                ts.setScrollFactor(0).setDepth(depth);
+                ts.setDepth(depth);
                 ts.setData('factor', factor);
                 this.layers.push(ts);
                 return ts;
             };
+
+            /**
+             * Delivered parallax, when it exists.
+             *
+             * Hand-drawn layers are authored as three full-screen plates per
+             * section — far, mid and near — rather than as the six narrow bands
+             * the coded version paints, so they get their own path rather than
+             * being forced through `strip`. Each is one 960 x 540 texture, which
+             * is exactly one canvas, so `tileScale` of 1/ZOOM maps one plate
+             * onto one screenful of world and it tiles seamlessly from there.
+             *
+             * Returns false when the art for this section has not been
+             * delivered, and the coded strips below run instead. That is the
+             * whole "a half-delivered set is not a broken build" promise, and it
+             * is one `if`.
+             */
+            const plate = (suffix: string, factor: number, depth: number): boolean => {
+                const key = T(`bg-${def.art}-${suffix}`);
+                if (!this.textures.exists(key)) return false;
+                const ts = this.add.tileSprite(0, 0, VIEW_W, VIEW_H, key).setOrigin(0, 0);
+                ts.setTileScale(1 / ZOOM, 1 / ZOOM);
+                ts.setDepth(depth);
+                ts.setData('factor', factor);
+                ts.setData('full', true);
+                this.layers.push(ts);
+                return true;
+            };
+
+            // Far is almost still, mid drifts, near keeps pace with the player
+            // and draws in *front* of everything — it is the row of seats you
+            // run behind, which is what gives a flat cabin any depth at all.
+            const drawn = [
+                plate('far', 0.22, -8),
+                plate('mid', 0.55, -6),
+                plate('near', 1.06, 50),
+            ];
+            if (drawn.some(Boolean)) {
+                // Anything the delivered set is missing still comes from the
+                // coded strips, so a section with only a far plate is a section
+                // with a hand-drawn sky and a coded cabin.
+                if (!drawn[0] && !def.boss) strip(def.dark ? T('galleywall') : T('sky'), 62, 42, 0.32, -6);
+                if (!drawn[2]) strip(T('fore'), 182, 16, 1.12, 50);
+                if (!def.boss) {
+                    this.doorImg = this.add.image(len - 20, 62, T('door-sealed')).setOrigin(0, 0).setDepth(-3);
+                    this.doorLock = this.add.image(len - 7, 110, TG('lock')).setDisplaySize(10, 10).setDepth(-2);
+                }
+                if (def.dark) this.buildDarkness();
+                return;
+            }
 
             if (def.boss) {
                 // Flight deck: one baked 352-wide plate, with the windscreen
@@ -2177,9 +2226,20 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.stepDoor();
 
             // PHASER: one assignment per parallax layer. That is the scroll.
-            const sx = this.cameras.main.scrollX;
+            //
+            // The layers are pinned to the camera's *world view* rather than
+            // left at scroll factor zero. A scroll-factor-zero object is only
+            // at the top-left of the screen while the camera zoom is 1, and
+            // this camera is zoomed by ZOOM so the art can carry real
+            // resolution — so every backdrop drifted off its floor line the
+            // moment that landed, which looks exactly like art delivered at the
+            // wrong scale and is not.
+            const cam = this.cameras.main;
+            const sx = cam.scrollX;
             for (const l of this.layers) {
                 const f = l.getData('factor') as number;
+                l.x = cam.worldView.x;
+                if (l.getData('full')) l.y = cam.worldView.y;
                 l.tilePositionX = sx * f + (l.texture.key === T('sky') ? this.time.now * 0.006 : 0);
             }
 

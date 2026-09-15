@@ -127,6 +127,36 @@ layer its own file. One set per section (`economy`, `galley`, `business`,
 | `bg-<section>-mid` | Cabin walls, lockers, signage. |
 | `bg-<section>-near` | Foreground seat rows the player passes behind. |
 
+Sections are `economy`, `galley`, `business`, `first`, `cockpit`.
+
+### The framing rule, which is the thing to get right
+
+**One plate is one screenful, and one screenful is 352 × 198 world units.** So
+the scale is fixed: a thing drawn `N` pixels tall in a 540px plate is
+`N × 198 / 540` world units in the game, and it has to agree with the sprite of
+the same object.
+
+That is the check worth doing before rendering fifteen of these. The player is
+**28 world units** — about 175cm — so one world unit is roughly **6cm**, and
+everything follows:
+
+| object | world units | pixels in a 540px plate |
+|---|---|---|
+| the player, standing | 28 | **76** |
+| an economy seat back | ~18 | **49** |
+| a cabin window | ~14 | **38** |
+| floor to overhead bins | ~106 | **289** |
+
+A plate framed so the seats are twice that size is a plate where the player
+reads as knee-high, which is not something you can see while drawing the plate —
+there is no character in it to compare against. The first delivered set was
+drawn about **2.3× too zoomed in**, measured against the same artist's own
+`seat-row.png`: the seat sprite is 30 world units and the seats inside
+`bg-economy-near.png` are about 70. Same object, two files, 2.3× apart.
+
+**Rule of thumb: a 960 × 540 plate should show roughly 25 windows across.** If
+it shows eight, it is framed for a cutscene rather than for a run-and-gun.
+
 
 ## Priority 8 — the cast
 

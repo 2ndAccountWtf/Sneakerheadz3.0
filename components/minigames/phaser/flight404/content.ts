@@ -180,6 +180,14 @@ export interface SpawnDef { kind: MookKind; x: number; perch?: boolean }
 
 export interface SectionDef {
     name: string;
+    /**
+     * Slug for this section's delivered parallax art, as
+     * `bg-<art>-far|mid|near`. Separate from `name` because the name is player-
+     * facing and gets rewritten for tone, and a filename that changes when
+     * somebody improves a section title is a filename that silently stops
+     * matching.
+     */
+    art: string;
     tag: string;
     length: number;
     /** Unpowered stretch — see the darkness model in gameScene.ts. */
@@ -200,6 +208,7 @@ export interface SectionDef {
 export const SECTIONS: SectionDef[] = [
     {
         name: 'ECONOMY',
+        art: 'economy',
         tag: 'ROWS 30-44 — THE SMELL IS TAHINI',
         // A plane. Nothing is wrong yet, and nothing should be: this section
         // exists so the next one can be wrong. The tahini is the only clue.
@@ -216,6 +225,7 @@ export const SECTIONS: SectionDef[] = [
     },
     {
         name: 'THE GALLEY',
+        art: 'galley',
         tag: 'POWER IS OUT — SOMEONE PULLED A BREAKER',
         // The turn. Still an aircraft galley, except a man is brewing coffee on
         // a fingjan next to his donkey and has not acknowledged the power cut.
@@ -234,6 +244,7 @@ export const SECTIONS: SectionDef[] = [
     },
     {
         name: 'BUSINESS CLASS',
+        art: 'business',
         tag: 'THE LIE-FLATS ARE FULLY OCCUPIED',
         // The cabin has lost. Cloth strung between the lie-flats, a shawarma
         // spit where the bar cart was, stalls in the aisle, everybody talking.
@@ -252,6 +263,7 @@ export const SECTIONS: SectionDef[] = [
     },
     {
         name: 'THE COCKPIT',
+        art: 'cockpit',
         tag: 'HE IS SHOUTING AT THE AUTOPILOT',
         // Everyone is here and nobody is helping.
         length: VIEW_W, dark: false, boss: true, creep: 'bedlam',
