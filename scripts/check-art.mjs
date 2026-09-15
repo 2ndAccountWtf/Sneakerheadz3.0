@@ -132,14 +132,35 @@ const SCALE = artScale();
 
 // --- what the asset document asked for --------------------------------------
 
+/**
+ * Which briefs describe this folder.
+ *
+ * Each game's art has its own document and its own rules — Flight 404 is a flat
+ * side elevation, the street games are a 3/4 high angle — so checking a street
+ * delivery against the aeroplane brief would report every file as unknown and
+ * teach whoever is delivering to ignore the output.
+ */
+const BRIEFS = {
+    'assets/art/street': ['docs/ASSETS-STREET.md'],
+    'assets/art/flight404': ['docs/ASSETS-FLIGHT404.md', 'docs/ASSETS-FLIGHT404-REMAINING.md'],
+};
+
+function briefsFor(folder) {
+    const key = Object.keys(BRIEFS).find((k) => folder.replace(/\/+$/, '').endsWith(k.split('/').pop()));
+    return (key ? BRIEFS[key] : Object.values(BRIEFS).flat()).filter(existsSync);
+}
+
 function specSizes() {
-    const doc = 'docs/ASSETS-FLIGHT404.md';
-    if (!existsSync(doc)) return new Map();
     const out = new Map();
-    for (const line of readFileSync(doc, 'utf8').split('\n')) {
-        // | `id` | 34 × 30 | 6 | ...
-        const m = line.match(/^\|\s*`([a-z0-9-]+)`\s*\|\s*(\d+)\s*[×x]\s*(\d+)\s*\|\s*(\d+)/i);
-        if (m) out.set(m[1], { w: +m[2], h: +m[3], frames: +m[4] });
+    for (const doc of briefsFor(FOLDER)) {
+        for (const line of readFileSync(doc, 'utf8').split('\n')) {
+            // Table row:  | `id` | 34 × 30 | 6 | ...
+            const row = line.match(/^\|\s*`([a-z0-9-]+)`\s*\|\s*(\d+)\s*[×x]\s*(\d+)\s*\|\s*(\d+)/i);
+            if (row && !out.has(row[1])) out.set(row[1], { w: +row[2], h: +row[3], frames: +row[4] });
+            // Block heading:  ### `id` — 34 × 30, 6 frames
+            const head = line.match(/^###\s+`([a-z0-9-]+)`\s*[—-]\s*(\d+)\s*[×x]\s*(\d+)\s*,\s*(\d+)\s*frames?/i);
+            if (head && !out.has(head[1])) out.set(head[1], { w: +head[2], h: +head[3], frames: +head[4] });
+        }
     }
     return out;
 }
