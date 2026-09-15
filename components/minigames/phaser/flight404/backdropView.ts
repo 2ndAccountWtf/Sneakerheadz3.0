@@ -52,6 +52,10 @@ export function buildResidents(
     for (const f of frames) {
         const img = scene.add.image(f.x, f.y, residentTexture(f.kind))
             .setOrigin(0.5, 1)
+            // Residents get a facing picked when they are placed, and it used
+            // to be computed and thrown away — so every coffee crew in the game
+            // faced the same way and a section read as a wallpaper repeat.
+            .setFlipX(f.facing < 0)
             .setDepth(f.depth)
             // Distance is sold with haze as much as with size. A far-plane actor
             // at full strength reads as a near one standing on a shelf.

@@ -22,9 +22,10 @@ import {
     CREEP, CREEP_ORDER, admits, actorBudget, creepRank, isAnomaly, anomalyBudget, type Creep,
 } from '../components/minigames/phaser/flight404/creep.ts';
 import { BEATS, DUCK } from '../components/minigames/phaser/flight404/background.ts';
-import { SECTIONS, FLOOR_Y } from '../components/minigames/phaser/flight404/content.ts';
+import { SECTIONS, FLOOR_Y, CABIN_BASE } from '../components/minigames/phaser/flight404/content.ts';
 import { rngFor } from '../utils/rng.ts';
 
+const DT = 1 / 60;
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
 
@@ -125,7 +126,13 @@ t('the far plane sits higher and darker than the near one', () => {
         'the two planes interleave, so nobody reads as further away');
     assert.ok(SHADE.back < SHADE.mid, 'distance is not dimmer');
     assert.ok(back.every(a => a.shade === SHADE.back) && mid.every(a => a.shade === SHADE.mid));
-    assert.equal(LAYER_Y.mid, FLOOR_Y, 'the near plane is not standing on the aisle');
+    // The rule reversed when the cabin became scenery. Residents used to stand
+    // on FLOOR_Y, which is the line the player runs along — so the background
+    // cast and the fight shared a floor and every bystander looked like
+    // something you ought to be able to shoot. They stand in the cabin now, and
+    // the aisle in front of it belongs to the gameplay.
+    assert.equal(LAYER_Y.mid, CABIN_BASE, 'the near plane is not standing in the cabin');
+    assert.ok(LAYER_Y.mid < FLOOR_Y, 'a resident is standing on the player aisle');
 });
 
 t('the whole background sorts under the gameplay', () => {
@@ -354,6 +361,37 @@ t('a tier with no ration still uses its whole cast', () => {
     const kinds = new Set(populate('shuk', 820, rngFor('unrationed')).map(p => p.def.kind));
     assert.ok(kinds.size >= 6, `a shuk drew only ${kinds.size} kinds — the ration has leaked upwards`);
     assert.equal(anomalyBudget('shuk'), Infinity, 'shuk should ration nothing');
+});
+
+
+t('the things that get in your way are on your floor, and the scenery is not', () => {
+    // The split the whole layout rests on, checked from both sides. A crossing
+    // shares the player's aisle because it is meant to be in the way; a
+    // resident never does, because it is meant to be looked at.
+    const rng = rngFor('aisle-split');
+    let b = openBackdrop('shuk', 820, rng);
+    for (const p of b.placements) {
+        assert.ok(p.y <= CABIN_BASE, `a ${p.def.kind} is standing at y${p.y}, on the aisle`);
+    }
+    let sawCrossing = false;
+    for (let i = 0; i < 60 * 120; i++) {
+        const r = stepBackdrop(b, DT, rng);
+        b = r.backdrop;
+        for (const c of r.crossings) {
+            sawCrossing = true;
+            assert.equal(c.y, FLOOR_Y, `a ${c.kind} is crossing at y${c.y} instead of the aisle`);
+        }
+    }
+    assert.ok(sawCrossing, 'nothing crossed in two minutes, so this proved nothing');
+});
+
+t('residents are not all turned the same way', () => {
+    // `facing` was picked when a resident was placed and then thrown away, so
+    // every coffee crew in a section faced identically and a crowded cabin read
+    // as a wallpaper repeat. It reaches the renderer now.
+    const p = populate('bedlam', 820, rngFor('facing'));
+    const right = p.filter(a => a.def.facing === 1).length;
+    assert.ok(right > 0 && right < p.length, `all ${p.length} residents face the same way`);
 });
 
 console.log(`\n${pass} backdrop checks passed.\n`);

@@ -40,7 +40,7 @@ import {
     openCrossing, stepCrossing, crossingGone, CROSS_WIDTH,
     type CrossingKind, type CrossingState,
 } from './crossings';
-import { FLOOR_Y } from './content';
+import { CABIN_BASE, FLOOR_Y } from './content';
 import { TIER } from './terrain';
 import { shuffled } from '../../../../utils/rng';
 
@@ -67,11 +67,17 @@ export const DEPTH: Record<Layer, number> = { back: 1, mid: 4 };
  * Feet lines. Further away is higher up the screen, which is the entire trick
  * that makes a flat cabin look deep.
  *
- * Every `back` value has to stay above `FLOOR_Y` by a clear margin or the two
+ * Both planes stand in the *cabin*, not on the aisle. `mid` used to be
+ * `FLOOR_Y`, which put the coffee crew on exactly the line the player runs
+ * along — so the background cast and the gameplay shared a floor and every
+ * resident looked like something you ought to be able to shoot. The cabin has
+ * its own base now and the aisle in front of it belongs to the fight.
+ *
+ * Every `back` value has to stay above `mid` by a clear margin or the two
  * planes interleave and the illusion collapses into a crowd of people standing
  * on each other.
  */
-export const LAYER_Y: Record<Layer, number> = { back: TIER.seatback, mid: FLOOR_Y };
+export const LAYER_Y: Record<Layer, number> = { back: TIER.seatback, mid: CABIN_BASE };
 
 /** Balcony spectators are leaning over something, so they start higher again. */
 const PERCH: Partial<Record<ActorKind, number>> = { balcony: TIER.counter };
@@ -250,6 +256,8 @@ export interface BackdropFrame {
     layer: Layer;
     depth: number;
     shade: number;
+    /** Which way this one is turned. Placed once and never changes. */
+    facing: -1 | 1;
 }
 
 /**
@@ -309,6 +317,7 @@ export function stepBackdrop(
             beat: r.beat,
             ducking: r.state.ducking > 0,
             x: p.x, y: p.y, layer: p.layer, depth: p.depth, shade: p.shade,
+            facing: p.def.facing ?? 1,
         });
     }
     // --- the traffic
@@ -332,7 +341,10 @@ export function stepBackdrop(
         if (kinds.length) {
             const kind = kinds[Math.floor(rng() * kinds.length) % kinds.length] as CrossingKind;
             const from: -1 | 1 = rng() < 0.5 ? -1 : 1;
-            crossings.push(openCrossing(kind, b.length, LAYER_Y.mid, 'mid', from, rng));
+            // Crossings run the *aisle*, not the cabin — they are the things
+            // that get in the player's way, so they share the player's floor
+            // even though residents no longer do.
+            crossings.push(openCrossing(kind, b.length, FLOOR_Y, 'mid', from, rng));
         }
         nextCross = nextCrossingIn(b.creep, rng);
     }
