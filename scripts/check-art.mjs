@@ -20,7 +20,7 @@
  *
  *   node scripts/check-art.mjs [folder]
  */
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { join } from 'node:path';
 
@@ -171,20 +171,52 @@ function specSizes() {
  * Ids that are meant to be opaque from edge to edge.
  *
  * A character sprite whose border is fully opaque is on a matte and will paint
- * a box. A tiling cabin wall whose border is fully opaque is simply a wall —
- * the whole job of `dress-windowwall` is to be a continuous surface, and the
- * only transparent part of it is the window aperture in the middle, which the
- * border test never sees. Flagging those as broken would train whoever is
- * delivering to ignore the checker, which is worse than not having one.
+ * a box. A tiling road surface whose border is fully opaque is simply a road —
+ * the whole job of `road-asphalt` is to be a continuous surface. Flagging those
+ * as broken trains whoever is delivering to ignore the checker, which is worse
+ * than not having one.
+ *
+ * Read from the briefs rather than guessed from the name. The first version of
+ * this was a regex over id prefixes and it did not know that `road-asphalt`,
+ * `wall-breeze` and `drain-grate` are surfaces — so three correct files were
+ * reported as blockers. The documents already say which assets tile; that is
+ * the same fact, written down once, by the person who decided it.
  */
-const FULL_BLEED = /^(dress-|bg-[a-z]+-(far|mid|near)$|.*wall$|.*floor$|belt-segment$)/;
+function fullBleedIds() {
+    const out = new Set();
+    for (const doc of briefsFor(FOLDER)) {
+        for (const line of readFileSync(doc, 'utf8').split('\n')) {
+            const m = line.match(/^###\s+`([a-z0-9-]+)`/);
+            if (m && /tileable/i.test(line)) out.add(m[1]);
+        }
+    }
+    // Decals that lie flat on the road are solid by nature even when they do
+    // not tile: a drain cover is metal all the way to its own edge.
+    for (const id of ['drain-grate', 'manhole', 'road-crack', 'skid-mark']) out.add(id);
+    return out;
+}
+
+const FULL_BLEED = fullBleedIds();
 
 const spec = specSizes();
 if (!existsSync(FOLDER)) {
     console.log(`\nNo folder at ${FOLDER} yet — create it and drop PNGs in.\n`);
     process.exit(0);
 }
-const files = readdirSync(FOLDER).filter(f => /\.png$/i.test(f));
+/**
+ * Every PNG under the folder, including subfolders.
+ *
+ * Art arrives organised — a `skyline-kit/towers/` here, a `billboards/` there —
+ * and the loader globs recursively, so a checker that only read the top level
+ * reported 73 files where the game was loading 112. A checker that sees less
+ * than the game does is worse than none, because it says "all ready" about a
+ * set it never looked at.
+ */
+const walk = (dir) => readdirSync(dir).flatMap((f) => {
+    const full = join(dir, f);
+    return statSync(full).isDirectory() ? walk(full) : (/\.png$/i.test(f) ? [full] : []);
+});
+const files = walk(FOLDER).map(f => f.slice(FOLDER.replace(/\/+$/, '').length + 1));
 if (!files.length) {
     console.log(`\n${FOLDER} is empty. Nothing to check.\n`);
     process.exit(0);
@@ -195,7 +227,9 @@ console.log(`Canvas is ${Math.round(352 * SCALE)}px across a 352-unit world, so 
 let blockers = 0, warnings = 0;
 
 for (const file of files.sort()) {
-    const base = file.replace(/\.png$/i, '');
+    // Subfolders organise a delivery; the id is the filename alone, because
+    // that is what the game asks for.
+    const base = (file.split('/').pop() ?? file).replace(/\.png$/i, '');
     const m = base.match(/^(.+?)@(\d+)$/);
     const id = m ? m[1] : base;
     const frames = m ? +m[2] : (spec.get(base)?.frames ?? 1);
@@ -218,7 +252,7 @@ for (const file of files.sort()) {
         for (let y = 0; y < png.height; y++) { edge.push(alpha[y * png.width], alpha[y * png.width + png.width - 1]); }
         const opaqueEdge = edge.filter(a => a > 250).length / edge.length;
         const anyClear = alpha.some(a => a < 16);
-        const fullBleed = FULL_BLEED.test(id);
+        const fullBleed = FULL_BLEED.has(id);
         if (opaqueEdge > 0.9 && !fullBleed) {
             problems.push(`background is SOLID (${Math.round(opaqueEdge * 100)}% of the border is opaque) — the cabin is near-black, so this paints a box. \`node scripts/prep-art.mjs <file>\` keys it out.`);
         } else if (opaqueEdge > 0.9) {

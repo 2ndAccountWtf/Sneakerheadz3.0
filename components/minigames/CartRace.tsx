@@ -26,7 +26,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
-    shakeOffset, banner, actor,
+    shakeOffset, banner, actor, art,
 } from './engine';
 import type { Ctx } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -268,6 +268,25 @@ const OBS: ObsDef[] = [
 const JUNK: ObsDef = { kind: 'junk', glyph: '🥫', label: 'thrown garbage', len: 1.3, wide: 0.5, clear: 'ollie', dmg: 6, keep: 0.74, weight: 0 };
 
 const OBS_TOTAL = OBS.reduce((n, o) => n + o.weight, 0);
+
+/**
+ * This game's obstacle kinds, in the shared street vocabulary.
+ *
+ * The two street games name the same objects differently — one calls it a
+ * `bin`, the other a `bin` too but a `trolley` where this one says `bay` — so
+ * the art is keyed on the asset id and each game maps its own kinds onto it.
+ * That is what lets one delivered `bin-wheelie.png` serve both.
+ */
+const ART_ID: Record<string, string> = {
+    bin: 'bin-wheelie', dog: 'dog-stray', ped: 'pedestrian', works: 'roadworks',
+    oil: 'oil-slick', ramp: 'skate-ramp', car: 'car-sedan', door: 'car-door-open',
+    bay: 'trolley-bay', junk: 'trash-pile',
+};
+
+/** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
+const ART_H: Record<string, number> = {
+    bin: 12, dog: 9, ped: 23, works: 14, oil: 7, ramp: 10, junk: 8,
+};
 
 /** A stand-in so nobody is ever left with nothing to press. */
 const POCKET: Weapon = {
@@ -1177,7 +1196,14 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
     }
     shadow(ctx, x, y, 6 * sc, 2.4 * sc, 0.35);
     const bob = d.drift ? Math.sin(t * 6 + o.phase) * 1.4 : 0;
-    glyph(ctx, d.glyph, x, y - 7 * sc + bob, 13 * sc, o.hit ? 1.2 : 0);
+    // Delivered art when it exists, the emoji when it does not — the fallback
+    // is the whole reason art can arrive one file at a time. `ART_ID` maps this
+    // game's obstacle kinds onto the shared street asset ids.
+    art.sprite(ctx, ART_ID[d.kind] ?? d.kind, d.glyph, x, y + bob, 13 * sc, {
+        frame: Math.floor(t * 10),
+        rotation: o.hit ? 1.2 : 0,
+        height: (ART_H[d.kind] ?? 13) * sc,
+    });
 };
 
 export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
@@ -1573,6 +1599,12 @@ const CartRace: React.FC<{
     const doneRef = useRef(false);
     const finishedRef = useRef(false);
     const hudClock = useRef(0);
+
+    // Delivered street art starts decoding as the game mounts. Nothing waits on
+    // it: until a file is ready `art.sprite` draws the emoji, so a slow
+    // connection is a game that looks like it used to rather than a blank
+    // frame. See `engine/streetArt.ts`.
+    useMemo(() => art.load(), []);
 
     const onFrame = useCallback((ctx: CanvasRenderingContext2D, dt: number) => {
         const s = raceRef.current!;

@@ -33,7 +33,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner,
+    shakeOffset, banner, art,
 } from './engine';
 import type { Ctx } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -322,6 +322,25 @@ const OBS: ObsDef[] = [
     { kind: 'hedge', glyph: '🪴', label: 'somebody’s planter', len: 8, wide: 0.5, clear: 'ollie', where: 'walk', weight: 7 },
 ];
 const OBS_TOTAL = OBS.reduce((n, o) => n + o.weight, 0);
+
+/**
+ * This game's obstacle kinds, in the shared street vocabulary.
+ *
+ * Downhill Racer and Pizza Run name the same objects differently, so each maps
+ * its own kinds onto the asset ids in `docs/ASSETS-STREET.md`. That is what
+ * lets one delivered `bin-wheelie.png` serve both games.
+ */
+const ART_ID: Record<string, string> = {
+    car: 'car-sedan', taxi: 'car-taxi', door: 'car-door-open', bin: 'bin-wheelie',
+    skater: 'skateboarder', dog: 'dog-stray', works: 'roadworks',
+    trolley: 'trolley-shopping', hydrant: 'hydrant', sprink: 'sprinkler',
+    hedge: 'planter',
+};
+
+/** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
+const ART_H: Record<string, number> = {
+    bin: 12, dog: 9, works: 14, trolley: 16, hydrant: 8, sprink: 9, hedge: 9,
+};
 
 // ---------------------------------------------------------------------------
 // State. One flat mutable object, mutated 60 times a second. Nothing in here is
@@ -1408,7 +1427,14 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
     }
     shadow(ctx, x, y + 3, 6, 2.2, 0.35);
     const bob = d.drift ? Math.sin(s.t * 7 + o.phase) * 1.6 : 0;
-    glyph(ctx, d.glyph, x, y - 5 + bob, 13, o.hit ? 1.3 : 0);
+    // Delivered art first, emoji second. See `ART_ID` for why this game's own
+    // obstacle names are mapped onto shared street asset ids.
+    art.sprite(ctx, ART_ID[d.kind] ?? d.kind, d.glyph, x, y + 2 + bob, 13, {
+        frame: Math.floor(s.t * 10),
+        flip: (d.vx ?? 0) < 0,
+        rotation: o.hit ? 1.3 : 0,
+        height: ART_H[d.kind] ?? 13,
+    });
 };
 
 export function drawRun(ctx: Ctx, s: RunState) {
@@ -1756,6 +1782,12 @@ const PizzaRun: React.FC<{
     const doneRef = useRef(false);
     const finishedRef = useRef(false);
     const hudClock = useRef(0);
+
+    // Delivered street art starts decoding as the game mounts. Nothing waits on
+    // it: until a file is ready `art.sprite` draws the emoji, so a slow
+    // connection is a game that looks like it used to rather than a blank
+    // frame. See `engine/streetArt.ts`.
+    useMemo(() => art.load(), []);
 
     const onFrame = useCallback((ctx: CanvasRenderingContext2D, dt: number) => {
         const s = runRef.current!;
