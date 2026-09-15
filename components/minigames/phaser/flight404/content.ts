@@ -56,6 +56,27 @@ export const ZOOM = RENDER_W / VIEW_W;
  */
 export const ART_SCALE = ZOOM;
 
+/**
+ * How much the delivered parallax plates are shrunk to match the characters.
+ *
+ * One plate is one screenful, so its scale is fixed by its framing: a thing
+ * drawn N pixels tall in a 540px plate is N x 198 / 540 world units in the
+ * game. The delivered set is framed about 2.3x too zoomed in, measured against
+ * the same artist's own `seat-row.png` — the seat sprite is 30 world units and
+ * the seats inside `bg-economy-near.png` are about 70. Same object, two files.
+ *
+ * That cannot be seen while drawing a plate, because there is no character in
+ * it to compare against. Rather than have fifteen plates redrawn, they are
+ * shrunk here, which costs nothing: the art is authored at 960px across a
+ * 352-unit screen, so there are 2.7 device pixels per world unit to spend and
+ * shrinking by 2.3 still leaves more detail than the canvas had before.
+ *
+ * The cost is vertical: a plate drawn to fill the screen does not fill it once
+ * it is smaller. The cabin plates therefore tile upward from the floor line
+ * rather than being stretched, which is what `buildScenery` does with this.
+ */
+export const PLATE_SHRINK = 2.3;
+
 /** The aisle carpet — every character's feet line, and the arcade world floor. */
 export const FLOOR_Y = 164;
 /** Feet line for a mook wedged into an open overhead bin. */

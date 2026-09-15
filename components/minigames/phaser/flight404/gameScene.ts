@@ -34,7 +34,7 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
-import { ZOOM } from './content';
+import { ZOOM, PLATE_SHRINK } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import {
     openView, buildResidents, stepResidents, stepCrossings, clearView,
@@ -216,6 +216,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
         // --- scenery
         private layers: PhaserNS.GameObjects.TileSprite[] = [];
+        /** Flat wall behind the shrunk plates, so their gaps are cabin not void. */
+        private cabinFill?: PhaserNS.GameObjects.Rectangle;
         private cockpit?: Img;
         private doorImg?: Img;
         private doorLock?: Img;
@@ -480,6 +482,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.boss = null;
             this.layers.forEach(l => l.destroy());
             this.layers = [];
+            this.cabinFill?.destroy(); this.cabinFill = undefined;
             this.cockpit?.destroy(); this.cockpit = undefined;
             this.doorImg?.destroy(); this.doorImg = undefined;
             this.doorLock?.destroy(); this.doorLock = undefined;
@@ -578,6 +581,44 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
          * behind it, so clouds crawl past the windows for free. The canvas build
          * draws one cloud per window and offsets each by hand.
          */
+        /**
+         * The wall behind a shrunk plate.
+         *
+         * This is not a detail: the delivered plates are binary-alpha and about
+         * 59% of each one is empty, so whatever sits behind them *is* most of
+         * the screen. Getting it wrong does not show up as a wrong-coloured
+         * gap, it shows up as the entire cabin being the wrong colour, which is
+         * how the first version of this tinted a navy aeroplane maroon.
+         *
+         * Sampled from the art at load rather than taken from the game palette,
+         * because the palette is a near-black purple and every delivered cabin
+         * is navy. `getPixel` can return null — an unreadable source, a texture
+         * still decoding — so the fallback is the measured average of the
+         * delivered set rather than a palette entry, and it fails to the right
+         * colour instead of to a visible one.
+         */
+        private wallTone(key: string): number {
+            let r = 0, g = 0, b = 0, n = 0;
+            const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
+            if (src?.width) {
+                for (let i = 1; i < 8; i++) {
+                    for (let j = 1; j < 8; j++) {
+                        const px = this.textures.getPixel(
+                            Math.floor(src.width * i / 8), Math.floor(src.height * j / 8), key,
+                        );
+                        if (!px || px.alpha < 250) continue;
+                        r += px.red; g += px.green; b += px.blue; n++;
+                    }
+                }
+            }
+            // Measured across the delivered cabins: rgb(33, 35, 48).
+            if (!n) { r = 33; g = 35; b = 48; n = 1; }
+            // Darkened, because this sits *behind* the art. A fill at the wall's
+            // own brightness flattens the cabin into a single plane.
+            const dim = (v: number) => Math.max(0, Math.min(255, Math.round((v / n) * 0.55)));
+            return (dim(r) << 16) | (dim(g) << 8) | dim(b);
+        }
+
         private buildScenery(len: number, idx: number) {
             const def = SECTIONS[idx];
             const strip = (
@@ -608,14 +649,36 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const plate = (suffix: string, factor: number, depth: number): boolean => {
                 const key = T(`bg-${def.art}-${suffix}`);
                 if (!this.textures.exists(key)) return false;
+
+                // Shrunk to put the drawn furniture on the same scale as the
+                // characters — see PLATE_SHRINK. The sprite still covers the
+                // whole view and the texture simply repeats inside it, so the
+                // cabin gains windows across instead of gaining a gap.
+                const scale = 1 / (ZOOM * PLATE_SHRINK);
                 const ts = this.add.tileSprite(0, 0, VIEW_W, VIEW_H, key).setOrigin(0, 0);
-                ts.setTileScale(1 / ZOOM, 1 / ZOOM);
+                ts.setTileScale(scale, scale);
+                // Tiling starts from the floor rather than from the top of the
+                // screen, so the one row that has to line up — the one the
+                // player walks along — always does, and any repeat happens up
+                // in the ceiling where nothing is standing.
+                ts.tilePositionY = -(VIEW_H - FLOOR_Y) / scale;
                 ts.setDepth(depth);
                 ts.setData('factor', factor);
                 ts.setData('full', true);
                 this.layers.push(ts);
                 return true;
             };
+
+            // A plate shrunk to match the characters no longer fills the screen
+            // on its own, so the gaps between its repeats are backed by a flat
+            // cabin wall. Without this they are transparent and the cabin reads
+            // as floating bands over the void, which is the one thing worse
+            // than furniture at the wrong scale.
+            const midKey = T(`bg-${def.art}-mid`);
+            if (this.textures.exists(midKey)) {
+                this.cabinFill = this.add.rectangle(0, 0, VIEW_W, VIEW_H, this.wallTone(midKey))
+                    .setOrigin(0, 0).setDepth(-9);
+            }
 
             // Far is almost still, mid drifts, near keeps pace with the player
             // and draws in *front* of everything — it is the row of seats you
@@ -2236,6 +2299,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // wrong scale and is not.
             const cam = this.cameras.main;
             const sx = cam.scrollX;
+            this.cabinFill?.setPosition(cam.worldView.x, cam.worldView.y);
             for (const l of this.layers) {
                 const f = l.getData('factor') as number;
                 l.x = cam.worldView.x;
