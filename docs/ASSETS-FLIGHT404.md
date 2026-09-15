@@ -127,6 +127,148 @@ layer its own file. One set per section (`economy`, `galley`, `business`,
 | `bg-<section>-mid` | Cabin walls, lockers, signage. |
 | `bg-<section>-near` | Foreground seat rows the player passes behind. |
 
+
+## Priority 8 — the cast
+
+Six enemies, and every one of them is sold on a comedy beat that takes it out
+of the fight. **The beat is the mechanic**, so the animation for it is not
+decoration: if a player cannot tell at a glance that the Scalper has stopped
+fighting to photograph a drop, the enemy is just a man who sometimes stops
+shooting for no reason.
+
+Every state below is a real state in `cast.ts` with a real duration, listed
+here so an animation can be cut to length. Where a duration is given, that is
+how long the sprite is on screen doing that and nothing else.
+
+### Scalper — cannot help himself
+Throws shoeboxes until something better lands on the floor.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `scalper-approach` | 20 × 26 | 6 | Walk. Phone already half out. |
+| `scalper-throw` | 22 × 26 | 5 | Readable wind-up, same as the thrower mook. |
+| `scalper-photo` | 22 × 26 | 6 | **2.4s.** Both hands on the phone, crouched over the drop, back to the gunfight. The single most important animation in this tier — it is the whole character. |
+| `scalper-grab` | 20 × 26 | 4 | **0.5s.** Stoops, pockets it, straightens. |
+| `scalper-die` | 24 × 26 | 5 | |
+
+### Hypebeast — commitment as a character flaw
+Winds up, commits, and cannot steer out of it.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `hypebeast-stalk` | 22 × 28 | 6 | Sizing you up. |
+| `hypebeast-wind` | 24 × 28 | 3 | **0.45s.** The telegraph. The player is supposed to read this and move — make it unmistakable and make it the same length every time. |
+| `hypebeast-charge` | 26 × 28 | 4 | **1.1s.** Head down, arms back, no steering. |
+| `hypebeast-stunned` | 28 × 22 | 4 | **2.6s.** Face-down in a storefront, legs up. He takes **double damage** here, so this must look like an invitation. |
+| `hypebeast-die` | 26 × 28 | 5 | |
+
+### Reseller — the only one who can rob you
+Fast — the fastest thing in the level, deliberately. Bags loot and runs.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `reseller-seek` | 20 × 26 | 8 | Quick, low, scanning the floor. |
+| `reseller-bag` | 20 × 26 | 4 | **0.6s.** Snatches, into the backpack. |
+| `reseller-flee` | 22 × 26 | 8 | Sprint. Backpack visibly full. The player has **8 seconds** to shoot him before the loot is gone for good, so he must read as "that man is leaving with your things" instantly. |
+| `reseller-drop` | 24 × 26 | 5 | Shot: the bag bursts and everything comes back out. The payoff for paying attention. |
+
+### Mall Security — over-serious
+Narrates the firefight to Control instead of ending it.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `security-patrol` | 22 × 28 | 6 | Slow. Hands behind back where possible. |
+| `security-baton` | 24 × 28 | 4 | |
+| `security-radio` | 22 × 28 | 5 | **1.8s.** Radio to mouth, eyes middle-distance. A donkey may walk past behind him during this and **he must not react** — that is the joke and the code enforces it. |
+| `security-die` | 26 × 28 | 5 | |
+
+### Angry Shop Owner — the shelf wins
+Throws his own stock at you, then turns his back to straighten a display.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `owner-stock` | 22 × 28 | 4 | Behind the counter, furious. |
+| `owner-throw` | 24 × 28 | 5 | Four throw props below, in a fixed order — the player learns the mannequin is coming and it still lands. |
+| `owner-tidy` | 22 × 28 | 6 | **2s.** Back fully turned, squaring up a shelf, mid-firefight. |
+| `owner-die` | 26 × 28 | 5 | |
+| `throw-shoebox` | 12 × 8 | 1 | |
+| `throw-mannequin` | 10 × 26 | 2 | Tumbling. The funny one. |
+| `throw-display` | 14 × 12 | 2 | |
+| `throw-basket` | 14 × 10 | 2 | |
+
+### Falafel Guy — not an enemy, and the art must say so
+He has no attack and the code makes one impossible. He must never read as a
+target, or players will shoot him and feel cheated when nothing happens.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `falafel-serve` | 22 × 26 | 6 | Working. Entirely uninterested in the gunfight. |
+| `falafel-spill` | 30 × 26 | 6 | **1.2s.** Somebody hits the stand, the counter goes over, food is airborne. |
+| `falafel-recover` | 26 × 26 | 6 | **3s.** Picking it all up, muttering. |
+
+## Priority 9 — food, which is a weapon now
+
+Hummus and falafel are separate physics objects because they are separate
+jokes. Hummus arrives and stops; falafel arrives and leaves again.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `hummus-blob` | 10 × 10 | 4 | In flight. Wobbling, not spinning — it is soft. |
+| `hummus-splat` | 16 × 12 | 5 | Contact. Ends as the mark it leaves. |
+| `hummus-smear` | 20 × 14 | 3 | Sitting on a surface, **4.5s**, fading over the last 1.2. The floor version is a **slick that the player slides on**, so it must be visible enough to be fair. |
+| `hummus-drip` | 8 × 16 | 4 | The version that clings to a sign and sags. Total sag is ~21px. |
+| `hummus-worn` | 14 × 10 | 2 | Riding an NPC's head, **3s**. He does not get to shake it off. |
+| `falafel-ball` | 8 × 8 | 4 | Spins. Hard little object — it must not read as soft. |
+| `falafel-bounce` | 10 × 10 | 3 | Squash on contact. Up to 8 bounces, each slower than the last. |
+| `falafel-crumb` | 12 × 8 | 4 | Where it finally stops. |
+| `bowl-roll` | 16 × 12 | 6 | A bowl rolling along the floor, looking for a slope. |
+| `bowl-burst` | 28 × 22 | 7 | It stops, and stopping is what opens it. Catering-tub size gets the big version. |
+| `tray-clang` | 20 × 16 | 3 | The shawarma guy's tray, rung. **He does not look up.** |
+
+## Priority 10 — the background that ignores you
+
+Eight kinds of people who are *structurally incapable* of noticing the player —
+`stepActor` in `background.ts` takes no player argument at all, so awareness is
+not merely discouraged, it cannot be expressed. Everything here must animate
+like it is in a different film from the gunfight happening in front of it.
+
+These are the "wait, why is there a donkey on this plane" tier, and they are
+what turns a corridor shooter into the thing described in the brief. Each needs
+an idle loop plus its beats; the beats fire every 12–34 seconds depending on
+the kind, so they are noticed once and then become furniture, which is correct.
+
+| id | size | frames | notes |
+|---|---|---|---|
+| `bg-coffee-crew` | 34 × 26 | 6 | Men round a fingjan on a burner. Beats: one points at the player *without urgency*; the pot goes round; one leans back to see past the fighting, then leans in again. |
+| `bg-shawarma` | 24 × 30 | 6 | The spit and the man. **He never ducks** — everybody else does, and he does not. Keep his loop unbroken through explosions. |
+| `bg-sweeper` | 18 × 26 | 6 | Sweeping the same patch. Beats: sweeps it again; examines it, unsatisfied. |
+| `bg-balcony` | 30 × 24 | 4 | People leaning out to watch. Beats: somebody leans further; a second arrives; they go back inside, bored. |
+| `bg-porter` | 20 × 32 | 6 | Carrying a stack taller than he is. Beats: the stack wobbles and does not fall; he adds one more; he peers around it. |
+| `bg-argument` | 28 × 26 | 6 | Two men, then briefly three. Nothing is resolved. |
+| `bg-donkey` | 26 × 22 | 6 | Walks. Beats: stops dead in the aisle; **stares at an enemy until he walks around it**; kicks a gate open. |
+| `bg-sheep` | 30 × 18 | 6 | A small flock. Beats: one looks directly at the camera; one goes the wrong way; the flock bunches, then spills. |
+| `bg-duck` | — | 3 | The one sanctioned reaction, shared: everybody drops for **2s** after a nearby blast, then carries on. Deliver as a duck/hold/rise for each kind above, or as one generic crouch if that is cheaper. |
+
+## Priority 11 — dressing, by how wrong the plane has gone
+
+The level walks through four tiers and never goes back: it starts as a plane,
+stops making sense, becomes a market, and ends in bedlam. Dressing is how that
+lands before a single line is read. Tiers are declared per section in
+`content.ts`; the turn happens at section two.
+
+| tier | reads as | dressing ids |
+|---|---|---|
+| `plane` | "I am on a plane." | `dress-seats`, `dress-bins`, `dress-windowwall`, `dress-carpet` |
+| `wrong` | "I am on a plane. Why is there a donkey." | the above plus `dress-galleywall`, `dress-rug` |
+| `shuk` | "This is a market. I am also still on a plane." | `dress-awning`, `dress-hangingcloth`, `dress-stalls`, `dress-lamps`, `dress-rug`, `dress-carpet` |
+| `bedlam` | "Everyone is here and nobody is helping." | all of the above plus `dress-bunting` |
+
+Each `dress-*` is a horizontally tileable strip with alpha, 64px wide, height to
+suit. The important ones are `dress-hangingcloth` and `dress-awning`: they are
+what make a fuselage read as a market while the seats are still visible behind
+them. **The plane must never fully disappear** — the joke only works if you can
+still tell you are on an aeroplane.
+
 ---
 
 ## What we are building against this
@@ -135,5 +277,16 @@ The terrain model, reachability maths and the mover/destructible definitions are
 already in `components/minigames/phaser/flight404/terrain.ts`, with 21 checks in
 `tests/flight404.test.mts`. The climb is arithmetic: one jump lifts 38.3px, no
 rung asks for more than 34.3, and every platform in every section is verified
-climbable from the floor. So the levels can be built and played as code-drawn
-blocks **now**, and each PNG above upgrades them in place as it lands.
+climbable from the floor.
+
+Priorities 8–11 are in the same state. The six enemies are built and tested in
+`cast.ts`, the food physics in `projectiles.ts`, the eight background kinds in
+`background.ts`, and the four-tier escalation in `creep.ts` — every duration
+quoted above is read off a constant in one of those files rather than proposed
+here, so an animation cut to the length given will match the game exactly.
+
+Which means none of this is blocking. The levels can be built and played as
+code-drawn blocks **now**, and each PNG above upgrades them in place as it
+lands, one file at a time, with no code change and no manifest to edit. A
+half-delivered set is not a broken build; it is a game where six things look
+better than they did yesterday.
