@@ -54,7 +54,7 @@ import type { StreetBuyer, HypeEvent } from '../../types/hype';
 import type { SellingSpot } from '../../data/sellingSpots';
 import { MAX_HEAT, MAX_ENERGY } from '../../constants';
 import { interestedIn } from './buyers';
-import { spotChance, gradeOf } from '../market/authenticity';
+import { gradeOf, caughtWith } from '../market/authenticity';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -394,7 +394,15 @@ export function resolveSale(
     }
 
     // --- 3. Do they clock the fake before paying for it? ---
-    if (item.isFake && Math.random() < spotChance(buyer.eye, gradeOf(item))) {
+    // A street buyer is not a counter with a policy — he is one man deciding
+    // whether to turn the shoe over in his hands. His `eye` says how good he is
+    // at it; how often he bothers scales with the same eye, because someone who
+    // knows what to look for is someone who looks. See `docs/TRUST.md`.
+    if (caughtWith(
+        item,
+        { securityLevel: buyer.eye * 2, heat: player.heat },
+        buyer.eye,
+    )) {
         const flagged: Player = {
             ...player,
             heat: clamp(player.heat + 8, 0, MAX_HEAT),

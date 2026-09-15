@@ -32,7 +32,7 @@ import { reseedHypeCalendar } from '../systems/events/hypeCalendar';
 import { clearRumorCache } from '../systems/rumorEngine';
 import { saveRun, loadRun, clearRun } from '../systems/persistence/save';
 import { skimCard } from '../systems/banking';
-import { spotChance, gradeOf } from '../systems/market/authenticity';
+import { gradeOf, caughtWith } from '../systems/market/authenticity';
 
 /**
  * Odds a card gets skimmed on arriving somewhere new. Low: this should be a
@@ -489,9 +489,20 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
                 // The shop's own rigour, less whatever the grade hides. A
                 // street rep fails a casual glance; an unauthorised pair walks
                 // past most counters.
-                const rigour = Math.min(0.95, securityLevel * 0.4 + state.player.heat / 400);
-                const detectionChance = spotChance(rigour, gradeOf(itemToSell));
-                if (Math.random() < detectionChance) {
+                // Two rolls, not one: does anyone look, and can they see. The
+                // single roll this replaces meant a securityLevel 0 counter
+                // caught an unauthorised pair 7% of the time, so the whole
+                // "who do you sell to" decision collapsed into "the grimiest
+                // shop in town, always". See `docs/TRUST.md`.
+                //
+                // The clerk's eye is his own; the shop's policy only decides how
+                // often he bothers to use it.
+                const eye = 0.35 + securityLevel * 0.3;
+                if (caughtWith(
+                    itemToSell,
+                    { securityLevel, heat: state.player.heat },
+                    eye,
+                )) {
                     const fine = Math.round(price * 0.2);
                     // Getting caught in a shop is not a private embarrassment.
                     // The story travels: the store's own clerk remembers it, and

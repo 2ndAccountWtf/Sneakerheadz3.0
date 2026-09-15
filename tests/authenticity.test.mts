@@ -13,7 +13,7 @@ import {
     AUTH_GRADES, GRADE_COST, GRADE_DIFFICULTY, GRADE_LABEL,
     gradeOf, isCounterfeit, fakeFlagFor, spotChance, gradePrice,
     claimedGradeOf, isPassedOff, leakRateFor, gradeForLeak,
-    LEAK_RATE,
+    LEAK_RATE, checkChance, caughtWith, catchChance, CHECK_FLOOR, CHECK_CEILING,
     type AuthGrade,
 } from '../systems/market/authenticity.ts';
 import { rngFor } from '../utils/rng.ts';
@@ -182,6 +182,120 @@ t('a leak is listed at the price of what it claims to be', () => {
     // stock, so the price signal was cut and the mystery rests on rigour, seller
     // talk and a paid LegitCheck instead. See the note in authenticity.ts.
     assert.equal(GRADE_COST[claimedGradeOf({ grade: 'super', claimed: 'retail' })], GRADE_COST.retail);
+});
+
+console.log('\nlooking is not the same as seeing');
+
+t('even the laziest counter in the game gives it a look', () => {
+    // The whole reason reps did not pay: a securityLevel 0 counter worked out at
+    // a 7% chance of catching an unauthorised pair, so a rep-runner was searched
+    // 0.4 times in thirty simulated days. A floor puts the risk back.
+    const lazy = checkChance({ securityLevel: 0 });
+    assert.ok(lazy >= CHECK_FLOOR, `a trunk checks ${lazy}, under the floor`);
+    assert.ok(lazy <= 0.2, `a trunk checks ${lazy} — that is not a trunk, that is a shop`);
+});
+
+t('the better the shop, the more often it looks', () => {
+    const a = checkChance({ securityLevel: 0 });
+    const b = checkChance({ securityLevel: 1 });
+    const c = checkChance({ securityLevel: 2 });
+    assert.ok(a < b && b < c, `not monotonic in rigour: ${a}, ${b}, ${c}`);
+    assert.ok(c > 0.8, `a gallery only checks ${c} of the time`);
+});
+
+t('nobody is ever a certainty', () => {
+    // A ceiling below 1 means there is always a shop worth trying, which keeps
+    // "notorious" a hostile way to play rather than a dead end.
+    const worst = checkChance({ securityLevel: 2, suspicion: 1, heat: 100 });
+    assert.ok(worst <= CHECK_CEILING, `the worst case is ${worst}, a certainty`);
+});
+
+t('a shop that has caught you before stops being lazy', () => {
+    const cold = checkChance({ securityLevel: 0 });
+    const burned = checkChance({ securityLevel: 0, suspicion: 1 });
+    assert.ok(burned > cold * 3, `being remembered only moved it ${cold} -> ${burned}`);
+    assert.ok(burned > 0.8, `a shop that caught you still only checks ${burned}`);
+});
+
+t('heat leans on it without deciding it', () => {
+    const cool = checkChance({ securityLevel: 1, heat: 0 });
+    const hot = checkChance({ securityLevel: 1, heat: 100 });
+    assert.ok(hot > cool, 'heat did nothing');
+    assert.ok(hot - cool < 0.3, 'heat is doing the shop rigour\'s job');
+});
+
+t('a distracted clerk checks less, but somebody always glances', () => {
+    const sober = checkChance({ securityLevel: 2 });
+    const beered = checkChance({ securityLevel: 2, distraction: 0.6 });
+    assert.ok(beered < sober, 'the beers did nothing');
+    // Never a cloak: a full distraction must not reach zero, or the schmooze
+    // becomes permanent immunity and the rep game stops being a gamble.
+    const blackout = checkChance({ securityLevel: 2, distraction: 1 });
+    assert.ok(blackout > 0, 'a schmooze bought total immunity');
+});
+
+t('the real thing is never caught, however hard they look', () => {
+    const always = () => 0;   // every roll succeeds
+    assert.equal(caughtWith({ grade: 'retail' }, { securityLevel: 2, suspicion: 1 }, 1, always), false);
+    assert.equal(caughtWith({}, { securityLevel: 2, suspicion: 1 }, 1, always), false);
+});
+
+t('a fake is only caught when they both look and see', () => {
+    const never = () => 0.999;  // every roll fails
+    const always = () => 0;
+    assert.equal(caughtWith({ grade: 'street' }, { securityLevel: 2 }, 1, always), true);
+    assert.equal(caughtWith({ grade: 'street' }, { securityLevel: 2 }, 1, never), false);
+    // Looked but could not see: a perfect eye is wasted on a grade it cannot read.
+    assert.equal(caughtWith({ grade: 'unauthorised' }, { securityLevel: 2 }, 0, always), false);
+});
+
+t('the grimy counter is no longer a free dump', () => {
+    // The number the simulation complained about. Passing an unauthorised pair
+    // over the worst counter in the game used to be caught ~7% of the time.
+    let caught = 0;
+    const rng = rngFor('grimy-counter');
+    for (let i = 0; i < 4000; i++) {
+        if (caughtWith({ grade: 'unauthorised' }, { securityLevel: 0, heat: 20 }, 0.5, rng)) caught++;
+    }
+    const rate = caught / 4000;
+    // Still the safest channel — that is correct, it is why you would use it —
+    // but no longer free.
+    assert.ok(rate > 0.01, `only ${(rate * 100).toFixed(1)}% caught; still a free dump`);
+    assert.ok(rate < 0.2, `${(rate * 100).toFixed(1)}% caught; the grimy shop is no longer worth using`);
+});
+
+t('who you sell to is still the decision', () => {
+    // The point of the whole ladder. The same pair, over two counters.
+    const run = (securityLevel: number, eye: number) => {
+        const rng = rngFor(`channel-${securityLevel}`);
+        let caught = 0;
+        for (let i = 0; i < 4000; i++) {
+            if (caughtWith({ grade: 'super' }, { securityLevel }, eye, rng)) caught++;
+        }
+        return caught / 4000;
+    };
+    const trunk = run(0, 0.3);
+    const gallery = run(2, 0.8);
+    assert.ok(gallery > trunk * 4, `the gallery (${gallery}) is barely worse than the trunk (${trunk})`);
+});
+
+t('the odds and the roll agree', () => {
+    // `catchChance` is the number, `caughtWith` is the roll. They must not be
+    // allowed to drift: a second hand-written copy of check x spot is exactly
+    // how the single-roll bug survived three call sites.
+    const look = { securityLevel: 1, heat: 30 };
+    const eye = 0.6;
+    const p = catchChance({ grade: 'super' }, look, eye);
+    const rng = rngFor('odds-vs-roll');
+    let caught = 0;
+    const N = 20000;
+    for (let i = 0; i < N; i++) if (caughtWith({ grade: 'super' }, look, eye, rng)) caught++;
+    const observed = caught / N;
+    assert.ok(Math.abs(observed - p) < 0.02, `stated ${p.toFixed(3)} but rolled ${observed.toFixed(3)}`);
+});
+
+t('the real thing has no odds against it at all', () => {
+    assert.equal(catchChance({ grade: 'retail' }, { securityLevel: 2, suspicion: 1 }, 1), 0);
 });
 
 console.log(`\n${pass} authenticity checks passed.\n`);

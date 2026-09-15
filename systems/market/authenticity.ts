@@ -186,3 +186,106 @@ export function gradeForLeak(securityLevel: number, rng: () => number): AuthGrad
  * player still cannot form a view, the missing signal is more seller dialogue,
  * not a cheaper sticker.
  */
+
+/* ------------------------------------------------------------------ *
+ * Looking, and seeing
+ * ------------------------------------------------------------------ */
+
+/**
+ * Whether anybody examines the pair at all.
+ *
+ * This is the half that was missing, and its absence is why running reps does
+ * not pay. One roll used to do both jobs: a `securityLevel 0` counter worked out
+ * at about `0 × 0.4 + heat/400` ≈ 0.24 even at heat 97, and against an
+ * `unauthorised` pair that is a 7% chance of being caught. Simulated over 400
+ * runs, a rep-runner dumping over such a counter was searched **0.4 times in
+ * thirty days** — so "who do you sell to" collapsed to "always the grimiest shop
+ * in town", which is not a decision.
+ *
+ * Splitting it fixes that without making the grimy clerk sharp-eyed, which would
+ * have been the wrong lie: he is not better at spotting fakes, he just can't be
+ * bothered most of the time. **Most of the time is not every time.** Even the
+ * worst counter in the game gives the pair a look now and then, and that floor
+ * is what puts the risk back in the channel.
+ *
+ * It is also the hook everything else in `docs/TRUST.md` hangs off. Trust,
+ * per-shop suspicion and the schmooze all move *this* number — whether you get
+ * looked at — and leave `spotChance` alone, because none of them change how good
+ * anybody's eyes are.
+ */
+
+/** Even the laziest counter in the game looks this often. */
+export const CHECK_FLOOR = 0.1;
+/** Nobody is a certainty, so a clean pair is always worth trying somewhere. */
+export const CHECK_CEILING = 0.95;
+
+/**
+ * How often a counter of a given rigour bothers to look.
+ *
+ * `securityLevel` is authored 0–2 per store. A gallery that authenticates
+ * everything checks nearly always; a man with a trunk checks about one time in
+ * ten. `suspicion` is that specific shop's memory of you and is the sharpest
+ * term here: a counter that has caught you once checks you nearly every time,
+ * whatever its posted policy, which is what makes getting caught burn the venue
+ * rather than the city.
+ *
+ * `heat` still leans on it, because a man the police are asking about is a man
+ * whose merchandise gets a second look.
+ */
+export function checkChance(opts: {
+    securityLevel: number;
+    /** 0..1. This shop's memory of you. */
+    suspicion?: number;
+    /** 0..100. */
+    heat?: number;
+    /** 0..1. Beers, a joint, a coffee. Subtracted last. */
+    distraction?: number;
+}): number {
+    const { securityLevel, suspicion = 0, heat = 0, distraction = 0 } = opts;
+    const base = CHECK_FLOOR + Math.max(0, Math.min(2, securityLevel)) * 0.38;
+    // A shop that has been burned by you stops honouring its own laziness.
+    const remembered = base + (1 - base) * Math.max(0, Math.min(1, suspicion));
+    const hot = remembered + Math.max(0, Math.min(100, heat)) / 400;
+    const looked = hot * (1 - Math.max(0, Math.min(1, distraction)));
+    // The floor survives a distraction: somebody always glances. Buying the
+    // clerk a beer is an edge, never a cloak.
+    return Math.max(CHECK_FLOOR * 0.5, Math.min(CHECK_CEILING, looked));
+}
+
+/**
+ * The odds of being made: they have to look *and* see.
+ *
+ * Exported as the number as well as the roll, because anything reasoning about
+ * risk — the buy policy in `tests/rep-economy.test.mts`, a future "is this worth
+ * it" hint — needs the probability, and a second hand-written copy of
+ * `check × spot` is exactly how the old single-roll bug survived three call
+ * sites. One definition, used by both.
+ */
+export function catchChance(
+    item: { grade?: AuthGrade; isFake?: boolean },
+    look: Parameters<typeof checkChance>[0],
+    eye: number,
+): number {
+    const grade = gradeOf(item);
+    if (!isCounterfeit(grade)) return 0;
+    return checkChance(look) * spotChance(eye, grade);
+}
+
+/**
+ * The whole detection sequence, rolled.
+ *
+ * Two rolls rather than one multiplied probability, so the two halves stay
+ * distinguishable in play: "he never even looked" and "he looked and shrugged"
+ * are different stories, and a later pass can narrate them differently.
+ */
+export function caughtWith(
+    item: { grade?: AuthGrade; isFake?: boolean },
+    look: Parameters<typeof checkChance>[0],
+    eye: number,
+    rng: () => number = Math.random,
+): boolean {
+    const grade = gradeOf(item);
+    if (!isCounterfeit(grade)) return false;
+    if (rng() >= checkChance(look)) return false;   // nobody looked
+    return rng() < spotChance(eye, grade);          // they looked, did they see
+}

@@ -67,7 +67,7 @@ import type { OutcomeLogEntry } from '../types/game';
 import { SNEAKERS } from '../data/sneakers';
 import { COLLECTORS, type Collector } from '../data/collectors';
 import { MAX_HEAT } from '../constants';
-import { spotChance, gradeOf } from './market/authenticity';
+import { gradeOf, caughtWith } from './market/authenticity';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
@@ -392,7 +392,14 @@ export function resolveDeal(state: NegotiationState, player: Player, day: number
     }
 
     // --- 2. Do they clock the fake before paying for it? ---
-    if (item.isFake && Math.random() < spotChance(fakeDetectChance(collector, player), gradeOf(item))) {
+    // A collector came specifically to examine a shoe, so he nearly always
+    // looks — securityLevel 2 — and his eye is the sharpest in the game, less
+    // whatever your relationship buys you in benefit of the doubt.
+    if (caughtWith(
+        item,
+        { securityLevel: 2, heat: player.heat },
+        fakeDetectChance(collector, player),
+    )) {
         const confiscated = {
             ...player,
             inventory: player.inventory.filter(i => i.instanceId !== item.instanceId),
