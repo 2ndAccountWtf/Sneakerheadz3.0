@@ -29,8 +29,21 @@
 const SAVE_KEY = 'sdw:run:v1';
 const SCORES_KEY = 'sdw:scores:v1';
 
-/** Bumped whenever the saved shape changes incompatibly. */
-export const SAVE_VERSION = 1;
+/**
+ * Bumped whenever the *run* shape changes incompatibly.
+ *
+ * v2: `mood` and `cleanliness` left the player. Both were write-only — items
+ * moved them, the stats screen drew them, and no rule ever read either — so
+ * they were cut rather than given a job. A v1 run carries two fields the game
+ * no longer has, and per rule 2 above that is a discard, not a migration.
+ */
+export const SAVE_VERSION = 2;
+
+/**
+ * The scoreboard versions separately, because `RunScore` has not changed and a
+ * run-shape bump has no business wiping somebody's personal best.
+ */
+export const SCORES_VERSION = 1;
 
 /** How many finished runs to keep. Enough to see a personal best move. */
 export const MAX_SCORES = 25;
@@ -128,7 +141,7 @@ export interface RunScore {
     name?: string;
 }
 
-export const loadScores = (): RunScore[] => read<RunScore[]>(SCORES_KEY, SAVE_VERSION) ?? [];
+export const loadScores = (): RunScore[] => read<RunScore[]>(SCORES_KEY, SCORES_VERSION) ?? [];
 
 /**
  * File a finished run. Returns the board and whether this run topped it, so
@@ -140,7 +153,7 @@ export function recordScore(score: RunScore): { scores: RunScore[]; isBest: bool
     const scores = [...previous, score]
         .sort((a, b) => b.netWorth - a.netWorth)
         .slice(0, MAX_SCORES);
-    write(SCORES_KEY, SAVE_VERSION, scores);
+    write(SCORES_KEY, SCORES_VERSION, scores);
     return { scores, isBest: score.netWorth > previousBest };
 }
 

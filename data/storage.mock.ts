@@ -19,10 +19,10 @@ import { StorageItem, ItemEffect, AmpmAisle, SoftStat } from '../types';
  *
  *  - `effects[]` is the ONLY thing the reducer reads today (`USE_STORAGE_ITEM`).
  *    Guaranteed health/energy therefore lives there, as `chance: 1.0`.
- *  - `deltas` carries the stats `ItemEffect` cannot express — mood, focus,
- *    cleanliness — plus health/energy for items that have no `stat_change`
- *    effect at all. An item never declares the same stat in both places, so
- *    whichever system reads them can't double-count.
+ *  - `deltas` carries the stats `ItemEffect` cannot express — focus — plus
+ *    health/energy for items that have no `stat_change` effect at all. An item
+ *    never declares the same stat in both places, so whichever system reads
+ *    them can't double-count.
  *  - `digestiveRisk` is the chance this ends in a bathroom emergency. Chocolate
  *    milk in a bag is the ceiling (0.35). Everything else is measured against it.
  *  - `gas` feeds the hidden gas meter. Legumes, dairy and carbonation only.
@@ -79,7 +79,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.08,
-    deltas: soft({ mood: 4 }),
     effects: [
       gain('energy', 16),
       say("You feel gassy. A foul wind blows.", 0.3),
@@ -99,7 +98,6 @@ export const storageMock: StorageItem[] = [
     flavor: "The comforting taste of the Levant.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 3, cleanliness: -2 }),
     effects: [
       gain('health', 12),
       say("Crumbs everywhere. Worth it."),
@@ -121,7 +119,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.1,
-    deltas: soft({ mood: 5, cleanliness: -6 }),
     effects: [
       gain('health', 15),
       say("Grease coats your soul. You feel comforted and heavy."),
@@ -143,7 +140,7 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 2,
     digestiveRisk: 0.18,
-    deltas: soft({ mood: 6, cleanliness: -8, focus: -3 }),
+    deltas: soft({ focus: -3 }),
     effects: [
       gain('energy', 26),
       say("The bottom gives out in the last third. It always does. You knew."),
@@ -164,7 +161,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Nutritionally excellent. Socially catastrophic.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: -14, mood: -2 }),
     effects: [
       gain('health', 14),
       say("Protein secured. Your breath is now a weapon you cannot put down."),
@@ -185,7 +181,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     gas: 1,
-    deltas: soft({ cleanliness: -10 }),
     effects: [
       gain('energy', 9),
       say("You eat a hard-boiled egg in public. The air changes."),
@@ -206,7 +201,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The brine is the product. The pickles are packaging.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ energy: 6, focus: 3, mood: -2 }),
+    deltas: soft({ energy: 6, focus: 3 }),
     effects: [
       say("You drink the brine first, like a man with nothing to prove."),
       say("Your face does something involuntary. A stranger witnesses it.", 0.5),
@@ -228,7 +223,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.12,
-    deltas: soft({ mood: 2 }),
     effects: [
       gain('health', 8),
       say("You lick the lid. Everyone does. Nobody admits it."),
@@ -250,7 +244,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.14,
-    deltas: soft({ mood: -3 }),
     effects: [
       gain('health', 12),
       say("Excellent macros. Zero street credibility. You eat it fast, standing up."),
@@ -271,7 +264,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Dense, honest, and structurally committed to your fingers.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: -12, mood: 4 }),
     effects: [
       gain('energy', 22),
       say("STICKY HANDS. Everything you touch for the next hour knows what you did."),
@@ -291,7 +283,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Bought firm. Will not be firm when you get there.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ energy: 4, mood: 1 }),
+    deltas: soft({ energy: 4 }),
     effects: [
       gain('health', 6),
       say("Solid banana. No notes."),
@@ -311,7 +303,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Nature's caramel, priced like a mineral.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 4 }),
     effects: [
       gain('energy', 14),
       say("Two dates and a glass of water. Somewhere, a grandfather is nodding."),
@@ -332,7 +323,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Priced per kilo of shell.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: -2, cleanliness: -5 }),
+    deltas: soft({ focus: -2 }),
     effects: [
       gain('energy', 12),
       say("You spend twenty seconds on one that was never going to open. You lose the twenty seconds.", 0.45),
@@ -374,7 +365,6 @@ export const storageMock: StorageItem[] = [
     flavor: "The official taste of being broke.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 3 }),
     effects: [
       gain('health', 10),
       say("You consume the sodium brick. You are now 40% salt."),
@@ -395,7 +385,7 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     digestiveRisk: 0.25,
-    deltas: soft({ focus: 5, cleanliness: -6, mood: -2 }),
+    deltas: soft({ focus: 5 }),
     effects: [
       gain('energy', 16),
       say("Sweat on the forehead by noodle four. You do not stop. Nobody asked you to continue."),
@@ -416,7 +406,7 @@ export const storageMock: StorageItem[] = [
     flavor: "A perfect triangle of handheld happiness.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 3, focus: 2 }),
+    deltas: soft({ focus: 2 }),
     effects: [
       gain('health', 10),
       say("Efficient sustenance consumed. You feel slightly more anime."),
@@ -438,7 +428,7 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.12,
-    deltas: soft({ mood: 7, focus: -4 }),
+    deltas: soft({ focus: -4 }),
     effects: [
       gain('health', 30),
       say("You ate a brick of cheese. Movement speed decreased."),
@@ -467,7 +457,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 2,
     digestiveRisk: 0.35,
-    deltas: soft({ mood: 6 }),
     effects: [
       gain('energy', 12),
       afflict('diarrhea', 2, "You have explosive diarrhea. Travel is... risky.", 0.2),
@@ -491,7 +480,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.2,
-    deltas: soft({ mood: 5 }),
     effects: [
       gain('energy', 10),
       say("Cold, sweet, structurally sound. A good day."),
@@ -512,7 +500,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Burnt at 04:00, served at 14:00, drunk without comment.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: 10, mood: 2 }),
+    deltas: soft({ focus: 10 }),
     effects: [
       gain('energy', 22),
       say("Hot, bitter, correct."),
@@ -534,7 +522,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Tastes like battery acid and victory.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: 6, mood: 3 }),
+    deltas: soft({ focus: 6 }),
     effects: [
       gain('energy', 20),
       say("Heart rate is now techno BPM. Vision is vibrating."),
@@ -558,8 +546,8 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     gas: 1,
+    deltas: soft({ energy: 2 }),
     uselessness: "It is water with an attitude. Hydrating, and that is the whole résumé.",
-    deltas: soft({ mood: 1 }),
     effects: [
       say("Hydrated. Nothing else happens. You are, however, hydrated."),
       say("CARBONATION CRITICAL. The bubbles hit the roof of your skull and you move like a man with a plan.", 0.05),
@@ -581,7 +569,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 2,
     digestiveRisk: 0.16,
-    deltas: soft({ mood: -1 }),
     effects: [
       gain('energy', 14),
       say("Thick. You chew it slightly. That is not a drink behaviour."),
@@ -602,7 +589,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The machine whispers. This is what it wants.",
     addedAgo: "20m",
     stackable: true,
-    deltas: soft({ mood: 6, focus: -4 }),
+    deltas: soft({ focus: -4 }),
     effects: [
       gain('energy', 8),
       say("Brain freeze. Worth it. Probably.", 0.6),
@@ -625,7 +612,7 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 2,
     digestiveRisk: 0.18,
-    deltas: soft({ mood: -2, focus: 2 }),
+    deltas: soft({ focus: 2 }),
     effects: [
       gain('energy', 8),
       say("Your gut biome is now a battlefield. Morale improved?"),
@@ -645,7 +632,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Tastes like lawn clippings and self-improvement.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: -6, health: 4 }),
+    deltas: soft({ health: 4 }),
     effects: [
       gain('energy', 15),
       say("It tastes like punishment. Health +1, Joy -5."),
@@ -666,7 +653,7 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     gas: 1,
-    deltas: soft({ focus: 4, mood: -1 }),
+    deltas: soft({ focus: 4 }),
     effects: [
       say("Bitter, dry, faintly medicinal. You enjoy it and this troubles you."),
       gain('energy', 6),
@@ -685,7 +672,7 @@ export const storageMock: StorageItem[] = [
     flavor: "From the heated shelf. Warm can, cold morning, no complaints.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: 8, mood: 4 }),
+    deltas: soft({ focus: 8 }),
     effects: [
       gain('energy', 12),
       say("Grassy, sweet, unhurried. For six minutes you are a calm person."),
@@ -695,9 +682,9 @@ export const storageMock: StorageItem[] = [
   // =======================================================================
   // BAKERY — the front counter. Warm, cheap, and the only aisle whose stock
   // doubles as ordnance.
-  // Design intent: bakery is where mood lives. It is also where the baguette
-  // lives, and the baguette has been a melee weapon in this game longer than
-  // it has been bread. Both readings are correct.
+  // Design intent: bakery is cheap energy, bought warm. It is also where the
+  // baguette lives, and the baguette has been a melee weapon in this game
+  // longer than it has been bread. Both readings are correct.
   // =======================================================================
   {
     id: "itm-baguette",
@@ -712,7 +699,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Crust does crit damage at close range.",
     addedAgo: "1d",
     stackable: true,
-    deltas: soft({ mood: 5, energy: 6, cleanliness: -4 }),
+    deltas: soft({ energy: 6 }),
     effects: [
       say("You tear the end off and eat it walking. This is the correct way."),
       say("\"Is that bread?\" \"It's tactical.\"", 0.3),
@@ -751,7 +738,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Ninety per cent butter, ten per cent air, one hundred per cent worth it.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 9, cleanliness: -5 }),
     effects: [
       gain('energy', 12),
       say("Shatters correctly. Your morning improves for no defensible reason."),
@@ -773,7 +759,7 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     digestiveRisk: 0.06,
-    deltas: soft({ mood: 8, focus: -3 }),
+    deltas: soft({ focus: -3 }),
     effects: [
       gain('energy', 14),
       say("Glaze on the thumb. Licked without ceremony."),
@@ -794,7 +780,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Sold by weight. Consumed by volume.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 10, cleanliness: -7 }),
     effects: [
       gain('energy', 18),
       say("Syrup on every finger. You have committed to the tray."),
@@ -814,7 +799,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Structurally a brick. Emotionally a hug.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 5, cleanliness: -5 }),
     effects: [
       gain('health', 14),
       say("Seeds in your teeth for the rest of the day. Every single one of them."),
@@ -834,7 +818,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Contains no melon. Has never contained melon. Nobody minds.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 7 }),
     effects: [
       gain('energy', 13),
       say("The crust cracks like sugar glass. You feel briefly wholesome."),
@@ -854,7 +837,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     digestiveRisk: 0.08,
-    deltas: soft({ mood: -2 }),
     effects: [
       gain('energy', 10),
       say("Dry. Aggressively dry. You need a drink you did not buy."),
@@ -882,7 +864,7 @@ export const storageMock: StorageItem[] = [
     flavor: "A two-hour activity disguised as a snack.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: 8, cleanliness: -10 }),
+    deltas: soft({ focus: 8 }),
     effects: [
       say("Shell, split, spit, repeat. Your hands are busy and your mind is clear."),
       say("SHELLS EVERYWHERE. A trail of them leads directly to you.", 0.65),
@@ -902,7 +884,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The cheapest thing in the store that reliably changes how people treat you.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ focus: 6, cleanliness: 4 }),
+    deltas: soft({ focus: 6 }),
     effects: [
       say("Sharp mint. Your jaw has something to do. Your hands stop fidgeting."),
       say("You offer a piece to a stranger. They take it and say nothing. Deal closed.", 0.25),
@@ -923,7 +905,7 @@ export const storageMock: StorageItem[] = [
     flavor: "No drugs involved. Just sugar, and a great deal of it.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 10, focus: -5 }),
+    deltas: soft({ focus: -5 }),
     effects: [
       gain('energy', 18),
       say("SUGAR RUSH. You are talking faster and the sentences are not shorter."),
@@ -944,7 +926,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The bag is eighty per cent air and the air is also seasoned.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 7, health: -4, cleanliness: -9 }),
+    deltas: soft({ energy: 8, health: -4 }),
     effects: [
       say("Orange fingertips. They will transfer to everything you own."),
       say("You open it during a quiet moment. Everyone turns around.", 0.3),
@@ -963,7 +945,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Never once been a disappointment. Occasionally been a liquid.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 7 }),
     effects: [
       gain('energy', 12),
       say("Cheap cocoa and vegetable fat. You are not complaining."),
@@ -983,7 +964,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Weighs nothing. Disappears instantly. Nationally non-negotiable.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 6, cleanliness: -5 }),
+    deltas: soft({ energy: 5 }),
     effects: [
       say("Gone. The bag is empty and you have no memory of the middle of it."),
       say("Peanut dust on your fingers and the front of your shirt. Standard.", 0.5),
@@ -1002,7 +983,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Fried wheat, grill flavour, no grill involved at any stage.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 5, focus: 2 }),
+    deltas: soft({ focus: 2 }),
     effects: [
       say("Loud. Genuinely loud. Conversation pauses around you."),
       say("A shard wedges itself into your gum and stays there for two days.", 0.25),
@@ -1021,7 +1002,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Dry, salty, and entirely reasonable. The beige option.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ energy: 4, mood: 2 }),
+    deltas: soft({ energy: 4 }),
     effects: [
       say("Adequate. Nobody has ever been excited about this and nobody has ever complained."),
     ],
@@ -1040,7 +1021,7 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     uselessness: "Nutritionally this is a rumour. You will be hungry in eleven minutes.",
-    deltas: soft({ health: 3, mood: 1 }),
+    deltas: soft({ health: 3 }),
     effects: [
       say("It dissolves on contact. You eat the whole pack and feel nothing but salt."),
       say("A sheet sticks to your front tooth and stays there through two conversations.", 0.3),
@@ -1059,7 +1040,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Advertised as nuts. Delivered as raisins.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: -1 }),
     effects: [
       gain('energy', 12),
       say("You pick out the almonds. You are left with a bag of raisins and a lesson."),
@@ -1079,7 +1059,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     uselessness: "You will eat the entire bag and remain hungry. This is by design.",
-    deltas: soft({ mood: 3, cleanliness: -4 }),
     effects: [
       say("Slightly stale. You keep eating because the bag has not yet said stop."),
       say("A kernel hull lodges under your gum. It will outlast this playthrough.", 0.3),
@@ -1098,7 +1077,6 @@ export const storageMock: StorageItem[] = [
     flavor: "Sixty per cent structure, forty per cent brown.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 5, cleanliness: -3 }),
     effects: [
       gain('energy', 10),
       say("It disintegrates on the first bite and the rest is dust management."),
@@ -1126,7 +1104,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.12,
-    deltas: soft({ mood: 9 }),
     effects: [
       gain('energy', 14),
       say("Eaten with the small flat spoon that comes taped to the lid."),
@@ -1148,7 +1125,6 @@ export const storageMock: StorageItem[] = [
     stackable: true,
     gas: 1,
     digestiveRisk: 0.12,
-    deltas: soft({ mood: 14 }),
     effects: [
       gain('energy', 16),
       say("Real pistachio. Not green. The good kind is never green."),
@@ -1169,7 +1145,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     gas: 1,
     digestiveRisk: 0.15,
-    deltas: soft({ mood: 22 }),
     effects: [
       gain('energy', 22),
       say("LOCAL ICE CREAM SHORTAGE. You are the reason. It is on the feed within the hour."),
@@ -1192,7 +1167,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     digestiveRisk: 0.1,
-    deltas: soft({ mood: 4 }),
     effects: [
       gain('health', 18),
       say("Cooked somewhere, somehow. The cheese has gone to one corner and stayed there."),
@@ -1212,7 +1186,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Sugar water in a plastic sleeve. Two flavours: blue and red.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 5, focus: -2 }),
+    deltas: soft({ energy: 5, focus: -2 }),
     effects: [
       say("Cold. Blue. Structurally a sugar icicle."),
       say("Your tongue is blue. Again. Someone comments. Again.", 0.4),
@@ -1233,7 +1207,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     gas: 2,
-    deltas: soft({ mood: 2 }),
     effects: [
       gain('health', 10),
       say("Salted, podded, eaten. You feel briefly like a man with a plan."),
@@ -1339,7 +1312,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Lemon-scented, industrial strength, absolutely not for skin.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 18, health: -2 }),
+    deltas: soft({ focus: 5, health: -2 }),
     effects: [
       say("CLEAN. You smell like a corridor in a hospital and people are noticeably warmer to you."),
       say("You use it on a sneaker. It works, and it takes a little colour with it.", 0.3),
@@ -1379,7 +1352,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Soft side, green side. Everyone knows which side is the violent one.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 6 }),
+    deltas: soft({ focus: 3 }),
     effects: [
       say("You scrub a scuff off a midsole. It mostly works. The green side did most of it."),
     ],
@@ -1459,9 +1432,9 @@ export const storageMock: StorageItem[] = [
   },
 
   // =======================================================================
-  // PERSONAL CARE — the shelf that quietly runs the social game.
-  // Design intent: cleanliness is a real stat and this is the only aisle that
-  // moves it upward. Deodorant is not a joke item. Not using deodorant is.
+  // PERSONAL CARE — the shelf you visit before a negotiation.
+  // Design intent: looking like you have your life together is composure, and
+  // composure is `focus`. Deodorant is not a joke item. Skipping it is.
   // =======================================================================
   {
     id: "itm-deodorant",
@@ -1476,7 +1449,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Forty-eight hour protection, in a city that does not respect the claim.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 22, mood: 3 }),
+    deltas: soft({ focus: 6 }),
     effects: [
       say("Applied in the street, without shame. NPC attitudes improve measurably."),
       say("Without this, the next three conversations all open with: \"Bro...\"", 0.2),
@@ -1495,7 +1468,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Sold at the till for people whose day has gone longer than planned.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 12, mood: 2 }),
+    deltas: soft({ focus: 4 }),
     effects: [
       say("You brush your teeth in a public bathroom at an hour that raises questions."),
       say("The bristles are the hard kind. Your gums register a protest.", 0.3),
@@ -1514,7 +1487,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Twenty seconds of pain, forty minutes of being taken seriously.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 16, focus: 4, mood: -1 }),
+    deltas: soft({ focus: 4 }),
     effects: [
       say("It burns. You hold it the full twenty seconds. Every conversation for the next hour goes better."),
       say("Cancels the tuna. Completely. This is what it was made for.", 0.4),
@@ -1535,7 +1508,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     uselessness: "Purely cosmetic. Changes nothing except how some people talk to you, which is not nothing.",
-    deltas: soft({ mood: 5 }),
     effects: [
       say("You put them on indoors. Two NPCs adjust their tone. One of them respects you now."),
       say("They are slightly crooked on your face and you will never know.", 0.35),
@@ -1555,7 +1527,7 @@ export const storageMock: StorageItem[] = [
     flavor: "DRIP +5. Also hold level: architectural.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 6, cleanliness: -3 }),
+    deltas: soft({ focus: 4 }),
     effects: [
       say("DRIP +5. Your hair does not move for nine hours, including in wind."),
       say("It goes crunchy by the afternoon and someone touches it without asking.", 0.3),
@@ -1574,7 +1546,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The correct answer to almost everything that happens in the food aisle.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 14 }),
+    deltas: soft({ focus: 3 }),
     effects: [
       say("You clean your hands, then a sneaker, then the sneaker again because the first pass made it worse."),
       say("The pack does not reseal. They will be dry by Thursday.", 0.4),
@@ -1593,7 +1565,7 @@ export const storageMock: StorageItem[] = [
     flavor: "Preventing a problem you will never notice you avoided.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ health: 6, cleanliness: -2 }),
+    deltas: soft({ health: 6 }),
     effects: [
       say("Applied unevenly. There is a white streak on one ear for the entire day."),
       say("You do not get burnt. There is no way to feel good about this.", 0.5),
@@ -1632,7 +1604,6 @@ export const storageMock: StorageItem[] = [
     addedAgo: "N/A",
     stackable: true,
     uselessness: "A comb. In a game about sneakers. It does tidy your hair, which nobody has asked about.",
-    deltas: soft({ cleanliness: 4, mood: 1 }),
     effects: [
       say("You comb your hair in a shop window reflection. A tooth snaps off."),
     ],
@@ -1754,11 +1725,11 @@ export const storageMock: StorageItem[] = [
     flavor: "Twenty-seven shots, no screen, no deleting. Every photo is a commitment.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ mood: 4 }),
+    deltas: soft({ focus: 3 }),
     effects: [
       say("You take a photo mid-encounter. It goes in the collection whether it is any good or not."),
       say("The flash did not fire. You will find out in three weeks.", 0.3),
-      say("You wind it on with your thumb and the sound alone improves your mood.", 0.3),
+      say("You wind it on with your thumb and the sound alone is worth the price.", 0.3),
     ],
   },
   {
@@ -1793,7 +1764,6 @@ export const storageMock: StorageItem[] = [
     flavor: "One olive. In its own jar. With a certificate. Priced accordingly.",
     addedAgo: "N/A",
     uselessness: "It is one olive. It costs more than a pair of shoes. It provides one olive of nutrition.",
-    deltas: soft({ mood: 12 }),
     effects: [
       say("You eat a single olive that cost more than your last three meals combined. It was, annoyingly, excellent."),
       say("You keep the jar. The jar is now the most valuable thing you own that is not a shoe.", 0.4),
@@ -2047,7 +2017,7 @@ export const storageMock: StorageItem[] = [
     flavor: "The name is one letter off a house you would recognise. The bottle is heavier than the real one.",
     addedAgo: "N/A",
     stackable: true,
-    deltas: soft({ cleanliness: 8, mood: 3 }),
+    deltas: soft({ focus: 3, health: -2 }),
     effects: [
       say("For ninety seconds it is indistinguishable from the real thing. Then it turns, and it turns hard.", 0.4),
       say("Two people compliment it. One asks to smell your wrist. You have no answer for that.", 0.3),

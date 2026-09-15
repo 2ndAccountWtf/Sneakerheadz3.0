@@ -16,7 +16,7 @@ export interface Bathroom {
     unreliability: number;
     /** How long it takes to reach, in seconds off the emergency clock. */
     travelSeconds: number;
-    /** Quality of the experience, which decides the cleanliness you leave with. */
+    /** Quality of the experience. Decides how the resolution line reads. */
     dignity: 1 | 2 | 3 | 4 | 5;
     blurb: string;
     /** Shown when it turns out to be unavailable. */

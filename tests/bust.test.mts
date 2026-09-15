@@ -25,7 +25,7 @@ const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n)
 
 const mk = (over: Partial<Player> = {}): Player => ({
     cash: 3000, bank: 0, inventory: [], storage: [], statusEffects: [],
-    stats: {} as never, health: 100, energy: 100, cleanliness: 100, mood: 60,
+    stats: {} as never, health: 100, energy: 100,
     focus: 60, gas: 0, streetCred: 20, heat: 30, bibiApproval: 50, flags: {},
     buffs: [], emergency: null, wallet: {} as never, connections: {},
     ...over,

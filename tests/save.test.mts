@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
     saveRun, loadRun, clearRun, hasSavedRun,
     recordScore, loadScores, bestScore, clearScores,
-    SAVE_VERSION, MAX_SCORES, type RunScore,
+    SAVE_VERSION, SCORES_VERSION, MAX_SCORES, type RunScore,
 } from '../systems/persistence/save.ts';
 
 let pass = 0;
@@ -65,6 +65,20 @@ t('a save from an older build is discarded, not half-read', () => {
     // browser storage. Dropping it is the honest option.
     const map = fakeStorage();
     map.set('sdw:run:v1', JSON.stringify({ v: SAVE_VERSION - 1, at: Date.now(), data: { day: 9 } }));
+    assert.equal(loadRun(), null);
+});
+
+t('a run from the build that still had mood and cleanliness is discarded', () => {
+    // Both scales were cut because nothing read them. A v1 save carries them,
+    // and loading it would put two fields back on the player that no rule
+    // knows about — so the version moved and the run goes in the bin.
+    const map = fakeStorage();
+    map.set('sdw:run:v1', JSON.stringify({
+        v: 1,
+        at: Date.now(),
+        data: { day: 14, player: { cash: 900, health: 80, energy: 40, focus: 55, mood: 60, cleanliness: 72 } },
+    }));
+    assert.ok(SAVE_VERSION > 1, 'the run version never moved, so a v1 save would still be read');
     assert.equal(loadRun(), null);
 });
 
@@ -133,6 +147,18 @@ t('the board does not grow forever', () => {
     const scores = loadScores();
     assert.equal(scores.length, MAX_SCORES);
     assert.equal(scores[0].netWorth, 1000 + MAX_SCORES * 3 - 1, 'the best run was dropped');
+});
+
+t('the scoreboard is not collateral damage when the run shape changes', () => {
+    // RunScore did not change when mood and cleanliness left the player, so
+    // bumping the run version has no business wiping somebody's personal best.
+    // A board filed by the build before that bump still reads.
+    const map = fakeStorage();
+    map.set('sdw:scores:v1', JSON.stringify({ v: 1, at: Date.now(), data: [score(77000)] }));
+    assert.equal(SCORES_VERSION, 1, 'the board shape changed and this check needs rewriting');
+    assert.equal(bestScore()!.netWorth, 77000);
+    recordScore(score(80000));
+    assert.deepEqual(loadScores().map(s => s.netWorth), [80000, 77000], 'the old board was not built on');
 });
 
 t('a bad run still survives a great one before it', () => {

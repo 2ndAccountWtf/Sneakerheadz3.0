@@ -239,11 +239,10 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             player = interestResult.player;
             const interestLog = [...interestResult.log];
 
-            // Overnight the body resets somewhat, and you get grubbier.
+            // Overnight the body resets somewhat.
             player = {
                 ...player,
                 gas: settleGas(player.gas),
-                cleanliness: Math.max(0, player.cleanliness - 8),
                 focus: Math.min(MAX_SOFT_STAT, player.focus + 10),
             };
 
@@ -647,8 +646,6 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             else newStorage.splice(itemIndex, 1);
 
             // --- Guaranteed stat deltas declared on the item ---
-            let cleanliness = state.player.cleanliness;
-            let mood = state.player.mood;
             let focus = state.player.focus;
             const clampSoft = (v: number) => Math.max(0, Math.min(MAX_SOFT_STAT, v));
 
@@ -658,8 +655,6 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
                     if (!value) continue;
                     if (stat === 'health') health = Math.max(0, Math.min(MAX_HEALTH, health + value));
                     else if (stat === 'energy') energy = Math.max(0, Math.min(MAX_ENERGY, energy + value));
-                    else if (stat === 'cleanliness') cleanliness = clampSoft(cleanliness + value);
-                    else if (stat === 'mood') mood = clampSoft(mood + value);
                     else if (stat === 'focus') focus = clampSoft(focus + value);
                     log.push({
                         icon: value > 0 ? '▲' : '▼',
@@ -682,8 +677,6 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
                 stats: newStats,
                 health,
                 energy,
-                cleanliness,
-                mood,
                 focus,
                 gas,
             };
@@ -1071,15 +1064,12 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             }
 
             const resolved = withOutcomes({ ...state, player: { ...state.player, emergency: null } }, attempt.outcomes, bathroom.name);
-            const cleanliness = Math.max(0, Math.min(MAX_SOFT_STAT,
-                resolved.player.cleanliness + [0, 6, 14, 24, 34, 44][bathroom.dignity]));
 
             return {
                 ...resolved,
                 player: {
                     ...resolved.player,
                     emergency: null,
-                    cleanliness,
                     // Whatever was happening down there is over.
                     gas: Math.max(0, resolved.player.gas - 6),
                 },
@@ -1098,7 +1088,7 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
             // do not have tomorrow — which is the worst possible timing, and is
             // exactly the point.
             const log: OutcomeLogEntry[] = [{ icon: '💀', text: disaster.line, tone: 'bad' }];
-            let ruined = { ...after.player, emergency: null, cleanliness: 0, gas: 0 };
+            let ruined = { ...after.player, emergency: null, gas: 0 };
             const cardEvent = cardUsable(ruined, state.day) && Math.random() < 0.3
                 ? rollCardLossEvent('bathroom')
                 : undefined;

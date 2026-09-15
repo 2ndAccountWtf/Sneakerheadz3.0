@@ -61,8 +61,8 @@ export type AmpmAisle =
     | 'specialty'
     | 'questionable';
 
-/** Social and condition stats that consumables move. */
-export type SoftStat = 'health' | 'energy' | 'mood' | 'focus' | 'cleanliness';
+/** Condition stats that consumables move. */
+export type SoftStat = 'health' | 'energy' | 'focus';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'legendary';
 
 export interface ItemEffect {
@@ -118,7 +118,6 @@ export interface PlayerStats {
     timesFarted: number;
     moneyWastedOnBurekas: number;
     timesRobbed: number;
-    bibiRespect: number;
     fightsWon: number;
     fightsLost: number;
     minigamesPlayed: number;
@@ -138,10 +137,6 @@ export interface Player {
     health: number;
     /** 0-100. Spent by travel and mini-games, restored by food and naps. */
     energy: number;
-    /** 0-100. Deodorant, mouthwash and not sleeping in a doorway. NPCs notice. */
-    cleanliness: number;
-    /** 0-100. Sugar, croissants and small victories. */
-    mood: number;
     /** 0-100. Coffee and gum. Steadies your hand in mini-games. */
     focus: number;
     /**

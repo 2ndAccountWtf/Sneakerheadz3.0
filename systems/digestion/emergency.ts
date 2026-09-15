@@ -101,9 +101,6 @@ export function attemptBathroom(bathroom: Bathroom, player: Player): BathroomAtt
         };
     }
 
-    // Cleanliness recovered scales with how civilised the facility was.
-    const cleanliness = [0, 6, 14, 24, 34, 44][bathroom.dignity];
-
     return {
         ok: true,
         line: `Resolved. ${bathroom.dignity >= 4 ? 'With dignity, even.' : 'Barely. But resolved.'}`,

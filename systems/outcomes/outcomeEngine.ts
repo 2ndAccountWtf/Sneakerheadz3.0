@@ -314,11 +314,7 @@ export function applyOutcomes(
 
             case 'bibiApproval': {
                 const change = Math.round(outcome.change ?? 0);
-                next = {
-                    ...next,
-                    bibiApproval: clamp(next.bibiApproval + change, 0, 100),
-                    stats: { ...next.stats, bibiRespect: clamp(next.bibiApproval + change, 0, 100) },
-                };
+                next = { ...next, bibiApproval: clamp(next.bibiApproval + change, 0, 100) };
                 log.push({
                     icon: change > 0 ? '🤝' : '🙅',
                     text: `Bibi's approval ${change > 0 ? 'rises' : 'falls'} (${change > 0 ? '+' : ''}${change}).`,

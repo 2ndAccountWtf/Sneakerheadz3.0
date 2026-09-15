@@ -75,7 +75,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Burekas',
         description: 'Flaky pastry with a mysterious cheese-like filling.',
         price: 6,
-        effect: '+15 Health, −Cleanliness',
+        effect: '+15 Health, gas risk',
         category: 'Food & Drinks',
         aisle: 'food',
     },
@@ -94,7 +94,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Tuna Can (Pull Tab)',
         description: 'Excellent protein. Your breath becomes a public matter.',
         price: 5,
-        effect: '+14 Health, −14 Cleanliness',
+        effect: '+14 Health. Smells for hours.',
         category: 'Food & Drinks',
         aisle: 'food',
     },
@@ -326,8 +326,8 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
     },
 
     // =====================================================================
-    // BAKERY — the front counter. Mood lives here. So does the baguette,
-    // which has been a melee weapon in this game longer than it has been bread.
+    // BAKERY — the front counter. Cheap energy, bought warm. So does the
+    // baguette, a melee weapon in this game longer than it has been bread.
     // =====================================================================
     {
         id: 'itm-baguette',
@@ -344,7 +344,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Croissant',
         description: 'Ninety per cent butter, ten per cent air.',
         price: 4,
-        effect: '+12 Energy, +9 Mood',
+        effect: '+12 Energy',
         category: 'Local Specialties',
         aisle: 'bakery',
         cities: ['paris'],
@@ -354,7 +354,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Glazed Donut',
         description: 'One is breakfast. Six is a personality.',
         price: 3,
-        effect: '+14 Energy, +8 Mood',
+        effect: '+14 Energy, −3 Focus',
         category: 'Food & Drinks',
         aisle: 'bakery',
     },
@@ -363,7 +363,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Chocolate Rugelach (Tray)',
         description: 'Sold by weight. Consumed by volume.',
         price: 9,
-        effect: '+18 Energy, +10 Mood',
+        effect: '+18 Energy',
         category: 'Local Specialties',
         aisle: 'bakery',
         cities: ['tel-aviv'],
@@ -383,7 +383,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Melon Pan',
         description: 'Contains no melon. Has never contained melon.',
         price: 3,
-        effect: '+13 Energy, +7 Mood',
+        effect: '+13 Energy',
         category: 'Local Specialties',
         aisle: 'bakery',
         cities: ['tokyo'],
@@ -393,7 +393,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Day-Old Muffin',
         description: 'Forty per cent off for a reason the label declines to state.',
         price: 2,
-        effect: '+10 Energy, −2 Mood',
+        effect: '+10 Energy',
         category: 'Food & Drinks',
         aisle: 'bakery',
     },
@@ -434,7 +434,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Paprika Chips (Family Bag)',
         description: 'Eighty per cent air, and the air is also seasoned.',
         price: 6,
-        effect: '+7 Mood, −4 Health',
+        effect: '+8 Energy, −4 Health',
         category: 'Food & Drinks',
         aisle: 'snacks',
     },
@@ -443,7 +443,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Chocolate Bar',
         description: 'Never once been a disappointment. Occasionally been a liquid.',
         price: 3,
-        effect: '+12 Energy, +7 Mood',
+        effect: '+12 Energy',
         category: 'Food & Drinks',
         aisle: 'snacks',
     },
@@ -452,7 +452,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Bamba (Peanut Puffs)',
         description: 'Weighs nothing. Disappears instantly.',
         price: 4,
-        effect: '+6 Mood',
+        effect: '+5 Energy',
         category: 'Local Specialties',
         aisle: 'snacks',
         cities: ['tel-aviv'],
@@ -462,7 +462,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Bissli (Grill Flavour)',
         description: 'Fried wheat, grill flavour, no grill involved at any stage.',
         price: 4,
-        effect: '+5 Mood, dental hazard',
+        effect: '+2 Focus, dental hazard',
         category: 'Local Specialties',
         aisle: 'snacks',
         cities: ['tel-aviv'],
@@ -491,7 +491,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Trail Mix (Mostly Raisins)',
         description: 'Advertised as nuts. Delivered as raisins.',
         price: 8,
-        effect: '+12 Energy, −1 Mood',
+        effect: '+12 Energy',
         category: 'Food & Drinks',
         aisle: 'snacks',
     },
@@ -523,7 +523,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Chocolate Ice Cream (Tub)',
         description: 'The one that is always there. Loyal. Unremarkable.',
         price: 12,
-        effect: '+14 Energy, +9 Mood',
+        effect: '+14 Energy',
         category: 'Food & Drinks',
         aisle: 'frozen',
     },
@@ -532,7 +532,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Pistachio Ice Cream (Tub)',
         description: 'Rarely in stock. Discussed in the neighbourhood when it is.',
         price: 24,
-        effect: '+16 Energy, +14 Mood',
+        effect: '+16 Energy',
         category: 'Food & Drinks',
         aisle: 'frozen',
     },
@@ -560,7 +560,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Blue Ice Pop',
         description: 'Sugar water in a plastic sleeve. Two flavours: blue and red.',
         price: 2,
-        effect: '+5 Mood, blue tongue',
+        effect: '+5 Energy, blue tongue',
         category: 'Food & Drinks',
         aisle: 'frozen',
     },
@@ -585,7 +585,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
 
     // =====================================================================
     // HOUSEHOLD — aisle six. Nothing here is food and everything here is a
-    // mechanic: repairs, resistances, cleanliness, and one dead asset waiting
+    // mechanic: repairs, resistances, composure, and one dead asset waiting
     // for the right headline.
     // =====================================================================
     {
@@ -620,7 +620,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'All-Purpose Cleaning Spray',
         description: 'Lemon-scented, industrial strength, absolutely not for skin.',
         price: 8,
-        effect: 'Temporary CLEAN, NPCs warmer',
+        effect: 'Temporary CLEAN. +5 Focus, −2 Health',
         category: 'Tools & Gear',
         aisle: 'household',
     },
@@ -638,7 +638,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Two-Tone Sponge',
         description: 'Soft side, green side. Everyone knows which side is the violent one.',
         price: 3,
-        effect: '+6 Cleanliness',
+        effect: '+3 Focus',
         category: 'Tools & Gear',
         aisle: 'household',
     },
@@ -681,15 +681,15 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
     },
 
     // =====================================================================
-    // PERSONAL CARE — the shelf that quietly runs the social game. The only
-    // aisle that moves cleanliness upward.
+    // PERSONAL CARE — the shelf you visit before a negotiation. Looking like
+    // you have your life together is composure, and composure is focus.
     // =====================================================================
     {
         id: 'itm-deodorant',
         name: 'Deodorant (48h, Allegedly)',
         description: 'Forty-eight hour protection, in a city that does not respect the claim.',
         price: 8,
-        effect: '+22 Cleanliness. Without it: "Bro…"',
+        effect: '+6 Focus. Without it: "Bro…"',
         category: 'Tools & Gear',
         aisle: 'personal-care',
     },
@@ -698,7 +698,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Emergency Toothbrush',
         description: 'Sold at the till for people whose day has gone longer than planned.',
         price: 4,
-        effect: '+12 Cleanliness',
+        effect: '+4 Focus',
         category: 'Tools & Gear',
         aisle: 'personal-care',
     },
@@ -725,7 +725,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Hair Gel (Extreme Hold)',
         description: 'Hold level: architectural.',
         price: 7,
-        effect: 'DRIP +5',
+        effect: 'DRIP +5, +4 Focus',
         category: 'Tools & Gear',
         aisle: 'personal-care',
     },
@@ -734,7 +734,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Wet Wipes (Pack)',
         description: 'The correct answer to almost everything in the food aisle.',
         price: 5,
-        effect: '+14 Cleanliness',
+        effect: '+3 Focus',
         category: 'Tools & Gear',
         aisle: 'personal-care',
     },
@@ -761,7 +761,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Plastic Comb',
         description: 'Costs almost nothing and snaps a tooth off immediately.',
         price: 2,
-        effect: '+4 Cleanliness',
+        effect: 'Tidies your hair. Nothing else.',
         category: 'Tools & Gear',
         aisle: 'personal-care',
     },
@@ -822,7 +822,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'Disposable Camera (27 Shots)',
         description: 'No screen, no deleting. Every photo is a commitment.',
         price: 18,
-        effect: 'Photo during encounters → collectible',
+        effect: 'Photo during encounters → collectible. +3 Focus',
         category: 'Local Specialties',
         aisle: 'specialty',
     },
@@ -840,7 +840,7 @@ export const AMPM_ITEMS: AmpmShopItem[] = [
         name: 'One Extremely Expensive Olive',
         description: 'One olive. In its own jar. With a certificate.',
         price: 480,
-        effect: 'One olive of nutrition. +12 Mood.',
+        effect: 'One olive of nutrition. That is the entire offer.',
         category: 'Local Specialties',
         aisle: 'specialty',
     },

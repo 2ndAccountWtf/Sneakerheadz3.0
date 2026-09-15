@@ -12,6 +12,10 @@ import { CITIES } from '../data/cities.ts';
 import { AMPM_ITEMS } from '../data/ampmItems.ts';
 import { shelfFor, availableAt, isWeaponItem, sectionOf, SECTION_ORDER, AISLE_SECTION } from '../systems/ampm/stock.ts';
 import { AMPM_AISLE_ORDER } from '../data/ampmItems.ts';
+import { storageMock } from '../data/storage.mock.ts';
+import { INITIAL_PLAYER } from '../constants.ts';
+import { gameReducer } from '../hooks/useGame.ts';
+import type { GameState, StorageItem } from '../types.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -148,6 +152,100 @@ t('no group is offered as a pill with nothing behind it', () => {
             const present = new Set(shelfFor(c.id, day).map(e => sectionOf(e.item.id, e.item.aisle)));
             assert.ok(present.size >= 2, `${c.id} day ${day}: only ${present.size} group(s) to browse`);
             assert.ok(present.has('food'), `${c.id} day ${day}: nothing to eat`);
+        }
+    }
+});
+
+console.log('\nampm — what the thing you bought actually does');
+
+/** Mid-range on every scale, so a delta has room to move in either direction. */
+const withItem = (item: StorageItem): GameState => ({
+    day: 1,
+    player: { ...INITIAL_PLAYER, health: 50, energy: 50, focus: 50, gas: 0, storage: [{ ...item, qty: 1 }] },
+} as GameState);
+
+const use = (item: StorageItem) =>
+    gameReducer(withItem(item), { type: 'USE_STORAGE_ITEM', payload: { itemId: item.id } } as never);
+
+/** The levers a consumable can still pull now that mood and cleanliness are gone. */
+const LIVE: (keyof typeof INITIAL_PLAYER)[] = ['health', 'energy', 'focus', 'gas'];
+
+/** Something the reducer will apply every time, not one time in three. */
+const guaranteed = (item: StorageItem) =>
+    Object.values(item.deltas ?? {}).some(v => v)
+    || (item.effects ?? []).some(e => e.type === 'stat_change' && e.chance >= 1 && e.payload.value);
+
+t('using an item that declares a guaranteed effect moves the player', () => {
+    // mood and cleanliness were the whole payload for three aisles' worth of
+    // items. Removing them must not have left a bureka you can eat for nothing.
+    const checked = storageMock.filter(guaranteed);
+    assert.ok(checked.length > 40, `only ${checked.length} items declare a guaranteed effect`);
+    for (const item of checked) {
+        const before = withItem(item).player;
+        const after = use(item).player;
+        assert.ok(
+            LIVE.some(k => after[k] !== before[k]),
+            `${item.id} declares a guaranteed effect and changed nothing on the player`,
+        );
+    }
+});
+
+/**
+ * Items that did nothing *before* mood and cleanliness were cut, and still do.
+ *
+ * Named rather than excluded by aisle, which is what this check did at first.
+ * An aisle filter leaves the rest of the catalogue unguarded: gutting an item
+ * outside the named aisles passed silently, which I found by gutting one. A
+ * grandfather list turns an open hole into seven known names — and any new
+ * inert item has to be argued for by being added here.
+ *
+ * None of these is net-negative, so nothing punishes you for buying it. They
+ * are props: foil, tape, a bin bag, glue, an umbrella, a burner, a cursed
+ * totem. Give one a lever or an `uselessness` note and take it off this list.
+ */
+const ALREADY_INERT = new Set([
+    'itm-aluminium-foil', 'itm-duct-tape', 'itm-trash-bags', 'itm-superglue',
+    'itm-cheap-umbrella', 'itm-burner-phone', 'itm-cursed-totem',
+]);
+
+t('nothing in the shop does nothing without admitting it', () => {
+    // mood and cleanliness were the whole payload for three aisles' worth of
+    // items. Removing them must not have left a bureka you can eat for nothing.
+    // A joke item is allowed to do nothing, but it has to say so on the card.
+    for (const item of storageMock) {
+        if (item.uselessness || isWeaponItem(item.id) || ALREADY_INERT.has(item.id)) continue;
+        const lever = guaranteed(item) || !!item.gas || !!item.digestiveRisk
+            || (item.effects ?? []).some(e => e.type === 'status_effect');
+        assert.ok(lever, `${item.id} does nothing and does not admit it — give it a lever or an uselessness note`);
+    }
+});
+
+t('the grandfather list is not hiding anything that now works', () => {
+    // A list like this rots into an excuse. If one of these grows a real effect,
+    // it must come off the list rather than sit there granting an exemption it
+    // no longer needs.
+    for (const id of ALREADY_INERT) {
+        const item = storageMock.find(i => i.id === id);
+        assert.ok(item, `${id} is on the grandfather list but no longer exists`);
+        const lever = guaranteed(item!) || !!item!.gas || !!item!.digestiveRisk
+            || (item!.effects ?? []).some(e => e.type === 'status_effect');
+        assert.ok(!lever, `${id} does something now — take it off ALREADY_INERT`);
+    }
+});
+
+t('no item still offers a scale the game does not have', () => {
+    const dead = ['mood', 'cleanliness'];
+    for (const item of storageMock) {
+        for (const stat of Object.keys(item.deltas ?? {})) {
+            assert.ok(!dead.includes(stat), `${item.id} still moves ${stat}`);
+        }
+    }
+    for (const row of AMPM_ITEMS) {
+        for (const stat of dead) {
+            assert.ok(
+                !row.effect.toLowerCase().includes(stat),
+                `the shelf still advertises ${stat} on ${row.id}: "${row.effect}"`,
+            );
         }
     }
 });
