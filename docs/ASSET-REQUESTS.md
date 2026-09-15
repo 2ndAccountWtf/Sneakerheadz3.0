@@ -12,6 +12,30 @@ sprite id to a PNG first and falls back to the coded sprite when the PNG is
 absent, so **partial delivery is fine** — one file at a time improves the game
 and nothing breaks while the rest is missing.
 
+## The pipeline is verified working
+
+Not a claim — measured, on 2026-09-15, by putting a real file through it end to
+end and reading back what the game made of it:
+
+```
+{ pngsFound: 1, loaded: true, frameWidth: 16, frameHeight: 24,
+  frames: 2, canvas: "32x24" }
+```
+
+A 32x24 PNG dropped at `assets/art/cast/grandma-laces@2.png` was found by the
+build glob, loaded, split into two 16x24 frames from the `@2` suffix, and drawn
+with nearest-neighbour upscaling — hard pixel edges, no blur, both frames
+distinct. Nothing was imported by hand and no manifest was edited. It was then
+deleted; the folder is empty again by design.
+
+Two things worth knowing that the test surfaced:
+
+- **A small PNG will not appear as a file in `dist/`.** Vite inlines anything
+  under ~4KB as a base64 data URI. That is correct and not a failure — do not go
+  looking for your file in the build output to check it landed.
+- **`loadArt` is awaited in `index.tsx` before the app mounts**, so art is ready
+  on the first frame rather than popping in.
+
 ## How to deliver
 
 - **Format**: PNG, RGBA, no interlacing. Nearest-neighbour only — never
