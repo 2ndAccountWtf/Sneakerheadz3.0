@@ -283,6 +283,41 @@ const ART_ID: Record<string, string> = {
     bay: 'trolley-bay', junk: 'trash-pile',
 };
 
+/**
+ * The two riders, drawn from delivered sheets when they exist.
+ *
+ * `RIDER_H` is rider-plus-vehicle, so it is taller than a standing adult: the
+ * board adds a couple of pixels under the feet and the bike rather more. Both
+ * are drawn from their own ground contact, which is the bottom of the wheels.
+ */
+const RIDER_H = 30;
+
+/**
+ * Which animation each rider wants, from state the game already tracks.
+ *
+ * Named rather than picked by frame so there is one notion of what a rider is
+ * doing — the same discipline the Phaser scene uses. A sheet that has not been
+ * delivered falls back through `art.sprite` to the coded figure, so a partial
+ * delivery is a game with one drawn rider and one blocky one.
+ */
+function boardState(s: RaceState): string {
+    if (s.outcome === 'wipeout') return 'skateboard-balance-fall';
+    if (s.crashT > 0) return 'skateboard-obstacle-trip-forward';
+    if (s.airT > 0) return 'skateboard-ollie';
+    if (s.tucking) return 'skateboard-manual';
+    return 'skateboard-ride';
+}
+
+function bikeState(s: RaceState): string {
+    if (s.crashT > 0) return 'bike-fall-off';
+    if (s.thiefStun > 0) return 'bike-banana-slip';
+    // He looks back when you are on his wheel — the drafting tell, and the
+    // only moment in the race where he acknowledges you at all.
+    if (s.draft > 0.04) return 'bike-look-back';
+    if (s.thiefSpeed > 34) return 'bike-wheelie-sparks';
+    return 'bike-ride';
+}
+
 /** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
 const ART_H: Record<string, number> = {
     bin: 12, dog: 9, ped: 23, works: 14, oil: 7, ramp: 10, junk: 8,
@@ -1331,15 +1366,22 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         }
         ctx.restore();
     }
-    drawTrolley(ctx, tx, ty, tsc * 1.05, '#6b3340', lurch, s.t * (4 + s.thiefSpeed * 0.5));
-    actor(ctx, 'the-game', tx - 2 * tsc, ty - 7 * tsc, {
-        height: 25 * tsc, facing: 1,
-        stride: s.t * 2,
-        armUp: rattled ? 1 : 0.35,
-        crouch: s.crashT > 0,
-        hurt: s.thiefStun > 0.35 || s.crashT > 0.35,
-        kit: KIT.rival,
-    });
+    if (art.has(bikeState(s))) {
+        art.sprite(ctx, bikeState(s), '', tx, ty + 2 * tsc, RIDER_H * tsc, {
+            frame: Math.floor(s.t * 14),
+            height: RIDER_H * tsc,
+        });
+    } else {
+        drawTrolley(ctx, tx, ty, tsc * 1.05, '#6b3340', lurch, s.t * (4 + s.thiefSpeed * 0.5));
+        actor(ctx, 'the-game', tx - 2 * tsc, ty - 7 * tsc, {
+            height: 25 * tsc, facing: 1,
+            stride: s.t * 2,
+            armUp: rattled ? 1 : 0.35,
+            crouch: s.crashT > 0,
+            hurt: s.thiefStun > 0.35 || s.crashT > 0.35,
+            kit: KIT.rival,
+        });
+    }
     // The box: floats above his head normally, and hands off to the player
     // during the second half of the catch cinematic below (see "you").
     const boxBob = Math.sin(s.t * 5) * 0.3;
@@ -1359,16 +1401,28 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     if (s.airH > 1) shadow(ctx, s.px, py + 1, 9 * psc, 3 * psc, 0.3);
     const ry = py - s.airH;
     const roll = s.wob * Math.sin(s.t * 26) * 0.07;
-    if (s.hasBoard) drawBoard(ctx, s.px, ry, psc, roll);
-    else drawTrolley(ctx, s.px, ry, psc, '#3d4a58', roll, s.t * (4 + s.speed * 0.5));
-    actor(ctx, 'player', s.px, ry - (s.hasBoard ? 3 : 7) * psc, {
-        height: 26 * psc, facing: 1,
-        stride: s.t * 2.4,
-        armUp: s.cool > 0.2 || handEase > 0.6 ? 1 : 0,
-        crouch: s.tucking,
-        hurt: s.invT > 0.45,
-        kit: KIT.player,
-    });
+    // Delivered rider art when it exists, the coded rig when it does not.
+    // `art.has` rather than a try/fail so the two paths stay obviously separate
+    // — the coded one still draws its own board and figure, which is not
+    // something a fallback inside `sprite` could do.
+    const boardArt = s.hasBoard && art.has(boardState(s));
+    if (boardArt) {
+        art.sprite(ctx, boardState(s), '', s.px, ry + 2 * psc, RIDER_H * psc, {
+            frame: Math.floor(s.t * 14),
+            height: RIDER_H * psc,
+        });
+    } else {
+        if (s.hasBoard) drawBoard(ctx, s.px, ry, psc, roll);
+        else drawTrolley(ctx, s.px, ry, psc, '#3d4a58', roll, s.t * (4 + s.speed * 0.5));
+        actor(ctx, 'player', s.px, ry - (s.hasBoard ? 3 : 7) * psc, {
+            height: 26 * psc, facing: 1,
+            stride: s.t * 2.4,
+            armUp: s.cool > 0.2 || handEase > 0.6 ? 1 : 0,
+            crouch: s.tucking,
+            hurt: s.invT > 0.45,
+            kit: KIT.player,
+        });
+    }
     ctx.restore();
 
     // The box hand-off, drawn after both riders so it reads as passing

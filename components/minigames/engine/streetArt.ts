@@ -33,14 +33,32 @@
  */
 let FILES: Record<string, string> = {};
 try {
-    FILES = import.meta.glob('../../../assets/art/street/**/*.png', {
-        eager: true,
-        query: '?url',
-        import: 'default',
-    }) as Record<string, string>;
+    FILES = {
+        ...import.meta.glob('../../../assets/art/street/**/*.png', {
+            eager: true, query: '?url', import: 'default',
+        }),
+        // Characters live in their own folder because they belong to the game
+        // world rather than to one game's street, but they load through the
+        // same registry — an id is an id, and the two sets do not collide.
+        ...import.meta.glob('../../../assets/art/characters/**/*.png', {
+            eager: true, query: '?url', import: 'default',
+        }),
+    } as Record<string, string>;
 } catch {
     FILES = {};
 }
+
+/**
+ * Frame counts for sheets delivered without an `@N` in the filename.
+ *
+ * A multi-frame sheet loaded as one frame draws the whole strip at once, which
+ * looks like a rendering fault and is a naming one. `tiny-bicycle` arrived as
+ * 464 x 48 with no suffix; its ink falls on a 58px pitch, which is eight
+ * frames and the same frame width as `bike-ride`.
+ */
+const UNMARKED_FRAMES: Record<string, number> = {
+    'tiny-bicycle': 8,
+};
 
 export interface StreetSheet {
     img: HTMLImageElement;
@@ -58,7 +76,7 @@ export const ENTRIES: { id: string; url: string; frames: number }[] = (() => {
         const base = (path.split('/').pop() ?? '').replace(/\.png$/i, '');
         const m = base.match(/^(.+?)@(\d+)$/);
         const id = m ? m[1] : base;
-        const frames = m ? Math.max(1, Number(m[2])) : 1;
+        const frames = m ? Math.max(1, Number(m[2])) : (UNMARKED_FRAMES[id] ?? 1);
         if (seen.has(id)) {
             console.warn(`[street art] two files claim "${id}" — using the first`);
             continue;

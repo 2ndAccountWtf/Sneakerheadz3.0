@@ -337,6 +337,25 @@ const ART_ID: Record<string, string> = {
     hedge: 'planter',
 };
 
+/** Rider plus vehicle, taller than a standing adult because of the deck. */
+const RIDER_H = 30;
+
+/**
+ * Which rider animation the delivered art wants, from state already tracked.
+ *
+ * The board branch uses the character sheets; the BMX has only a ride cycle so
+ * far, so everything else on that branch falls through to the coded figure.
+ * Named states rather than frame indices, so the drawn rider and the simulated
+ * one cannot disagree about what is happening.
+ */
+function riderState(s: RunState): string {
+    if (!s.hasBoard) return 'bmx';
+    if (s.wipeT > 0) return 'skateboard-balance-fall';
+    if (s.air > 0) return 'skateboard-ollie';
+    if (s.charging) return 'skateboard-manual';
+    return 'skateboard-ride';
+}
+
 /** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
 const ART_H: Record<string, number> = {
     bin: 12, dog: 9, works: 14, trolley: 16, hydrant: 8, sprink: 9, hedge: 9,
@@ -1527,16 +1546,27 @@ export function drawRun(ctx: Ctx, s: RunState) {
             ctx.rotate(tumble);
             ctx.translate(-RIDER_X, -ry);
         }
-        if (s.hasBoard) drawDeck(ctx, RIDER_X, ry, lean, s.ammo);
-        else drawBike(ctx, RIDER_X, ry, lean, s.ammo);
-        figure(ctx, RIDER_X, ry - (s.hasBoard ? 4 : 6), 23, {
-            kit: KIT.player,
-            facing: 1,
-            stride: s.t * 3,
-            armUp: s.armT > 0 ? 1 : s.charging ? 0.55 : 0,
-            crouch: s.charging || s.air > 0,
-            hurt: s.invT > 0.9,
-        });
+        // Delivered rider art when it exists, the coded deck-and-figure when it
+        // does not. Checked with `art.has` rather than letting `sprite` fall
+        // back, because the coded path draws two things — a vehicle and a
+        // person — which a fallback inside one call could not reproduce.
+        if (art.has(riderState(s))) {
+            art.sprite(ctx, riderState(s), '', RIDER_X, ry + 2, RIDER_H, {
+                frame: Math.floor(s.t * 14),
+                height: RIDER_H,
+            });
+        } else {
+            if (s.hasBoard) drawDeck(ctx, RIDER_X, ry, lean, s.ammo);
+            else drawBike(ctx, RIDER_X, ry, lean, s.ammo);
+            figure(ctx, RIDER_X, ry - (s.hasBoard ? 4 : 6), 23, {
+                kit: KIT.player,
+                facing: 1,
+                stride: s.t * 3,
+                armUp: s.armT > 0 ? 1 : s.charging ? 0.55 : 0,
+                crouch: s.charging || s.air > 0,
+                hurt: s.invT > 0.9,
+            });
+        }
         ctx.restore();
 
         // Facing chevron. Which verge a throw would go to is the single most
