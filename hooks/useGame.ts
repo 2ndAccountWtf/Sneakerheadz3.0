@@ -46,8 +46,8 @@ import {
 import { isWeaponItem } from '../systems/ampm/stock';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
-import { shopCredGain } from '../systems/pricing';
-import { admit, stabilise, nightIn, settle, mustLeave } from '../systems/hospital';
+import { shopCredGain, getBagValue } from '../systems/pricing';
+import { admit, stabilise, nightIn, settle, canStayAnother } from '../systems/hospital';
 import { reputationSpread } from '../systems/npc/reactions';
 import {
     seedWorld, advanceWorld, applyTradePressure, snapshotMarket, addLocalStock,
@@ -920,7 +920,8 @@ const rawReducer = (state: GameState, action: Action): GameState => {
          * along and applies what it hands back; nothing here decides odds. */
 
         case 'HOSPITAL_NIGHT': {
-            if (!state.hospital || mustLeave(state.hospital)) return state;
+            // They stop when the money stops. See `canStayAnother`.
+            if (!state.hospital || !canStayAnother(state.hospital, state.player)) return state;
             const night = nightIn(state.hospital, state.player);
             return {
                 ...state,
@@ -1334,14 +1335,24 @@ const rawReducer = (state: GameState, action: Action): GameState => {
  */
 export const gameReducer = (state: GameState, action: Action): GameState => {
     const next = rawReducer(state, action);
-    if (next.hospital || next.player.health > 0) return next;
+    // `Number.isFinite` and not just `> 0`: an undefined health reads as
+    // "not greater than zero" and would have admitted a player whose state was
+    // merely malformed — a half-restored save waking up in a hospital bed. Only
+    // a real number that has actually reached zero puts anybody in one.
+    if (next.hospital || !Number.isFinite(next.player.health) || next.player.health > 0) return next;
 
     return {
         ...next,
         player: stabilise(next.player),
         // A stop cannot continue while you are being loaded into an ambulance.
         activeBust: null,
-        hospital: admit(next.day, causeOfCollapse(next, action)),
+        // What they can see and what they can reach: the pocket, the bank, and
+        // the bag, which is the part they price you on.
+        hospital: admit(
+            next.day,
+            causeOfCollapse(next, action),
+            next.player.cash + next.player.bank + getBagValue(next),
+        ),
     };
 };
 

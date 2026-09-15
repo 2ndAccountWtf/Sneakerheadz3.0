@@ -1,7 +1,8 @@
 import React from 'react';
 import { useGame } from '../../hooks/useGame';
 import {
-    mustLeave, NIGHTLY_RATE, COOLED_PER_NIGHT, HEALED_PER_NIGHT, MAX_NIGHTS,
+    canStayAnother, atTheLimit, reachableFunds, nightlyEstimate,
+    COOLED_PER_NIGHT, HEALED_PER_NIGHT, MAX_NIGHTS,
 } from '../../systems/hospital';
 import { MAX_HEALTH } from '../../constants';
 
@@ -32,11 +33,12 @@ const HospitalScene: React.FC = () => {
     const { player, day } = gameState;
     const health = Math.round(player.health);
     const pct = Math.max(0, Math.min(100, (health / MAX_HEALTH) * 100));
-    const done = mustLeave(stay);
+    const canStay = canStayAnother(stay, player);
+    const outOfNights = atTheLimit(stay);
     const daysHere = day - stay.admittedOnDay;
 
     // What the desk can actually get out of you, in the order it will try.
-    const reachable = player.cash + player.bank;
+    const reachable = reachableFunds(player);
     const short = stay.bill > reachable;
 
     return (
@@ -98,9 +100,11 @@ const HospitalScene: React.FC = () => {
                 <p className="text-xs text-[var(--ink-faint)] italic mb-3">{stay.neighbour}</p>
 
                 <div className="grid grid-cols-1 gap-2">
-                    {done ? (
+                    {!canStay ? (
                         <p className="label text-center mb-1" style={{ color: 'var(--warn)' }}>
-                            {MAX_NIGHTS} nights. They need the bed, and they have said so twice.
+                            {outOfNights
+                                ? `${MAX_NIGHTS} nights. They need the bed, and they have said so twice.`
+                                : 'They will not run the bill any higher. You are being discharged, and it is not because you are well.'}
                         </p>
                     ) : (
                         <button
@@ -109,7 +113,7 @@ const HospitalScene: React.FC = () => {
                         >
                             🛏 Stay another night
                             <span className="label ml-2">
-                                −1 day · {fmt(NIGHTLY_RATE)} · about +{HEALED_PER_NIGHT} back
+                                −1 day · {fmt(nightlyEstimate(stay))} · about +{HEALED_PER_NIGHT} back
                             </span>
                         </button>
                     )}
@@ -118,7 +122,7 @@ const HospitalScene: React.FC = () => {
                         className="btn btn-primary"
                         onClick={() => dispatch({ type: 'HOSPITAL_DISCHARGE' })}
                     >
-                        {done ? `Settle up — ${fmt(stay.bill)}` : `Sign yourself out at ${health}/100`}
+                        {canStay ? `Sign yourself out at ${health}/100` : `Settle up — ${fmt(stay.bill)}`}
                     </button>
                 </div>
 

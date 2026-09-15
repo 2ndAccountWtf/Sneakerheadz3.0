@@ -14,7 +14,9 @@
 import assert from 'node:assert/strict';
 import {
     admit, stabilise, nightIn, settle, mustLeave,
-    ADMISSION_FEE, NIGHTLY_RATE, STABILISED_AT, HEALED_PER_NIGHT, COOLED_PER_NIGHT, MAX_NIGHTS,
+    admissionFee, nightlyRate, ADMISSION_FLOOR, NIGHTLY_FLOOR,
+    canStayAnother, atTheLimit, reachableFunds,
+    STABILISED_AT, HEALED_PER_NIGHT, COOLED_PER_NIGHT, MAX_NIGHTS,
     type HospitalStay,
 } from '../systems/hospital.ts';
 import { INITIAL_PLAYER, MAX_HEALTH, MAX_HEAT } from '../constants.ts';
@@ -39,7 +41,7 @@ console.log('\nthey bring you in');
 t('a stay opens with the door charge and nothing else', () => {
     const s = admit(7, 'Lost a fight behind a laundromat.');
     assert.equal(s.admittedOnDay, 7);
-    assert.equal(s.bill, ADMISSION_FEE);
+    assert.equal(s.bill, ADMISSION_FLOOR, 'a broke man is not charged the floor');
     assert.equal(s.nights, 0);
     assert.equal(s.chart.length, 0, 'you have not been here a night yet');
 });
@@ -79,7 +81,7 @@ t('a night costs a day of money and buys health back', () => {
     const before = hurt({ health: STABILISED_AT });
     const { stay, player } = nightIn(admit(2, 'x'), before, rngFor('night-a'));
     assert.equal(stay.nights, 1);
-    assert.ok(stay.bill >= ADMISSION_FEE + NIGHTLY_RATE, `the bill only reached ${stay.bill}`);
+    assert.ok(stay.bill >= ADMISSION_FLOOR + NIGHTLY_FLOOR, `the bill only reached ${stay.bill}`);
     assert.ok(player.health > before.health, 'a night in a bed healed nothing');
 });
 
@@ -130,12 +132,126 @@ t('the chart records every night, in order', () => {
 
 t('they want the bed back eventually', () => {
     // A stay has to terminate. Without a ceiling a player could hide in here
-    // for the rest of the run, cooling off for a flat nightly fee.
+    // for the rest of the run, cooling off at a flat nightly fee.
     let stay = admit(1, 'x');
-    let player = hurt();
-    assert.equal(mustLeave(stay), false);
+    let player = hurt({ cash: 500_000 });
+    assert.equal(atTheLimit(stay), false);
     for (let i = 0; i < MAX_NIGHTS; i++) ({ stay, player } = nightIn(stay, player, rngFor(`out-${i}`)));
-    assert.equal(mustLeave(stay), true, `still allowed to stay after ${MAX_NIGHTS} nights`);
+    assert.equal(atTheLimit(stay), true, `still allowed to stay after ${MAX_NIGHTS} nights`);
+});
+
+t('being broke does not make the hospital free', () => {
+    // The settlement writes off what cannot be paid, which without this rule is
+    // an exploit and the worst kind: a player with nothing could take all six
+    // nights, heal to full and pay nothing, while somebody doing well pays six
+    // figures for the same beds. Measured before the fix: six nights, $7,845
+    // run up, $0 paid, discharged at 100/100.
+    const skint = hurt({ cash: 0, bank: 0 });
+    skint.wallet = { ...skint.wallet, hasCredit: false, creditOwed: 0, creditLimit: 0 };
+    const stay = admit(2, 'x', 0);
+    assert.equal(canStayAnother(stay, skint), false, 'a week of beds handed over on a promise');
+});
+
+t('you can never refuse the ambulance, however little you have', () => {
+    // The admission lands whatever your pockets say. It is only the *nights*
+    // that are gated on money — turning somebody away at the door is a
+    // different and much worse game.
+    const stay = admit(2, 'x', 0);
+    assert.equal(stay.bill, ADMISSION_FLOOR, 'a broke man was not admitted at all');
+});
+
+t('the desk counts the card as money it can reach', () => {
+    const p = hurt({ cash: 0, bank: 0 });
+    p.wallet = { ...p.wallet, hasCredit: true, creditOwed: 0, creditLimit: 40_000 };
+    assert.equal(reachableFunds(p), 40_000);
+    assert.equal(canStayAnother(admit(2, 'x', 0), p), true, 'a card with room bought nothing');
+});
+
+t('a stay always ends, from every direction', () => {
+    // Nights, money, or both. Whichever runs out first, the loop terminates.
+    for (const cash of [0, 3_000, 50_000, 5_000_000]) {
+        let stay = admit(1, 'x', cash);
+        let player = hurt({ cash, bank: 0 });
+        player.wallet = { ...player.wallet, hasCredit: false, creditOwed: 0, creditLimit: 0 };
+        let nights = 0;
+        while (canStayAnother(stay, player) && nights < 50) {
+            ({ stay, player } = nightIn(stay, player, rngFor(`end-${cash}-${nights}`)));
+            nights++;
+        }
+        assert.ok(nights <= MAX_NIGHTS, `${cash} bought ${nights} nights`);
+        assert.equal(canStayAnother(stay, player), false);
+    }
+});
+
+console.log('\nwhat they decide you can stand');
+
+t('a flat price list would have been two different games', () => {
+    // The first version charged $400 to walk in and $260 a night, which takes
+    // most of a day-two stake and is invisible against the $150k/day a working
+    // trader clears by the back half. A flat fee in an exponential economy is
+    // a tax that expires.
+    const broke = admissionFee(2_000);
+    const rich = admissionFee(4_500_000);
+    assert.ok(rich > broke * 50, `a millionaire pays ${rich} against a beginner's ${broke}`);
+});
+
+t('nobody walks in for less than the floor', () => {
+    for (const worth of [0, -99, 500, 2_000]) {
+        assert.equal(admissionFee(worth), ADMISSION_FLOOR, `worth ${worth} got in cheaper`);
+        assert.equal(nightlyRate(worth), NIGHTLY_FLOOR);
+    }
+});
+
+t('the quote only ever goes up with what you are worth', () => {
+    let prevA = 0;
+    let prevN = 0;
+    for (const worth of [0, 10_000, 100_000, 1_000_000, 4_500_000, 20_000_000]) {
+        const a = admissionFee(worth);
+        const n = nightlyRate(worth);
+        assert.ok(a >= prevA, `admission fell from ${prevA} to ${a}`);
+        assert.ok(n >= prevN, `the nightly fell from ${prevN} to ${n}`);
+        prevA = a; prevN = n;
+    }
+});
+
+t('a serious stay is a real setback at any point in a run', () => {
+    // The number that matters: what three nights costs as a share of what you
+    // have. It must sting late as well as early, or the hospital stops being a
+    // consequence the moment you are doing well.
+    for (const worth of [50_000, 500_000, 4_500_000]) {
+        let stay = admit(1, 'x', worth);
+        let player = hurt({ health: STABILISED_AT });
+        for (let i = 0; i < 3; i++) ({ stay, player } = nightIn(stay, player, rngFor(`sting-${worth}-${i}`)));
+        const share = stay.bill / worth;
+        assert.ok(share > 0.08, `three nights costs ${(share * 100).toFixed(1)}% of ${worth} — barely noticed`);
+        assert.ok(share < 0.35, `three nights costs ${(share * 100).toFixed(1)}% of ${worth} — that is a run ender, not a setback`);
+    }
+});
+
+t('getting richer in the bed does not raise the rate on you', () => {
+    // Quoted once, on the way in. A stay whose price climbed while you lay
+    // there would be unreadable, and the player cannot earn in here anyway.
+    const stay = admit(4, 'x', 1_000_000);
+    const nightly = stay.nightly;
+    let s2 = stay;
+    let p = hurt();
+    for (let i = 0; i < 3; i++) ({ stay: s2, player: p } = nightIn(s2, p, rngFor(`fix-${i}`)));
+    assert.equal(s2.nightly, nightly, 'the rate moved mid-stay');
+});
+
+t('a padded line stays noticeable however rich you are', () => {
+    // Events bill a share of the night rather than a flat sum. Ninety dollars
+    // stops being a joke the moment ninety dollars stops being money.
+    const rich = admit(1, 'x', 4_500_000);
+    let stay = rich;
+    let player = hurt();
+    let padded = 0;
+    for (let i = 0; i < 30; i++) {
+        const before = stay.bill;
+        ({ stay, player } = nightIn(stay, player, rngFor(`pad-${i}`)));
+        if (stay.bill - before > stay.nightly) padded++;
+    }
+    assert.ok(padded > 0, 'no night was ever padded');
 });
 
 console.log('\nsettling up');
@@ -234,6 +350,17 @@ t('hitting zero puts you in a bed, whatever action did it', () => {
     const after = gameReducer(floored, { type: 'SET_NOTIFICATION', payload: null } as never);
     assert.ok(after.hospital, 'health hit zero and nothing happened');
     assert.ok(after.player.health > 0, 'discharged straight back through the floor');
+});
+
+t('a malformed player is not admitted to hospital', () => {
+    // `undefined > 0` is false, so a half-restored save with no health on it
+    // would have woken up in a bed. Only a real number that has reached zero
+    // puts anybody in one.
+    for (const health of [undefined, null, NaN, 'x']) {
+        const broken = { ...onTheEdge(), player: { ...hurt(), health } } as unknown as GameState;
+        const after = gameReducer(broken, { type: 'SET_NOTIFICATION', payload: null } as never);
+        assert.equal(after.hospital, null, `health ${String(health)} put somebody in a hospital bed`);
+    }
 });
 
 t('a healthy player is never admitted', () => {

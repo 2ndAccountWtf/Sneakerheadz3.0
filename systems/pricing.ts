@@ -147,7 +147,9 @@ export function honestBid(state: GameState, sneakerId: string): number | undefin
 
 /** Total mark-to-market value of the player's bag. */
 export function getBagValue(state: GameState): number {
-    return state.player.inventory.reduce((total, item) => {
+    // Defensive on the bag, because the hospital check calls this on the way in
+    // and a crash in the reducer takes the whole game with it.
+    return (state.player.inventory ?? []).reduce((total, item) => {
         const market = getCityMarketPrice(state, item.sneakerId);
         if (market === undefined) {
             const base = SNEAKERS.find(s => s.id === item.sneakerId)?.basePrice ?? 0;
