@@ -34,7 +34,7 @@ import {
     TILE, has, isFooting, conveyorDir,
     type PlatformDef,
 } from './terrain';
-import { FLOOR_Y } from './content';
+import { FLOOR_Y, ZOOM } from './content';
 import { T } from './textures';
 
 /** How thick a platform body is. The top surface is what matters; this is depth. */
@@ -130,7 +130,7 @@ export function buildPlatforms(
     for (const def of defs) {
         // Cloth holds nobody up: it is a picture with a high depth and no body.
         if (!isFooting(def) && !has(def.flags, TILE.ENEMY_WALL)) {
-            const drape = scene.add.image(def.x + def.w / 2, def.y, T('drape'))
+            const drape = scene.add.image(def.x + def.w / 2, def.y, T('hangingcloth'))
                 .setDisplaySize(def.w, 26)
                 .setOrigin(0.5, 0)
                 .setDepth(14)
@@ -143,12 +143,37 @@ export function buildPlatforms(
             : has(def.flags, TILE.ONE_WAY) ? set.oneWay
             : set.solid;
 
+        // These ids are the ones published in `docs/ASSETS-FLIGHT404.md`, and
+        // they have to stay that way: a delivered PNG is matched to a texture by
+        // this exact string. The pair drifted once already — the list said
+        // `seat-row` and the code said `seatrow`, so the art loaded correctly,
+        // installed correctly, and was drawn by nothing at all.
         const key = has(def.flags, TILE.DESTRUCTIBLE) ? T('crate')
-            : has(def.flags, TILE.ONE_WAY) ? T('seatrow')
-            : T('ledge');
+            : has(def.flags, TILE.ONE_WAY) ? T('seat-row')
+            : T('bulkhead-ledge');
 
         const img = group.create(def.x + def.w / 2, def.y, key) as PhaserNS.GameObjects.Image;
-        img.setOrigin(0.5, 0).setDisplaySize(def.w, THICKNESS);
+        img.setOrigin(0.5, 0);
+
+        // What you see and what you stand on are different rectangles.
+        //
+        // The body is always the authored span by `THICKNESS`, because that is
+        // what the reachability maths and every test are written against. The
+        // *picture* is whatever the art actually is: a drawn seat row is 34x30
+        // world units of upholstery whose top 8 are the standing surface, and
+        // stretching all 30 into the collision box turns it into a smear.
+        //
+        // Delivered art therefore draws at its own size, derived from the
+        // texture and the canvas zoom, hanging below the surface it sits on.
+        // A coded placeholder has no such size and keeps filling the box.
+        const src = img.texture.getSourceImage() as { width: number; height: number };
+        const frames = Math.max(1, img.texture.frameTotal - 1);
+        const natural = src && src.width ? { w: src.width / frames / ZOOM, h: src.height / ZOOM } : null;
+        if (natural && natural.h > THICKNESS * 1.5) {
+            img.setDisplaySize(Math.max(def.w, natural.w), natural.h);
+        } else {
+            img.setDisplaySize(def.w, THICKNESS);
+        }
         // A fence is a rule, not a thing. The player must never see one.
         img.setVisible(!(has(def.flags, TILE.ENEMY_WALL) && !isFooting(def)));
         img.setDepth(11);

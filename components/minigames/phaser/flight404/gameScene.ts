@@ -34,6 +34,7 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
+import { ZOOM } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import {
     openView, buildResidents, stepResidents, stepCrossings, clearView,
@@ -301,6 +302,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
             this.buildParticles();
             this.buildPlayer();
+            // The canvas is 960 device pixels wide and the world is 352 units
+            // wide, so the camera is zoomed by exactly that ratio and shows the
+            // same 352 units it always did. Every coordinate below this line is
+            // a world unit and none of them moved; the zoom only decides how
+            // many device pixels each one may be drawn with.
+            this.cameras.main.setZoom(ZOOM);
+            this.cameras.main.setRoundPixels(true);
+
             this.buildColliders();
 
             // A handle for automated verification, and nothing else.

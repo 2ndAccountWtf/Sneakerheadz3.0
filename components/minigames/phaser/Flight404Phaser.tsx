@@ -40,7 +40,7 @@ import type { Btn } from '../engine/useInput';
 import { useGame } from '../../../hooks/useGame';
 import { armsFor, hasWeapon, FISTS } from '../../../systems/weapons';
 import type { Weapon } from '../../../systems/weapons';
-import { VIEW_W, VIEW_H, SECTIONS, HELP_TEXT } from './flight404/content';
+import { VIEW_W, VIEW_H, RENDER_W, RENDER_H, SECTIONS, HELP_TEXT } from './flight404/content';
 import { blankInput, REG, type F404Hud, type F404Result } from './flight404/bridge';
 
 /**
@@ -167,9 +167,13 @@ const Flight404Phaser: React.FC<{
         >
             <div className="relative">
                 {createScenes ? (
+                    // width/height are DEVICE PIXELS, not world units — see
+                    // RENDER_W in content.ts. The world is still VIEW_W across;
+                    // the camera zoom in gameScene makes up the difference, so
+                    // hand-drawn art gets real resolution and no coordinate moves.
                     <PhaserHost
-                        width={VIEW_W}
-                        height={VIEW_H}
+                        width={RENDER_W}
+                        height={RENDER_H}
                         createScenes={createScenes}
                         data={data}
                         // Arcade physics, world gravity in px/s². The whole point

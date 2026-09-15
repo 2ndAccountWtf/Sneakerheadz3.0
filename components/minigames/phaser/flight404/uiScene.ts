@@ -23,7 +23,7 @@
  */
 import type * as PhaserNS from 'phaser';
 import { PAL } from '../../engine/palette';
-import { VIEW_W, SECTIONS } from './content';
+import { VIEW_W, SECTIONS, ZOOM } from './content';
 import { T, TG, C, MONO, DISPLAY } from './textures';
 
 export interface HudPayload {
@@ -83,6 +83,11 @@ export function makeUIScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmitte
         }
 
         create() {
+            // The HUD is authored in the same 352 x 198 world units as the game
+            // and is zoomed to match, so it lands exactly where it always did.
+            // Left unzoomed it would draw at a third of its size in the corner.
+            this.cameras.main.setZoom(ZOOM);
+
             // --- top strip
             this.box(0, 0, VIEW_W, 16, C.void, 0.85);
             this.box(0, 16, VIEW_W, 1, C.line);

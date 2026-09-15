@@ -22,6 +22,7 @@
  */
 import type * as PhaserNS from 'phaser';
 import { bakeTextures } from './textures';
+import { queueArt, installArt, buildAnims, artCount, type ArtEntry } from './artLoader';
 import { makeGameScene, GAME_KEY } from './gameScene';
 import { makeUIScene, UI_KEY } from './uiScene';
 
@@ -39,8 +40,33 @@ export function createFlight404Scenes(P: typeof PhaserNS): PhaserNS.Types.Scenes
     class BootScene extends P.Scene {
         constructor() { super({ key: BOOT_KEY }); }
 
+        /** Delivered PNGs, queued here and installed once the loader is done. */
+        private art: ArtEntry[] = [];
+
+        preload() {
+            // Hand-drawn art for this game lives in `assets/art/flight404/`.
+            // Nothing read that folder until `artLoader.ts` existed — Flight 404
+            // bakes its own textures and never called `bakeSprite`, so the
+            // canvas games' art registry did not reach it and delivered files
+            // silently did nothing. This is the half that was missing.
+            this.art = queueArt(this);
+        }
+
         create() {
+            // Placeholders first, delivered art second: an id with a PNG gets
+            // overwritten, an id without one keeps the coded version. That is
+            // what makes a half-delivered set a better-looking game rather than
+            // a broken one.
             bakeTextures(this);
+            if (this.art.length) {
+                const report = installArt(this, this.art);
+                buildAnims(this, this.art);
+                for (const s of report.skipped) console.warn(`[f404 art] skipped ${s.id}: ${s.why}`);
+                for (const o of report.orphans) {
+                    console.warn(`[f404 art] "${o}" loaded but nothing in the game draws that id — check the name against docs/ASSETS-FLIGHT404.md`);
+                }
+                console.info(`[f404 art] ${report.installed.length}/${artCount()} delivered sprites in use`);
+            }
             // UI first so it renders above the game scene.
             this.scene.launch(UI_KEY);
             this.scene.start(GAME_KEY);

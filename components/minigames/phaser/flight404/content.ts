@@ -22,6 +22,40 @@
 export const VIEW_W = 352;
 export const VIEW_H = 198;
 
+/**
+ * How many device pixels the canvas actually gets, and the zoom that keeps the
+ * world the same size in spite of it.
+ *
+ * These are two different questions and they were one number for too long. The
+ * canvas backing store was `VIEW_W × VIEW_H`, so the finest detail the game
+ * could ever show was 352 pixels across — a 960px-wide hand-drawn cabin wall
+ * was resampled down to a third of its size before it reached the screen, and
+ * every hour spent on it was thrown away in the last step of the pipeline.
+ *
+ * So the canvas is now 960 × 540 and the world camera is zoomed by exactly the
+ * ratio, which means the camera still shows 352 × 198 **world units**. Nothing
+ * downstream changes: every coordinate, every platform, every constant in
+ * `terrain.ts`, every jump arc and all 641 checks are in world units and are
+ * untouched. The only difference is how many device pixels each of those units
+ * is allowed to be drawn with.
+ *
+ * Coded placeholders are unaffected too — they are drawn at world size and
+ * upscaled by the zoom with nearest-neighbour filtering, so they stay exactly
+ * as chunky as they were. Delivered art is simply allowed to be better.
+ */
+export const RENDER_W = 960;
+export const RENDER_H = 540;
+export const ZOOM = RENDER_W / VIEW_W;
+
+/**
+ * The factor a delivered PNG should be authored at to land pixel-for-pixel.
+ *
+ * A sprite the asset list calls 34 × 30 world units renders into 34 × ZOOM ≈ 93
+ * device pixels, so art drawn on a 93px grid maps 1:1 and nothing is resampled.
+ * This is the number to quote to whoever is drawing.
+ */
+export const ART_SCALE = ZOOM;
+
 /** The aisle carpet — every character's feet line, and the arcade world floor. */
 export const FLOOR_Y = 164;
 /** Feet line for a mook wedged into an open overhead bin. */
