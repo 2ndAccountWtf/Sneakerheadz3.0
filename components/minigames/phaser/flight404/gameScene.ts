@@ -36,6 +36,7 @@ import {
 import { TILE, has } from './terrain';
 import { ZOOM, PLATE_SHRINK } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
+import { attachSkin, type Skin } from './skin';
 import {
     openView, buildResidents, stepResidents, stepCrossings, clearView,
     type BackdropView,
@@ -108,6 +109,8 @@ interface MookData {
     bubble?: Txt;
     bubbleT: number;
     cycle?: PhaserNS.Time.TimerEvent;
+    /** Drawn art, when it has been delivered for this kind. See `skin.ts`. */
+    skin?: Skin | null;
 }
 type Mook = BlockFigure & { md: MookData };
 
@@ -127,10 +130,12 @@ interface HostageData {
     barFill?: Img;
     bubble?: Txt;
     bubbleT: number;
+    skin?: Skin | null;
 }
 type Hostage = BlockFigure & { hd: HostageData };
 
 interface BossData {
+    skin?: Skin | null;
     hp: number;
     maxHp: number;
     facing: 1 | -1;
@@ -186,6 +191,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // --- actors
         private player!: BlockFigure;
         private playerProp!: Img;
+        /** The player's drawn art, if any. Null keeps the block rig. */
+        private playerSkin: Skin | null = null;
         private torch?: Img;
         private boltIcon?: Img;
         private mooks!: PhaserNS.Physics.Arcade.Group;
@@ -395,6 +402,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private buildPlayer() {
             this.player = mkFigure(this, 18, FLOOR_Y, PLAYER_H, KITS.player);
             this.player.setDepth(10);
+            this.playerSkin = attachSkin(this, this.player, 'player', PLAYER_H);
             // PHASER: a Container can carry an arcade body, so the whole
             // block-figure is one collidable thing. Feet are the origin, hence
             // the negative offset.
@@ -805,6 +813,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const h = def.perch ? 16 : 24;
             const fig = mkFigure(this, def.x, y, h, KITS.militant) as Mook;
             fig.setDepth(8);
+            // `trolley` mooks are chargers who happen to be hiding behind one,
+            // so they borrow the charger's art rather than needing their own.
+            const skinRole = def.kind === 'thrower' ? 'thrower' : 'charger';
             // A `trolley` mook is paired with the nearest parked trolley and
             // stands just *behind* it relative to the player's approach, so the
             // static body is genuinely between the two of them.
@@ -812,6 +823,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 ? trolleys.reduce((best, tx) => (Math.abs(tx - def.x) < Math.abs(best - def.x) ? tx : best), trolleys[0])
                 : undefined;
             fig.md = {
+                skin: attachSkin(this, fig, skinRole, h),
                 id: this.nextId++,
                 kind: def.kind,
                 hp: MOOK_HP[def.kind], maxHp: MOOK_HP[def.kind],
@@ -867,7 +879,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private spawnHostage(x: number) {
             const fig = mkFigure(this, x, FLOOR_Y - 1, 22, KITS.hostage) as Hostage;
             fig.setDepth(6);
-            fig.hd = { freed: false, dwell: 0, bubbleT: 0 };
+            fig.hd = { freed: false, dwell: 0, bubbleT: 0, skin: attachSkin(this, fig, 'hostage', 22) };
             fig.setPose({ crouch: true });
             this.hostages.add(fig);      // before the body setup — see spawnMook
             const b = body(fig);
@@ -891,6 +903,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const fig = mkFigure(this, len - 60, FLOOR_Y, 34, KITS.boss) as Boss;
             fig.setDepth(9);
             fig.bd = {
+                skin: attachSkin(this, fig, 'yasser', 34),
                 hp: BOSS_HP, maxHp: BOSS_HP, facing: -1, state: 'intro', t: 0,
                 phase: 1, step: 0, hurtT: 0, shots: 0, vest: 6, taken: 0, dir: -1,
                 defeatStage: 0, pips: [], bubbleT: 0,
@@ -1451,6 +1464,18 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const slow = md.slowT > 0 ? 0.45 : 1;
             const go = (s: string) => { md.state = s; md.t = 0; };
 
+            // The mook's own state machine already names what he is doing; the
+            // skin only has to translate those names into animations it has.
+            // Anything it does not recognise falls back through `skin.ts`, so a
+            // new mook state cannot make a character vanish.
+            md.skin?.play(
+                md.ko ? 'die'
+                : md.state === 'throw' || md.state === 'wind' ? 'throw'
+                : md.state === 'run' || md.state === 'charge' ? 'run'
+                : 'idle',
+                md.facing,
+            );
+
             if (md.ko) {
                 b.setVelocityX(b.velocity.x * 0.985);
                 return;
@@ -1772,6 +1797,19 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         }
 
         private stepBoss(dt: number) {
+            // Yasser's cycle names his own beats, so the skin follows them the
+            // same way the mooks' does. `defeat` outranks everything: once he is
+            // down he stays down whatever the cycle was mid-way through.
+            const bs = this.boss?.bd;
+            if (bs) {
+                bs.skin?.play(
+                    bs.state === 'defeat' ? 'die'
+                    : bs.state === 'throw' || bs.state === 'volley' ? 'throw'
+                    : bs.state === 'charge' || bs.state === 'run' ? 'run'
+                    : 'idle',
+                    bs.facing,
+                );
+            }
             const b = this.boss;
             if (!b) return;
             const bd = b.bd;
@@ -1981,6 +2019,17 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
             // --- pose
             this.player.setFacing(this.pFacing);
+            // The drawn skin reads the same facts the rig does, so there is one
+            // notion of what the player is doing and the two can never disagree.
+            this.playerSkin?.play(
+                this.pHurt > 0 ? 'hurt'
+                : !onGround ? 'jump'
+                : this.pFireCd > 0.03 ? (this.pAimUp ? 'shootUp' : 'shoot')
+                : this.pCrouch ? 'crouch'
+                : dir !== 0 ? 'run'
+                : 'idle',
+                this.pFacing,
+            );
             this.player.setPose({
                 stride: onGround ? this.pStride : 0.25,
                 armUp: this.pAimUp ? 1 : this.pFireCd > 0.03 ? 0.45 : 0,
@@ -2047,6 +2096,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                     hd.dwell += dt;
                     if (hd.dwell > 0.45) {
                         hd.freed = true;
+                        hd.skin?.play('freed', 1);
                         this.freed++;
                         this.score += 250;
                         hd.belt?.destroy(); hd.belt = undefined;
