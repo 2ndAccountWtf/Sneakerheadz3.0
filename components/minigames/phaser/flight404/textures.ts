@@ -325,6 +325,45 @@ export function bakeTextures(scene: Scene) {
         fillRect(g, 11, 4, 2, 20, C.bg);
     });
 
+
+    // --- The background, and the traffic through it.
+    //
+    // Eighteen silhouettes, deliberately flat and readable at 20-34px rather
+    // than detailed: these draw at 62% brightness on the far plane and behind
+    // everything in the fight, so shape is the only thing that survives. Each
+    // is a placeholder with a real footprint — the sizes match
+    // `docs/ASSETS-FLIGHT404.md`, so a delivered PNG drops straight in through
+    // the art registry and the layout does not move.
+    const blob = (
+        key: string, w: number, h: number,
+        parts: [number, number, number, number, number][],
+    ) => bake(scene, T(key), w, h, g => { for (const [x, y, pw, ph, col] of parts) fillRect(g, x, y, pw, ph, col); });
+
+    // Residents — they stand still and never look at you.
+    blob('bg-coffee-crew', 34, 26, [[2,10,7,16,C.dim],[12,8,7,18,C.dim],[22,11,7,15,C.dim],[14,20,6,3,C.warn],[16,17,2,3,C.faint]]);
+    blob('bg-shawarma', 24, 30, [[9,2,6,20,C.warn],[8,22,8,8,C.dim],[2,14,5,16,C.dim],[18,20,4,10,C.faint]]);
+    blob('bg-sweeper', 18, 26, [[6,4,6,22,C.dim],[3,18,3,10,C.faint],[1,24,14,2,C.line]]);
+    blob('bg-balcony', 30, 24, [[3,8,6,16,C.dim],[13,6,6,18,C.dim],[22,9,6,15,C.dim],[0,20,30,4,C.raised]]);
+    blob('bg-porter', 20, 32, [[6,16,8,16,C.dim],[3,0,14,6,C.raised],[4,7,12,6,C.raised],[5,13,10,4,C.raised]]);
+    blob('bg-argument', 28, 26, [[3,6,7,20,C.dim],[17,5,7,21,C.dim],[10,10,3,2,C.warn],[15,13,3,2,C.warn]]);
+    blob('bg-donkey', 26, 22, [[3,6,18,10,C.dim],[2,2,6,7,C.dim],[4,16,3,6,C.faint],[17,16,3,6,C.faint],[21,7,4,2,C.faint]]);
+    blob('bg-sheep', 30, 18, [[1,5,12,9,C.faint],[15,6,12,8,C.faint],[3,14,2,4,C.dim],[24,14,2,4,C.dim]]);
+
+    // Crossings — they walk through and they are gone. Drawn facing right; the
+    // scene mirrors them, which is why nothing here is asymmetric by accident.
+    blob('cross-donkey', 26, 22, [[3,6,18,10,C.dim],[19,2,6,7,C.dim],[4,16,3,6,C.faint],[17,16,3,6,C.faint],[1,7,3,2,C.faint]]);
+    blob('cross-sheep', 34, 18, [[1,5,14,9,C.faint],[17,6,14,8,C.faint],[3,14,2,4,C.dim],[28,14,2,4,C.dim]]);
+    // The camel is drawn tall on purpose: the bit is that it does not fit.
+    blob('cross-camel', 32, 34, [[5,12,20,10,C.warn],[9,6,7,8,C.warn],[16,8,7,6,C.warn],[24,4,7,9,C.warn],[6,22,4,12,C.dim],[20,22,4,12,C.dim]]);
+    blob('cross-goats', 30, 18, [[2,6,11,8,C.dim],[16,7,11,7,C.dim],[11,3,3,4,C.faint],[25,4,3,4,C.faint]]);
+    blob('cross-chickens', 26, 12, [[1,4,7,7,C.white],[10,5,7,6,C.white],[19,3,6,8,C.white],[6,1,2,3,C.bad]]);
+    blob('cross-cart', 30, 24, [[2,8,20,10,C.raised],[4,4,16,5,C.ok],[3,18,5,5,C.line],[16,18,5,5,C.line],[23,6,6,18,C.dim]]);
+    blob('cross-tea', 20, 28, [[6,8,8,20,C.dim],[1,6,7,12,C.legend],[14,12,5,3,C.legend],[7,3,6,5,C.skin]]);
+    // 44px wide because it does not fit down the aisle, which is its whole bit.
+    blob('cross-rug', 44, 26, [[0,6,44,7,C.violet],[16,13,8,13,C.dim],[18,1,5,5,C.skin]]);
+    blob('cross-bread', 22, 30, [[7,10,8,20,C.dim],[1,4,20,5,C.legend],[8,4,6,4,C.skin]]);
+    blob('cross-bicycle', 26, 24, [[2,16,7,7,C.line],[17,16,7,7,C.line],[6,10,14,3,C.raised],[9,2,7,10,C.dim]]);
+
     // --- Props
     bake(scene, T('trolley'), 24, 26, g => {
         fillRect(g, 1, 0, 22, 22, C.raised);

@@ -21,6 +21,7 @@
  */
 
 import type { ActorKind } from './background';
+import type { CrossingKind } from './crossings';
 
 export type Creep = 'plane' | 'wrong' | 'shuk' | 'bedlam';
 
@@ -54,6 +55,21 @@ export interface CreepTier {
      * the furniture and there is nothing left to ration.
      */
     ration?: { kinds: ActorKind[]; max: number };
+    /**
+     * What runs through and how often, in expected seconds between arrivals.
+     *
+     * Separate from `admits` and from `density` because a thing that crosses is
+     * not a thing that lives here — see the header of `crossings.ts`. An
+     * ordinary cabin has nobody standing in it and still gets a camel every
+     * twenty seconds or so, which is the difference between "this is a bazaar"
+     * and "wait, was that a camel".
+     *
+     * This is why `plane` is no longer an empty tier while remaining a tier
+     * that spends no jokes: a crossing costs nothing, because it takes the
+     * evidence with it when it leaves.
+     */
+    crossEvery: number;
+    crosses: CrossingKind[];
 }
 
 export const CREEP: Record<Creep, CreepTier> = {
@@ -66,6 +82,8 @@ export const CREEP: Record<Creep, CreepTier> = {
         admits: ['balcony'],           // passengers, staring over seat backs
         density: 0.4,
         dressing: ['seats', 'bins', 'windowwall', 'carpet'],
+        crossEvery: 22,
+        crosses: ['donkey', 'sheep', 'camel', 'goats', 'chickens', 'cart', 'tea', 'rug', 'bread', 'bicycle'],
     },
 
     /**
@@ -85,6 +103,8 @@ export const CREEP: Record<Creep, CreepTier> = {
         density: 0.9,
         dressing: ['seats', 'bins', 'galleywall', 'carpet', 'rug'],
         ration: { kinds: ['coffee', 'donkey', 'sweeper'], max: 1 },
+        crossEvery: 16,
+        crosses: ['donkey', 'sheep', 'camel', 'goats', 'chickens', 'cart', 'tea', 'rug', 'bread', 'bicycle'],
     },
 
     /**
@@ -96,6 +116,8 @@ export const CREEP: Record<Creep, CreepTier> = {
         admits: ['coffee', 'shawarma', 'sweeper', 'porter', 'argument', 'donkey', 'sheep', 'balcony'],
         density: 2.0,
         dressing: ['awning', 'hangingcloth', 'stalls', 'lamps', 'rug', 'carpet'],
+        crossEvery: 11,
+        crosses: ['donkey', 'sheep', 'camel', 'goats', 'chickens', 'cart', 'tea', 'rug', 'bread', 'bicycle'],
     },
 
     /**
@@ -107,6 +129,8 @@ export const CREEP: Record<Creep, CreepTier> = {
         admits: ['coffee', 'shawarma', 'sweeper', 'porter', 'argument', 'donkey', 'sheep', 'balcony'],
         density: 3.2,
         dressing: ['awning', 'hangingcloth', 'stalls', 'lamps', 'rug', 'carpet', 'bunting'],
+        crossEvery: 7,
+        crosses: ['donkey', 'sheep', 'camel', 'goats', 'chickens', 'cart', 'tea', 'rug', 'bread', 'bicycle'],
     },
 };
 
@@ -125,6 +149,16 @@ export const anomalyBudget = (c: Creep): number => CREEP[c].ration?.max ?? Infin
  * would have nothing to fall back on, so that is a mistake worth catching here
  * rather than as an empty background at run time.
  */
+/**
+ * Expected seconds between crossings in this tier. Falls with the escalation,
+ * so an ordinary cabin gets one now and then and the cockpit is continuous
+ * traffic.
+ */
+export const crossEvery = (c: Creep): number => CREEP[c].crossEvery;
+
+/** Does anything cross here? Every tier says yes, including the ordinary one. */
+export const hasCrossings = (c: Creep): boolean => CREEP[c].crosses.length > 0;
+
 export const staples = (c: Creep): ActorKind[] => {
     const rest = CREEP[c].admits.filter((k) => !isAnomaly(c, k));
     return rest.length ? rest : CREEP[c].admits;

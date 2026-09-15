@@ -35,7 +35,11 @@ import {
     openActor, stepActor, blastNear,
     type ActorDef, type ActorKind, type ActorState, type Layer,
 } from './background';
-import { CREEP, actorBudget, isAnomaly, anomalyBudget, staples, type Creep } from './creep';
+import { CREEP, actorBudget, isAnomaly, anomalyBudget, staples, crossEvery, type Creep } from './creep';
+import {
+    openCrossing, stepCrossing, crossingGone, CROSS_WIDTH,
+    type CrossingKind, type CrossingState,
+} from './crossings';
 import { FLOOR_Y } from './content';
 import { TIER } from './terrain';
 import { shuffled } from '../../../../utils/rng';
@@ -181,9 +185,34 @@ export function populate(creep: Creep, length: number, rng: () => number = Math.
  * in here moves, because a background actor that walks is a background actor
  * the player will eventually try to follow.
  */
+/** One crossing's beat, on the frame it fires. */
+export interface CrossingBeat {
+    kind: CrossingKind;
+    beat: string;
+    x: number;
+}
+
+/** What the scene needs to draw one crossing this frame. */
+export interface CrossingFrame {
+    kind: CrossingKind;
+    x: number;
+    y: number;
+    facing: -1 | 1;
+    balked: boolean;
+    width: number;
+    depth: number;
+}
+
 export interface Backdrop {
     actors: ActorState[];
     placements: Placement[];
+    /** Livestock and commerce currently walking through. See `crossings.ts`. */
+    crossings: CrossingState[];
+    /** Seconds until the next one wanders in. */
+    nextCross: number;
+    /** Kept so the scheduler knows how far a crossing has to walk. */
+    creep: Creep;
+    length: number;
 }
 
 export function openBackdrop(creep: Creep, length: number, rng: () => number = Math.random): Backdrop {
@@ -191,7 +220,18 @@ export function openBackdrop(creep: Creep, length: number, rng: () => number = M
     // Opened from the same stream, so the staggering `openActor` does is part
     // of the same seed — one key reproduces the entire section, positions and
     // performance schedules together.
-    return { placements, actors: placements.map(p => openActor(p.def, rng)) };
+    return {
+        placements,
+        actors: placements.map(p => openActor(p.def, rng)),
+        // Nothing is mid-aisle when a cabin opens. The first crossing is
+        // scheduled, not present: walking into a section that already has a
+        // camel in it reads as a spawn, and walking into one that gets a camel
+        // twenty seconds later reads as an aeroplane with a camel on it.
+        crossings: [],
+        nextCross: nextCrossingIn(creep, rng),
+        creep,
+        length,
+    };
 }
 
 /**
@@ -220,11 +260,42 @@ export interface BackdropFrame {
  * is a door to the scenery noticing you, and the moment it notices you it
  * stops being scenery and starts being a game element nobody can shoot.
  */
+/**
+ * When the next thing wanders in.
+ *
+ * Jittered around the tier's rate rather than fixed, because a metronome reads
+ * as a spawner and the whole point of a crossing is that it feels like it was
+ * already happening and you walked into it. The floor stops `bedlam` producing
+ * a continuous wall of goats.
+ */
+export const CROSS_JITTER = 0.55;
+export const CROSS_FLOOR = 2.5;
+
+export function nextCrossingIn(creep: Creep, rng: () => number = Math.random): number {
+    const base = crossEvery(creep);
+    return Math.max(CROSS_FLOOR, base * (1 - CROSS_JITTER + rng() * CROSS_JITTER * 2));
+}
+
+/**
+ * Where a crossing walks.
+ *
+ * Always the near plane and always the aisle: a camel on the far plane is a
+ * texture, and the gag needs it close enough that you cannot mistake it for
+ * scenery. It is still drawn under the gameplay — it is not in the fight, it is
+ * just in the way of looking at the fight.
+ */
+export const CROSS_DEPTH = DEPTH.mid + 1;
+
 export function stepBackdrop(
     b: Backdrop,
     dt: number,
     rng: () => number = Math.random,
-): { backdrop: Backdrop; frames: BackdropFrame[] } {
+): {
+    backdrop: Backdrop;
+    frames: BackdropFrame[];
+    beats: CrossingBeat[];
+    crossings: CrossingFrame[];
+} {
     const actors: ActorState[] = [];
     const frames: BackdropFrame[] = [];
 
@@ -240,7 +311,46 @@ export function stepBackdrop(
             x: p.x, y: p.y, layer: p.layer, depth: p.depth, shade: p.shade,
         });
     }
-    return { backdrop: { actors, placements: b.placements }, frames };
+    // --- the traffic
+    //
+    // Crossings are stepped and dropped in the same pass. Nothing retires them
+    // on a timer and nothing counts them: one walks off the end of the section
+    // and stops existing, which is the only lifecycle this needs and the reason
+    // an ordinary cabin can carry livestock without ever accumulating any.
+    const crossings: CrossingState[] = [];
+    const beats: CrossingBeat[] = [];
+    for (const c of b.crossings) {
+        const r = stepCrossing(c, dt, rng);
+        if (crossingGone(r.state)) continue;
+        crossings.push(r.state);
+        if (r.beat) beats.push({ kind: r.state.def.kind, beat: r.beat, x: r.state.x });
+    }
+
+    let nextCross = b.nextCross - (Number.isFinite(dt) && dt > 0 ? dt : 0);
+    if (nextCross <= 0) {
+        const kinds = CREEP[b.creep].crosses;
+        if (kinds.length) {
+            const kind = kinds[Math.floor(rng() * kinds.length) % kinds.length] as CrossingKind;
+            const from: -1 | 1 = rng() < 0.5 ? -1 : 1;
+            crossings.push(openCrossing(kind, b.length, LAYER_Y.mid, 'mid', from, rng));
+        }
+        nextCross = nextCrossingIn(b.creep, rng);
+    }
+
+    return {
+        backdrop: { actors, placements: b.placements, crossings, nextCross, creep: b.creep, length: b.length },
+        frames,
+        beats,
+        crossings: crossings.map((c) => ({
+            kind: c.def.kind,
+            x: c.x,
+            y: c.def.y,
+            facing: (c.def.from < 0 ? 1 : -1) as -1 | 1,
+            balked: c.phase === 'balked',
+            width: CROSS_WIDTH[c.def.kind],
+            depth: CROSS_DEPTH,
+        })),
+    };
 }
 
 /**
@@ -260,7 +370,12 @@ export function shockwave(
 ): Backdrop {
     const actors = b.actors.map((a, i) =>
         Math.abs(b.placements[i].x - x) <= radius ? blastNear(a, rng) : a);
-    return { actors, placements: b.placements };
+    // A crossing walks through a blast without breaking stride, on purpose. The
+    // residents' duck is an authored, rare gag that works because they are
+    // standing there to be seen not reacting afterwards; something already on
+    // its way out of the cabin has nothing to sell by flinching, and a donkey
+    // that ignores an explosion is the better joke anyway.
+    return { ...b, actors, placements: b.placements };
 }
 
 /** How far apart the two nearest actors ended up. Diagnostics, and tests. */

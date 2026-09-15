@@ -269,6 +269,45 @@ what make a fuselage read as a market while the seats are still visible behind
 them. **The plane must never fully disappear** — the joke only works if you can
 still tell you are on an aeroplane.
 
+
+## Priority 12 — things that run through the cabin
+
+The other half of the background, and the half that reaches the ordinary
+cabin. A donkey **standing** in row 32 says the plane has lost; a donkey
+**running the length of the aisle and out through the galley** says something
+better — *wait, was that a donkey?* — and it works in an ordinary cabin
+precisely because you cannot go back and check. It has gone.
+
+So the regular cabin gets livestock after all. It just never gets to keep any.
+
+Every one of these enters off-screen, crosses, and exits off-screen. They have
+no hitbox, take no damage, and walk through a firefight without breaking
+stride — a crossing that swerved around the player would be a game element
+instead of a glimpse. All of them move slower than the player's 88px/s except
+the chickens, so you can overtake one and look at it.
+
+**Each needs a walk cycle and a balk** — the one thing it does mid-aisle,
+listed below. The balk holds for 1.6s and fires at most once per crossing, so
+it is the beat a player only catches if they happen to be looking, which is the
+whole value of it. A delivered walk cycle with no balk is a sprite with the
+joke removed.
+
+| id | size | frames | speed | the balk — 1.6s, once per crossing |
+|---|---|---|---|---|
+| `cross-donkey` | 26 × 22 | 6 | 26 | It stops dead, for its own reasons. |
+| `cross-sheep` | 34 × 18 | 6 | 22 | The flock bunches at nothing and spreads out again. |
+| `cross-camel` | 32 × 34 | 8 | 20 | **It has to duck under the overhead bins, and does not enjoy it.** Too tall for the cabin is the entire bit — draw it at a height that makes the duck necessary. |
+| `cross-goats` | 30 × 18 | 6 | 40 | One gets up on a seat back and is removed. |
+| `cross-chickens` | 26 × 12 | 8 | 74 | They scatter, regroup, and continue as one. The only thing here faster than the player. |
+| `cross-cart` | 30 × 24 | 6 | 18 | A wheel catches on the aisle runner. Vegetables, pushed by somebody who will not be hurried. |
+| `cross-tea` | 20 × 28 | 6 | 30 | He pours one, over his shoulder, without looking or stopping. The brass urn on his back. |
+| `cross-rug` | 44 × 26 | 6 | 16 | **It will not fit and has to be turned, twice.** The rolled carpet is longer than the aisle is wide — that is why it is 44px and why the balk is the best one on this list. |
+| `cross-bread` | 22 × 30 | 6 | 28 | He adjusts the tray with one finger. Nothing falls. A tray of ka'ak carried flat on the head. |
+| `cross-bicycle` | 26 × 24 | 6 | 62 | He rings the bell. Nobody moves. Through an aeroplane. |
+
+Facing: deliver each walking **left to right**; the game mirrors it for the
+other direction, and both directions happen equally often.
+
 ---
 
 ## What we are building against this
@@ -279,9 +318,10 @@ already in `components/minigames/phaser/flight404/terrain.ts`, with 21 checks in
 rung asks for more than 34.3, and every platform in every section is verified
 climbable from the floor.
 
-Priorities 8–11 are in the same state. The six enemies are built and tested in
+Priorities 8–12 are in the same state. The six enemies are built and tested in
 `cast.ts`, the food physics in `projectiles.ts`, the eight background kinds in
-`background.ts`, and the four-tier escalation in `creep.ts` — every duration
+`background.ts`, the four-tier escalation in `creep.ts`, and the traffic in `crossings.ts` —
+every duration
 quoted above is read off a constant in one of those files rather than proposed
 here, so an animation cut to the length given will match the game exactly.
 

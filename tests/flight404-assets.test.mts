@@ -27,6 +27,7 @@ import {
     SMEAR_LIFE, SMEAR_FADE, STICK_LIFE, MAX_BOUNCES,
 } from '../components/minigames/phaser/flight404/projectiles.ts';
 import { DUCK, BEATS } from '../components/minigames/phaser/flight404/background.ts';
+import { CROSSING_KINDS, BALK } from '../components/minigames/phaser/flight404/crossings.ts';
 import { CREEP, CREEP_ORDER } from '../components/minigames/phaser/flight404/creep.ts';
 
 let pass = 0;
@@ -88,6 +89,26 @@ t('every background kind the code can spawn has art requested', () => {
             `background actor "${kind}" exists in the game and is not on the asset list`,
         );
     }
+});
+
+t('every kind that can walk through a cabin has art requested', () => {
+    // Added after ten crossing kinds — camels, goats, a tea seller, a man with a
+    // rolled carpet — went into the game and this file passed anyway, because it
+    // only knew about the residents in `background.ts`. A drift check that only
+    // watches the categories that existed when it was written is a drift check
+    // that waves the next category through.
+    for (const kind of CROSSING_KINDS) {
+        assert.ok(DOC.includes(`cross-${kind}`), `a ${kind} can run through the cabin and nobody has been asked to draw one`);
+    }
+});
+
+t('every crossing has its bit written down for the animator', () => {
+    // The balk is the only thing a crossing does. If it is not in the brief the
+    // delivered sprite is a walk cycle and the gag never existed.
+    for (const kind of CROSSING_KINDS) {
+        assert.ok(BALK[kind].length > 10, `${kind} has no bit in the code`);
+    }
+    assert.match(DOC, /balk|stops dead|duck under/i, 'the crossings are on the list as walk cycles with no beat');
 });
 
 t('every creep tier and its dressing is on the list', () => {

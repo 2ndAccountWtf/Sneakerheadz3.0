@@ -34,6 +34,11 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
+import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
+import {
+    openView, buildResidents, stepResidents, stepCrossings, clearView,
+    type BackdropView,
+} from './backdropView';
 import { REG, type F404Input, type F404Result } from './bridge';
 import type { HudPayload } from './uiScene';
 
@@ -191,6 +196,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private trolleys!: PhaserNS.Physics.Arcade.StaticGroup;
         /** The section's furniture. Rebuilt per cabin; see `platforms.ts`. */
         private terrain: PlatformSet | null = null;
+        /** Who is standing around not watching, and what is walking through. */
+        private backdrop: Backdrop | null = null;
+        private backdropView: BackdropView | null = null;
         /** Player feet at the start of the frame, for the one-way rule. */
         private feetWere = FLOOR_Y;
         /**
@@ -450,6 +458,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.trolleys.clear(true, true);
             clearPlatforms(this.terrain);
             this.terrain = null;
+            clearView(this.backdropView);
+            this.backdropView = null;
+            this.backdrop = null;
             this.shots.clear(true, true);
             this.hostiles.clear(true, true);
             this.melee.clear(true, true);
@@ -480,6 +491,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // live in `layout.ts` / `terrain.ts`; this is the one line that
             // turns them into something you can stand on.
             this.terrain = buildPlatforms(this, layoutFor(idx, () => this.rng.frac()));
+
+            // The cabin's own life, which has nothing to do with the fight.
+            // Residents are placed once; traffic arrives on its own schedule and
+            // leaves on its own, which is how an ordinary aeroplane ends up with
+            // a camel in it without ever keeping one. See `crossings.ts`.
+            this.backdrop = openBackdrop(def.creep, def.length, () => this.rng.frac());
+            this.backdropView = openView();
+            buildResidents(this, this.backdropView, stepBackdrop(this.backdrop, 0, () => this.rng.frac()).frames);
             this.physics.add.collider(this.player, this.terrain.solid);
             this.physics.add.collider(this.mooks, this.terrain.solid);
             this.physics.add.collider(this.mooks, this.terrain.fences);
@@ -1137,6 +1156,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // Ran out of cabin. The bulkhead wins.
             this.say(boss.bd, YASSER_WALL, 1800, PAL.accent2, 0);
             this.cameras.main.shake(340, 0.02);
+            this.duckNearby(boss.x, 150);
             this.pStars.emitParticleAt(boss.x, boss.y - 34, 6);
             this.pSplat.emitParticleAt(boss.x, boss.y - 26, 4);
             this.bossStagger();
@@ -1171,7 +1191,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             m.md.hurtT = 0.16;
             m.setHurt(true);
             this.pBoom.emitParticleAt(m.x, m.y - 14, 1);
-            if (m.md.hp <= 0) this.koMook(m, fromX);
+            if (m.md.hp <= 0) { this.duckNearby(m.x, 90); this.koMook(m, fromX); }
         }
 
         /**
@@ -1867,6 +1887,34 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.feetWere = this.player.y;
         }
 
+        /**
+         * One call into the background per frame, and nothing flows the other
+         * way. The scene tells it how much time passed; it does not tell it
+         * where the player is, because `stepBackdrop` has nowhere to put that
+         * and the whole bit depends on it staying that way.
+         */
+        /**
+         * The one thing that is allowed to reach the background.
+         *
+         * Everybody near a blast ducks, and is back on the coffee two seconds
+         * later. It works because it is scripted, brief and about the explosion
+         * rather than about the player — a reaction that fired every time would
+         * be awareness with extra steps, and the shawarma guy is exempt because
+         * a man who never once looks up is funnier than one who does.
+         */
+        private duckNearby(x: number, radius: number) {
+            if (!this.backdrop) return;
+            this.backdrop = shockwave(this.backdrop, x, radius, () => this.rng.frac());
+        }
+
+        private stepBackdrop(dt: number) {
+            if (!this.backdrop || !this.backdropView) return;
+            const r = stepBackdrop(this.backdrop, dt, () => this.rng.frac());
+            this.backdrop = r.backdrop;
+            stepResidents(this.backdropView, r.frames);
+            stepCrossings(this, this.backdropView, r.crossings);
+        }
+
         private stepHostages(dt: number) {
             for (const obj of this.hostages.getChildren() as Hostage[]) {
                 const h = obj as Hostage;
@@ -2114,6 +2162,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (this.boss) this.stepBoss(dt);
             this.stepShots(dt);
             this.stepHostages(dt);
+            this.stepBackdrop(dt);
             this.stepBubbles(dt);
             this.stepDarkness();
             this.stepDoor();
