@@ -76,7 +76,11 @@ export function syncCast(
         }
         fig.setPosition(m.x, m.y);
         fig.setFacing(m.facing);
-        fig.skin?.play(stateOf(m.state), m.facing);
+        // The director moves members by setting x, so speed is the distance
+        // covered since the last frame rather than a body velocity.
+        const was = fig.getData('lastX') as number | undefined;
+        fig.setData('lastX', m.x);
+        fig.skin?.play(stateOf(m.state), m.facing, { speed: was === undefined ? 0 : (m.x - was) * 60 });
         // A member mid-beat is out of the fight, and it should be legible at a
         // glance that he is: that is the whole reason the beats cost anything.
         fig.setAlpha(distracted(m.state) ? 0.82 : 1);

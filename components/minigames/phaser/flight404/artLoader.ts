@@ -177,6 +177,13 @@ export function installArt(scene: PhaserNS.Scene, entries: ArtEntry[]): InstallR
  */
 export const animKey = (id: string): string => `${T(id)}-play`;
 
+/**
+ * Register one looping animation per multi-frame sheet.
+ *
+ * The rate and the repeat count here are only defaults: `skin.ts` overrides
+ * both per state when it plays one, because how fast a thing animates is a
+ * property of what it is doing, not of the file it came from.
+ */
 export function buildAnims(scene: PhaserNS.Scene, entries: ArtEntry[], fps = 10): void {
     for (const e of entries) {
         const key = T(e.id);

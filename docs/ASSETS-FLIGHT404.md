@@ -108,6 +108,41 @@ and a knocked-over pose; the game already has the physics for spilling food.
 | `aisle-crate-broken` | 24 × 20 | 4 | Bursting apart. |
 | `aisle-luggage-open` | 28 × 18 | 4 | Contents everywhere. |
 
+## Frame counts: what you have is enough
+
+The delivered frame counts are fine and do not need increasing. An 8-frame run
+and a 4-frame idle are in the range the arcade games this is aiming at used.
+When animation looked bad it was playback, not frames:
+
+- Every state played at a flat 10fps, so a 2-frame flinch and an 8-frame run
+  ran at the same rate.
+- The run cycle was on a fixed clock instead of the character's actual speed,
+  so the feet skated at every speed except the one it happened to suit.
+- One-shot actions looped, so deaths animated forever and flinches strobed.
+- The jump was a timed loop rather than a position in an arc.
+
+All four are fixed in `skin.ts`, and these are the rates each state now plays
+at. **Cut animations to read well at these speeds**, not at some other rate:
+
+| state | fps | notes |
+|---|---|---|
+| idle, crouch, radio, tidy | 6–7 | slow enough to read as waiting |
+| run | **speed-driven**, 4–30 | one cycle per stride pair; feet stay planted |
+| jump | frame picked by velocity | 4 frames: rise, apex, fall, land |
+| shoot, attack, flee | 16–18 | plays **once** and holds |
+| hurt, throw, grab | 12–14 | plays **once** |
+| die | 9 | plays **once**; the last frame is what stays on the floor |
+| wind (telegraph) | 9 | deliberately slow — the player has to read it |
+| stunned | 5 | |
+
+Two consequences worth drawing to:
+
+**The last frame of a one-shot is a resting pose.** A death's final frame is the
+body lying there for the rest of the level, so it should work as a still.
+
+**A run cycle should loop seamlessly at its midpoint** as well as its end, since
+the rate varies with speed and the player will see it at all of them.
+
 ## What is already delivered and working
 
 107 files, all loading. The cabins, the characters, the props, the drops, the

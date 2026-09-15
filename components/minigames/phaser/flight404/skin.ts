@@ -61,6 +61,48 @@ export const SKINS: Record<string, SkinSet> = {
     falafelGuy: { idle: 'falafel-serve', spill: 'falafel-spill', recover: 'falafel-recover' },
 };
 
+/**
+ * How fast each state plays, in frames per second.
+ *
+ * A flat rate across every state is the single biggest thing that makes drawn
+ * animation look cheap, and it was what this did: a two-frame flinch and an
+ * eight-frame run cycle both ran at 10fps, so the flinch was a slow blink and
+ * the run was a man wading. These are per-state because they are per-state
+ * facts — a wind-up is slow so it can be read, a muzzle flash is instant
+ * because it is light.
+ *
+ * `run` is absent on purpose: its rate comes from how fast the character is
+ * actually moving. See `runRate`.
+ */
+export const RATE: Record<string, number> = {
+    idle: 6, crouch: 6, jump: 12, shoot: 18, shootUp: 18, hurt: 14, die: 9,
+    throw: 14, photo: 7, grab: 12, bag: 12, flee: 16, radio: 6, tidy: 7,
+    attack: 16, wind: 9, charge: 14, stunned: 5, spill: 12, recover: 7, freed: 10,
+};
+export const DEFAULT_RATE = 8;
+
+/**
+ * States that happen once and then hold their last frame.
+ *
+ * Everything used to loop, so a death animation played forever and the corpse
+ * twitched, a flinch strobed for as long as the invulnerability lasted, and a
+ * shot kept firing after the bullet had gone. A one-shot that holds is also
+ * what lets the last frame of a death be the thing left lying on the floor.
+ */
+export const ONCE = new Set(['shoot', 'shootUp', 'hurt', 'die', 'throw', 'grab', 'bag', 'spill']);
+
+/**
+ * How fast a run cycle should play so the feet stay planted.
+ *
+ * A cycle covers one full stride pair, which for a figure this tall is about
+ * its own height in ground distance. Tie the rate to speed and the feet stop
+ * skating; leave it fixed and the character moonwalks at every speed except the
+ * one it was tuned at — and this game has three (walking, crouched, carrying an
+ * energy drink), so it was wrong at two of them at all times.
+ */
+export const runRate = (frames: number, speed: number, height: number): number =>
+    Math.max(4, Math.min(30, (frames * Math.abs(speed)) / Math.max(8, height)));
+
 /** Where a state falls back to when its own art has not arrived. */
 const FALLBACK: Record<string, string> = {
     run: 'idle', jump: 'idle', crouch: 'idle', shoot: 'idle', shootUp: 'shoot',
@@ -74,8 +116,14 @@ export interface Skin {
     sprite: PhaserNS.GameObjects.Sprite;
     set: SkinSet;
     state: string;
-    /** Play a state. Cheap to call every frame; a repeat is ignored. */
-    play(state: string, facing: 1 | -1): void;
+    /**
+     * Play a state. Cheap to call every frame; a repeat is ignored.
+     *
+     * `speed` drives the run cycle's rate, and `vy` picks the jump frame — a
+     * jump is not a timed loop, it is a position in an arc, so it is read from
+     * the body rather than animated on a clock.
+     */
+    play(state: string, facing: 1 | -1, motion?: { speed?: number; vy?: number }): void;
 }
 
 const has = (scene: PhaserNS.Scene, id: string): boolean => scene.textures.exists(T(id));
@@ -122,18 +170,43 @@ export function attachSkin(
         sprite,
         set,
         state: '',
-        play(state: string, facing: 1 | -1) {
+        play(state: string, facing: 1 | -1, motion?: { speed?: number; vy?: number }) {
             const id = resolve(scene, set, state);
             if (!id) return;
             const key = T(id);
-            if (this.state !== state) {
+            const anim = scene.anims.exists(animKey(id)) ? scene.anims.get(animKey(id)) : null;
+            const frames = anim ? anim.frames.length : 1;
+
+            // A jump is a position in an arc, not a clock. Reading the frame off
+            // vertical velocity means the apex pose lands at the apex however
+            // long the jump took, which a timed loop can only manage for one
+            // jump height.
+            if (state === 'jump' && anim && motion?.vy !== undefined) {
+                this.state = state;
+                sprite.stop();
+                sprite.setTexture(key);
+                const vy = motion.vy;
+                const idx = vy < -60 ? 0 : vy < 40 ? 1 : 2;
+                sprite.setFrame(Math.min(frames - 1, idx));
+            } else if (this.state !== state) {
                 this.state = state;
                 // An animation exists only for multi-frame sheets; a single
                 // frame is set directly rather than played, because asking
                 // Phaser to play a one-frame animation logs a warning per call
                 // and there is one of these per actor per frame.
-                if (scene.anims.exists(animKey(id))) sprite.play(animKey(id), true);
-                else { sprite.stop(); sprite.setTexture(key); }
+                if (anim) {
+                    sprite.play({
+                        key: animKey(id),
+                        frameRate: state === 'run'
+                            ? runRate(frames, motion?.speed ?? 88, height)
+                            : (RATE[state] ?? DEFAULT_RATE),
+                        repeat: ONCE.has(state) ? 0 : -1,
+                    }, true);
+                } else { sprite.stop(); sprite.setTexture(key); }
+            } else if (state === 'run' && anim && motion?.speed !== undefined) {
+                // Already running: retune rather than restart, or the cycle
+                // resets to frame zero every time the speed changes at all.
+                sprite.anims.msPerFrame = 1000 / runRate(frames, motion.speed, height);
             }
             sprite.setFlipX(facing < 0);
             // Art may arrive at world size or at ART_SCALE. Pick whichever

@@ -1597,6 +1597,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 : md.state === 'run' || md.state === 'charge' ? 'run'
                 : 'idle',
                 md.facing,
+                { speed: b.velocity.x, vy: b.velocity.y },
             );
 
             if (md.ko) {
@@ -2152,6 +2153,11 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 : dir !== 0 ? 'run'
                 : 'idle',
                 this.pFacing,
+                // The run cycle is timed off actual ground speed and the jump
+                // frame off actual vertical velocity, so both stay right when
+                // the player is crouched, carrying an energy drink, or groping
+                // through a dark section at 80% pace.
+                { speed: b.velocity.x, vy: b.velocity.y },
             );
             this.player.setPose({
                 stride: onGround ? this.pStride : 0.25,
