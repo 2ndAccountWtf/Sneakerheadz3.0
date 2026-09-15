@@ -14,8 +14,13 @@
 import assert from 'node:assert/strict';
 import {
     JUMP_PEAK, MAX_STEP, HOP_MARGIN, TIER, canHop, unreachable, surfaces,
-    blocksRunning, headroom, type PlatformDef,
+    blocksRunning, headroom, TILE, SURFACE, has, isFooting, conveyorDir,
+    type PlatformDef,
 } from '../components/minigames/phaser/flight404/terrain.ts';
+import {
+    openActor, stepActor, blastNear, BEATS, BEAT_EVERY, DUCK, isInteractive,
+    type ActorKind,
+} from '../components/minigames/phaser/flight404/background.ts';
 import {
     PROP_HP, PROP_DROP_CHANCE, PROP_BLAST, PROP_ART, artFor, isHurt, type PropKind,
 } from '../components/minigames/phaser/flight404/props.ts';
@@ -25,6 +30,7 @@ import {
     openSpawner, stepSpawner, spent, inRange, DEFAULT_RANGE, type SpawnerDef,
 } from '../components/minigames/phaser/flight404/spawners.ts';
 import { GRAVITY, JUMP_V, FLOOR_Y, BIN_FEET, PLAYER_H } from '../components/minigames/phaser/flight404/content.ts';
+import { rngFor } from '../utils/rng.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -74,7 +80,7 @@ t('the rungs go strictly upward', () => {
 
 console.log('\nreachability, which is not the same as existence');
 
-const plat = (x: number, y: number, w = 40, kind: PlatformDef['kind'] = 'seat'): PlatformDef => ({ x, y, w, kind });
+const plat = (x: number, y: number, w = 40, flags = SURFACE.seat): PlatformDef => ({ x, y, w, flags });
 
 t('a platform within a hop of the floor is reachable', () => {
     assert.deepEqual(unreachable([plat(100, TIER.seat)]), []);
@@ -88,14 +94,14 @@ t('a platform out of reach with nothing under it is reported', () => {
 t('a ladder of platforms is reachable all the way up', () => {
     const ladder = [
         plat(100, TIER.seat), plat(110, TIER.seatback),
-        plat(120, TIER.counter), plat(130, TIER.bin, 60, 'bin'),
+        plat(120, TIER.counter), plat(130, TIER.bin, 60, SURFACE.bin),
     ];
     assert.deepEqual(unreachable(ladder), [], 'a complete ladder was called unclimbable');
 });
 
 t('a ladder with a rung missing is reported, not silently accepted', () => {
     // The soft lock this whole module exists to prevent.
-    const gap = [plat(100, TIER.seat), plat(130, TIER.bin, 60, 'bin')];
+    const gap = [plat(100, TIER.seat), plat(130, TIER.bin, 60, SURFACE.bin)];
     assert.equal(unreachable(gap).length, 1, 'a two-rung jump to the bins passed');
 });
 
@@ -103,7 +109,7 @@ t('a rung you cannot run to is not a rung', () => {
     // Right height, wrong end of the cabin.
     const far = plat(9000, TIER.seat);
     assert.deepEqual(unreachable([far]), [], 'the floor runs the whole section, so this one is fine');
-    const stranded = [plat(100, TIER.seat), plat(9000, TIER.bin, 40, 'bin')];
+    const stranded = [plat(100, TIER.seat), plat(9000, TIER.bin, 40, SURFACE.bin)];
     assert.equal(unreachable(stranded).length, 1, 'a bin at the far end was reachable from a seat at the near end');
 });
 
@@ -118,6 +124,122 @@ t('a low platform is flagged as something you have to crouch under', () => {
     assert.equal(blocksRunning(low), true, 'a head-height ledge was not flagged');
     assert.equal(blocksRunning(plat(40, TIER.counter)), false, 'a galley counter was called a head-banger');
     assert.ok(headroom(plat(0, TIER.bin)) > PLAYER_H);
+});
+
+console.log('\nwhat a surface does, rather than what it is');
+
+t('a surface can do several things at once', () => {
+    // The point of the conversion. This was an enum with two behaviours, which
+    // forces a new type every time a surface needs to behave slightly
+    // differently. A belt that is also solid is one OR, not a subclass.
+    const belt = SURFACE.beltFwd;
+    assert.equal(has(belt, TILE.SOLID), true);
+    assert.equal(has(belt, TILE.CONVEYOR_R), true);
+    assert.equal(has(belt, TILE.CONVEYOR_L), false);
+});
+
+t('every flag is its own bit, so nothing collides', () => {
+    const bits = Object.values(TILE);
+    assert.equal(new Set(bits).size, bits.length, 'two flags share a bit');
+    for (const b of bits) {
+        assert.ok(b > 0 && (b & (b - 1)) === 0, `${b} is not a single bit`);
+    }
+});
+
+t('an enemy-only wall is invisible to the player', () => {
+    // The fix for "the charger ran off the counter and died", authored in the
+    // level rather than patched into the AI with raycasts.
+    assert.equal(has(SURFACE.fence, TILE.ENEMY_WALL), true);
+    assert.equal(has(SURFACE.fence, TILE.SOLID), false, 'the player would walk into an invisible wall');
+    assert.equal(isFooting({ x: 0, y: 0, w: 10, flags: SURFACE.fence }), false, 'a fence became a rung');
+});
+
+t('a fence is never counted as part of the climb', () => {
+    // If it were, a level could "prove" reachable via a wall the player cannot
+    // stand on, which is the exact soft lock the ladder maths exists to stop.
+    const withFence = [plat(100, TIER.seat, 40, SURFACE.fence), plat(130, TIER.bin, 60, SURFACE.bin)];
+    assert.equal(unreachable(withFence).length, 1, 'a bin was reachable by standing on a fence');
+});
+
+t('a conveyor knows which way it drags', () => {
+    assert.equal(conveyorDir(SURFACE.beltFwd), 1);
+    assert.equal(conveyorDir(SURFACE.beltBack), -1);
+    assert.equal(conveyorDir(SURFACE.counter), 0);
+});
+
+t('a seat is jumped through and a counter is not', () => {
+    assert.equal(has(SURFACE.seat, TILE.ONE_WAY), true);
+    assert.equal(has(SURFACE.counter, TILE.ONE_WAY), false);
+    // Both still hold you up, which is what makes them rungs.
+    assert.equal(isFooting({ x: 0, y: 0, w: 9, flags: SURFACE.seat }), true);
+    assert.equal(isFooting({ x: 0, y: 0, w: 9, flags: SURFACE.counter }), true);
+});
+
+console.log('\nthe world that refuses to acknowledge the gunfight');
+
+const KINDS: ActorKind[] = ['coffee', 'shawarma', 'sweeper', 'balcony', 'porter', 'argument', 'donkey', 'sheep'];
+
+t('every actor kind has beats and a rhythm', () => {
+    for (const k of KINDS) {
+        assert.ok(BEATS[k]?.length, `${k} has nothing to do`);
+        assert.ok(BEAT_EVERY[k] > 0, `${k} has no rhythm`);
+    }
+});
+
+t('the rare beats are genuinely rare', () => {
+    // Funny once a run, furniture by the fourth time. Anything under about ten
+    // seconds is a loop the player will notice and stop finding funny.
+    for (const k of KINDS) {
+        assert.ok(BEAT_EVERY[k] >= 10, `${k} performs every ${BEAT_EVERY[k]}s — that is a loop, not a gag`);
+    }
+});
+
+t('nothing in the background can be shot, and nothing blocks', () => {
+    // A player who learns the scenery is shootable spends the level shooting
+    // scenery. There is deliberately no way to make one interactive.
+    assert.equal(isInteractive(), false);
+});
+
+t('an actor performs on its own schedule and never sees the player', () => {
+    // stepActor takes no player argument at all. That is the enforcement:
+    // awareness is impossible rather than merely discouraged.
+    let s = openActor({ kind: 'coffee', x: 100 }, rngFor('coffee'));
+    let beats = 0;
+    for (let i = 0; i < 60 * 300; i++) {
+        const r = stepActor(s, 1 / 60, rngFor(`c-${i}`));
+        s = r.state;
+        if (r.beat) beats++;
+    }
+    assert.ok(beats > 3, `five minutes produced only ${beats} beats`);
+    assert.ok(beats < 60, `${beats} beats in five minutes is a nervous tic`);
+});
+
+t('a street full of actors does not perform in unison', () => {
+    // Staggered on open, or the whole background moves as one organism.
+    const timers = KINDS.map((k, i) => openActor({ kind: k, x: i * 40 }, rngFor(`stagger-${i}`)).timer);
+    assert.ok(new Set(timers.map(t => Math.round(t))).size > 1, 'every actor opened on the same beat');
+});
+
+t('a blast makes some of them duck, and they go back to it', () => {
+    const before = openActor({ kind: 'coffee', x: 0 }, rngFor('duck'));
+    const ducked = blastNear({ ...before, ducking: 0 }, () => 0);   // always ducks
+    assert.equal(ducked.ducking, DUCK.hold);
+
+    // And two seconds later, coffee.
+    let s = ducked;
+    for (let i = 0; i < 60 * (DUCK.hold + 1); i++) s = stepActor(s, 1 / 60, rngFor('back')).state;
+    assert.equal(s.ducking, 0, 'still ducking long after the blast');
+});
+
+t('the shawarma guy never ducks, because that is the joke', () => {
+    const s = openActor({ kind: 'shawarma', x: 0 }, rngFor('sh'));
+    assert.equal(blastNear(s, () => 0).ducking, 0, 'he flinched');
+});
+
+t('a ducking actor performs nothing until it stands up', () => {
+    let s = { ...openActor({ kind: 'coffee', x: 0 }, rngFor('q')), timer: 0, ducking: DUCK.hold };
+    const r = stepActor(s, 1 / 60, rngFor('q2'));
+    assert.equal(r.beat, null, 'it performed its bit while face-down');
 });
 
 console.log('\nthings that break');

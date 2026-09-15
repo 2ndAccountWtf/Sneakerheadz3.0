@@ -60,20 +60,87 @@ export const TIER = {
 
 export type TierName = keyof typeof TIER;
 
-export type PlatformKind = 'bin' | 'seat' | 'counter' | 'crate';
+/**
+ * What a surface *does*, as orthogonal flags rather than a type.
+ *
+ * This was an enum with two behaviours — `kind` and `oneWay` — which is the
+ * shape that forces a new subclass every time a surface needs to behave
+ * slightly differently. Hurrican carries twenty-four of these as a bitmask on
+ * every tile and gets slippery ice, conveyors, sinking mud, damage and slopes
+ * without a single new entity type, because a designer *paints* behaviour
+ * instead of a programmer declaring it.
+ *
+ * Two of them are worth the conversion on their own:
+ *
+ * `ENEMY_WALL` — solid to enemies, invisible to the player. The fix for "the
+ * charger ran off the galley counter and died", authored in the level rather
+ * than patched into the AI with raycasts.
+ *
+ * `TURNAROUND` — a moving platform reverses when it meets one, so its patrol
+ * bounds live in the level and the platform logic is four lines. The same flag
+ * tells a walking enemy where the edge is.
+ */
+export const TILE = {
+    /** Stops everything. */
+    SOLID: 1 << 0,
+    /** Stops enemies only. The player walks through it and never knows. */
+    ENEMY_WALL: 1 << 1,
+    /** Jump up through it, drop down through it with down+jump. */
+    ONE_WAY: 1 << 2,
+    /** Comes apart when shot. Pairs with a `PropDef` for the pieces. */
+    DESTRUCTIBLE: 1 << 3,
+    /** Standing here hurts. Hot galley surfaces, broken glass. */
+    HURTS: 1 << 4,
+    /** Carries you along. Baggage belts. */
+    CONVEYOR_L: 1 << 5,
+    CONVEYOR_R: 1 << 6,
+    /** Spilled hummus. You keep going after you stop asking to. */
+    SLIPPERY: 1 << 7,
+    /** Reverses a moving platform, and tells a walker where the edge is. */
+    TURNAROUND: 1 << 8,
+    /** Drawn in front of the player, so you can duck behind it. */
+    OCCLUDES: 1 << 9,
+} as const;
+
+export type TileFlags = number;
+
+/** Named presets, so a level reads as furniture rather than arithmetic. */
+export const SURFACE = {
+    /** A galley counter or bulkhead: plain solid. */
+    counter: TILE.SOLID,
+    /** A seat back: jump up through it, drop off it. */
+    seat: TILE.ONE_WAY,
+    /** Overhead bins: solid, and the far end turns a patrolling thrower round. */
+    bin: TILE.SOLID,
+    /** A stack of duty-free you can shoot away. */
+    crate: TILE.SOLID | TILE.DESTRUCTIBLE,
+    /** A belt that carries you toward the tail. */
+    beltBack: TILE.SOLID | TILE.CONVEYOR_L,
+    beltFwd: TILE.SOLID | TILE.CONVEYOR_R,
+    /** Where a bowl went over. */
+    hummus: TILE.SOLID | TILE.SLIPPERY,
+    /** An invisible fence so the chargers stay on the counter. */
+    fence: TILE.ENEMY_WALL,
+} as const;
 
 export interface PlatformDef {
     x: number;
     /** Top surface. Feet rest here. */
     y: number;
     w: number;
-    kind: PlatformKind;
-    /**
-     * Jump-through from below and drop through with down+jump, the way a seat
-     * back works and a bulkhead does not.
-     */
-    oneWay?: boolean;
+    /** What it does. Use a `SURFACE` preset or OR your own. */
+    flags: TileFlags;
 }
+
+export const has = (flags: TileFlags, bit: number): boolean => (flags & bit) !== 0;
+
+/** Does this surface hold the player up at all? */
+export const isFooting = (p: PlatformDef): boolean =>
+    has(p.flags, TILE.SOLID) || has(p.flags, TILE.ONE_WAY);
+
+/** Which way it drags, in -1/0/1. */
+export const conveyorDir = (flags: TileFlags): -1 | 0 | 1 =>
+    has(flags, TILE.CONVEYOR_L) ? -1 : has(flags, TILE.CONVEYOR_R) ? 1 : 0;
 
 /** Can a player standing on `from` reach the top of `to`? */
 export const canHop = (fromY: number, toY: number): boolean => fromY - toY <= MAX_STEP;
@@ -95,7 +162,8 @@ export function unreachable(platforms: PlatformDef[]): PlatformDef[] {
     const reached: { y: number; x0: number; x1: number }[] = [
         { y: FLOOR_Y, x0: -Infinity, x1: Infinity },
     ];
-    const left = [...platforms];
+    // An enemy-only wall is not a rung, and neither is anything you fall through.
+    const left = platforms.filter(isFooting);
 
     for (let pass = 0; pass < platforms.length + 1; pass++) {
         let moved = false;
