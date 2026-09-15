@@ -87,10 +87,22 @@ The lever that makes the rep game *playable* rather than a dice roll: lower
 coffee, a bureka. These come off the **AM/PM shelf**, which finally gives that
 whole store a reason to exist beyond weapons and snacks.
 
-- It costs money and a slot, so it competes with carrying stock.
+**This is never announced.** There is no SCHMOOZE button, no tooltip, no hint
+text, and the clerk does not say "buy me a beer". It is a thing a player works
+out and then feels clever about, and the moment the UI offers it as an action it
+stops being that and becomes a step in a checklist. So:
+
+- It is **implicit in what you are carrying**. Walking up to a counter with beer
+  or a joint in your bag is what lowers the check. The player connects "I had
+  beers in my bag that time" to "nobody looked" on their own.
+- The only feedback is in the **narration of the stop itself** — the clerk is
+  distracted, talking, halfway through a smoke — never in a label or a number.
+- Nothing in the store UI changes to advertise it. If a player never figures it
+  out they simply never get the edge, which is correct.
+- It costs money and a bag slot, so it competes with carrying stock.
 - It is **per-visit**, so it cannot be stacked into permanent immunity.
-- It fails sometimes, and failing *raises* suspicion — offering a bribe to the
-  wrong clerk is itself a confession.
+- It fails sometimes, and failing *raises* suspicion — the wrong clerk reads a
+  bribe as a confession.
 - It works worse the lower your trust: a clerk who has been warned about you is
   not taking your beer.
 
