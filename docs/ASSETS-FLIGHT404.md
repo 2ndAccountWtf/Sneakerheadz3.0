@@ -26,11 +26,11 @@ is why the background can be as detailed as you like without confusing anybody.
 
 ## Scale, settled
 
-The screen is **352 × 198 world units**, drawn on a 960 × 540 canvas, so **1
-world unit = 2.727 device pixels**. The player is **28 units** (~175cm), which
+The screen is **352 × 198 world units**, drawn on a 1056 × 594 canvas, so **1
+world unit = 3 device pixels**. The player is **28 units** (~175cm), which
 makes **1 unit ≈ 6cm**.
 
-| thing | world units | pixels, if you draw at 2.727× |
+| thing | world units | pixels, if you draw at 3× |
 |---|---|---|
 | the player, standing | 28 | 76 |
 | the aisle, floor to cabin base | 36 | 98 |

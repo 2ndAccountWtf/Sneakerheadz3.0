@@ -33,8 +33,8 @@ If an asset would look right in a side-scrolling platformer, it is right here.
 
 ## 1.2 The three bands of the screen
 
-The screen is **352 × 198 world units**, rendered on a **960 × 540 canvas**, so
-**1 world unit = 2.727 device pixels**.
+The screen is **352 × 198 world units**, rendered on a **1056 × 594 canvas**, so
+**1 world unit = exactly 3 device pixels**.
 
 ```
   y=0    ─────────────────────────────────────────────  top of screen
@@ -111,7 +111,7 @@ overhead lights, cold blue from the windows.
 
 **The player's body is 26 world units tall.** Everything is relative to that.
 
-| thing | world units tall | device px at 2.727× |
+| thing | world units tall | device px at 3× |
 |---|---|---|
 | **the player** | **26** | **71** |
 | a mook | 24–26 | 65–71 |
@@ -120,9 +120,18 @@ overhead lights, cold blue from the windows.
 | aisle headroom | **36** | 98 — the hard ceiling |
 | the cabin band | 80 | 218 |
 
-**Deliver at either 1× world units or 2.727×.** The loader accepts both and picks
-whichever reading lands nearest the size the game expects. **2.727× is sharper**
-and is what the canvas can actually show.
+**Deliver at 3×.** A 26-unit player is drawn 78px tall.
+
+The canvas is exactly three device pixels per world unit, so art on that grid
+maps one-for-one and nothing is resampled. The loader still accepts art drawn at
+1× and upscales it — cleanly, because 3 is a whole number — but 3× is what the
+screen can actually show.
+
+**This changed.** The canvas used to be 960 × 540, which worked out
+at 2.727 device pixels per world unit, and nearest-neighbour cannot draw 2.727
+pixels: it drew some source pixels 3 wide and some 2. That uneven grid is why
+earlier art looked mushy, and it was the canvas, not the art. Anything already
+delivered still works and now upscales cleanly.
 
 ## 1.9 Format
 

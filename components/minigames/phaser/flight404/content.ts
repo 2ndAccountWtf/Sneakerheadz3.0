@@ -32,8 +32,18 @@ export const VIEW_H = 198;
  * was resampled down to a third of its size before it reached the screen, and
  * every hour spent on it was thrown away in the last step of the pipeline.
  *
- * So the canvas is now 960 × 540 and the world camera is zoomed by exactly the
- * ratio, which means the camera still shows 352 × 198 **world units**. Nothing
+ * So the canvas is a whole-number multiple of the world and the camera is zoomed
+ * by exactly that multiple, which means it still shows 352 × 198 **world
+ * units**.
+ *
+ * **The multiple has to be a whole number, and that is not a detail.** The
+ * canvas was 960 × 540 for a while, which is 2.727 world units per pixel —
+ * and nearest-neighbour cannot draw 2.727 device pixels per source pixel, so
+ * it drew some of them 3 wide and some 2. Across any twenty pixels of a sprite,
+ * fifteen came out 3 wide and five came out 2: an uneven grid on every
+ * character in the game, which reads as mush and looks exactly like art that
+ * was drawn too small. At ×3 every source pixel is exactly three device pixels
+ * and the whole thing snaps into focus. Nothing
  * downstream changes: every coordinate, every platform, every constant in
  * `terrain.ts`, every jump arc and all 641 checks are in world units and are
  * untouched. The only difference is how many device pixels each of those units
@@ -43,8 +53,8 @@ export const VIEW_H = 198;
  * upscaled by the zoom with nearest-neighbour filtering, so they stay exactly
  * as chunky as they were. Delivered art is simply allowed to be better.
  */
-export const RENDER_W = 960;
-export const RENDER_H = 540;
+export const RENDER_W = VIEW_W * 3;   // 1056
+export const RENDER_H = VIEW_H * 3;   // 594
 export const ZOOM = RENDER_W / VIEW_W;
 
 /**
