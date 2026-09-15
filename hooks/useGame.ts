@@ -47,6 +47,7 @@ import { isWeaponItem } from '../systems/ampm/stock';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
 import { shopCredGain } from '../systems/pricing';
+import { admit, stabilise, nightIn, settle, mustLeave } from '../systems/hospital';
 import { reputationSpread } from '../systems/npc/reactions';
 import {
     seedWorld, advanceWorld, applyTradePressure, snapshotMarket, addLocalStock,
@@ -105,6 +106,8 @@ type Action =
     | { type: 'ACCEPT_CITY_EVENT' }
     | { type: 'DECLINE_CITY_EVENT' }
     | { type: 'START_BUST' }
+    | { type: 'HOSPITAL_NIGHT' }
+    | { type: 'HOSPITAL_DISCHARGE' }
     | { type: 'BUST_OFFER'; payload: { amount: number } }
     | { type: 'BUST_RESOLVE'; payload: { choice: import('../systems/police/bust').BustChoice } }
     | { type: 'RESET_GAME' };
@@ -190,7 +193,7 @@ function startBust(state: GameState): GameState {
  * the AM/PM till can put an officer in front of you — never so a component
  * can reach past `dispatch`.
  */
-export const gameReducer = (state: GameState, action: Action): GameState => {
+const rawReducer = (state: GameState, action: Action): GameState => {
     switch (action.type) {
         case 'CHANGE_SCREEN': {
             const isLeavingStoreFlow = [Screen.Dashboard, Screen.Travel, Screen.Ampm, Screen.Inventory].includes(action.payload);
@@ -913,6 +916,35 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
         case 'START_BUST':
             return startBust(state);                      // no-op if one is already standing there
 
+        /* The ward. See `systems/hospital.ts`. The reducer only moves the stay
+         * along and applies what it hands back; nothing here decides odds. */
+
+        case 'HOSPITAL_NIGHT': {
+            if (!state.hospital || mustLeave(state.hospital)) return state;
+            const night = nightIn(state.hospital, state.player);
+            return {
+                ...state,
+                day: state.day + 1,
+                player: night.player,
+                hospital: night.stay,
+            };
+        }
+
+        case 'HOSPITAL_DISCHARGE': {
+            if (!state.hospital) return state;
+            const paid = settle(state.hospital, state.player);
+            return {
+                ...state,
+                player: paid.player,
+                hospital: null,
+                currentScreen: Screen.Dashboard,
+                outcomeLog: [
+                    { icon: '🏥', text: `Discharged after ${state.hospital.nights} night${state.hospital.nights === 1 ? '' : 's'}.`, tone: 'neutral' },
+                    ...paid.log.map(text => ({ icon: '🧾', text, tone: 'bad' as const })),
+                ],
+            };
+        }
+
         case 'BUST_OFFER': {
             if (!state.activeBust) return state;
             return { ...state, activeBust: bustOffer(state.activeBust, action.payload.amount, Math.random) };
@@ -1284,6 +1316,57 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
     }
 };
 
+/**
+ * The single writer, with the floor under it.
+ *
+ * `Player.health` promised a hospital in its own doc comment and there was no
+ * hospital: nothing anywhere checked `health <= 0`, so the fighter, the busts
+ * and the muggings all spent a currency that could be spent down to nothing for
+ * free. You could sit at zero and keep trading.
+ *
+ * The check lives here, wrapping every action, rather than at each place that
+ * takes health off. There are six of those today and there will be more, and a
+ * rule that has to be remembered at every new call site is a rule that gets
+ * forgotten — which is exactly how it came to be missing in the first place.
+ *
+ * Admission stabilises the player above zero on the way in, so a discharge can
+ * never drop them straight back through the floor.
+ */
+export const gameReducer = (state: GameState, action: Action): GameState => {
+    const next = rawReducer(state, action);
+    if (next.hospital || next.player.health > 0) return next;
+
+    return {
+        ...next,
+        player: stabilise(next.player),
+        // A stop cannot continue while you are being loaded into an ambulance.
+        activeBust: null,
+        hospital: admit(next.day, causeOfCollapse(next, action)),
+    };
+};
+
+/**
+ * What the player will be told put them here. Read off the action that did it,
+ * because "you collapsed" is the least interesting sentence available and the
+ * game already knows the real answer.
+ */
+function causeOfCollapse(state: GameState, action: Action): string {
+    switch (action.type) {
+        case 'RESOLVE_MINIGAME':
+            return 'You lost, and then you kept losing, and somebody called it.';
+        case 'BUST_RESOLVE':
+            return 'You ran. They were faster, and less tired, and there were more of them.';
+        case 'RESOLVE_STREET_SALE':
+            return 'A sale on a corner became something else entirely.';
+        case 'RESOLVE_COLLECTOR_DEAL':
+            return 'The meeting did not go the way the messages suggested it would.';
+        case 'TRAVEL':
+            return 'You were running on nothing and your body finally said so.';
+        default:
+            return 'You went down somewhere between one thing and the next.';
+    }
+}
+
 const initialState: GameState = {
     player: {
         ...INITIAL_PLAYER,
@@ -1312,6 +1395,7 @@ const initialState: GameState = {
     activeCutscene: null,
     activeCityEvent: null,
     activeBust: null,
+    hospital: null,
 };
 
 /**

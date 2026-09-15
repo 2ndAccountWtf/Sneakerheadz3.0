@@ -319,6 +319,12 @@ export interface GameState {
      * than picking from a list once.
      */
     activeBust: import('./systems/police/bust').BustState | null;
+    /**
+     * Set the moment health reaches zero, cleared when you sign yourself out.
+     * While it is set the player is in a bed and can do nothing else — see
+     * `systems/hospital.ts` for why this exists at all.
+     */
+    hospital: import('./systems/hospital').HospitalStay | null;
 }
 
 export interface Cutscene {

@@ -24,6 +24,7 @@ import Layout from './components/Layout';
 import Notification from './components/Notification';
 import { useNewsEngine } from './hooks/useNewsEngine';
 import BustScene from './components/police/BustScene';
+import HospitalScene from './components/hospital/HospitalScene';
 
 // This component ensures the news engine hook is running at the top level.
 const NewsEngineRunner: React.FC = () => {
@@ -84,6 +85,7 @@ const ScreenManager: React.FC = () => {
             {renderScreen()}
             <Notification />
             <BustScene />
+            <HospitalScene />
         </Layout>
     );
 };
