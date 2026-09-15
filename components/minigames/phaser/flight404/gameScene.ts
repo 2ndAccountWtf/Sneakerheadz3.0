@@ -37,6 +37,11 @@ import { TILE, has } from './terrain';
 import { ZOOM, PLATE_SHRINK } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import { attachSkin, type Skin } from './skin';
+import { openRoster, stepDirector, type Member, type World as CastWorld } from './castDirector';
+import { openCastView, syncCast, clearCastView, throwArt, type CastView } from './castView';
+import { CAST } from './cast';
+import { openField, addHummus, addFalafel, stepField, type FoodField } from './foodField';
+import { foodArt, openFoodView, syncFood, clearFoodView, type FoodView } from './foodView';
 import {
     openView, buildResidents, stepResidents, stepCrossings, clearView,
     type BackdropView,
@@ -207,6 +212,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         /** Who is standing around not watching, and what is walking through. */
         private backdrop: Backdrop | null = null;
         private backdropView: BackdropView | null = null;
+        /** The six-enemy cast and the food they knock over. */
+        private cast: Member[] = [];
+        private castView: CastView | null = null;
+        private castDamage: { id: number; amount: number }[] = [];
+        private food: FoodField = openField();
+        private foodView: FoodView | null = null;
         /** Player feet at the start of the frame, for the one-way rule. */
         private feetWere = FLOOR_Y;
         /**
@@ -480,6 +491,13 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             clearView(this.backdropView);
             this.backdropView = null;
             this.backdrop = null;
+            clearCastView(this.castView);
+            this.castView = null;
+            this.cast = [];
+            this.castDamage = [];
+            clearFoodView(this.foodView);
+            this.foodView = null;
+            this.food = openField();
             this.shots.clear(true, true);
             this.hostiles.clear(true, true);
             this.melee.clear(true, true);
@@ -516,6 +534,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // Residents are placed once; traffic arrives on its own schedule and
             // leaves on its own, which is how an ordinary aeroplane ends up with
             // a camel in it without ever keeping one. See `crossings.ts`.
+            // The cast walks the same cabin as the mooks and is denser in the
+            // sections where the plane has stopped being a plane.
+            this.cast = def.boss ? [] : openRoster(def.creep, def.length, () => this.rng.frac());
+            this.castView = openCastView();
+            this.foodView = openFoodView();
+
             this.backdrop = openBackdrop(def.creep, def.length, () => this.rng.frac());
             this.backdropView = openView();
             buildResidents(this, this.backdropView, stepBackdrop(this.backdrop, 0, () => this.rng.frac()).frames);
@@ -2165,6 +2189,140 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.backdrop = shockwave(this.backdrop, x, radius, () => this.rng.frac());
         }
 
+        /**
+         * The cast, and what it costs the scene.
+         *
+         * The director decides; this spends. Every branch below is one of the
+         * effects it can return, and the two that matter are `takeLoot` and
+         * `stolen`: the Reseller is the only enemy who can remove something from
+         * the game permanently, and `stolen` is the authoritative moment it
+         * happens. Treating `takeLoot` as the theft would refund the player
+         * every time the man was shot on his way out.
+         */
+        private stepCast(dt: number) {
+            if (!this.castView || !this.cast.length) return;
+            const loot = (this.pickups.getChildren() as Img[])
+                .filter(k => k.active)
+                .map(k => ({ x: k.x, y: k.y }));
+
+            const world: CastWorld = {
+                playerX: this.player.x,
+                playerY: this.player.y,
+                loot,
+                legendaryDropped: false,
+                damage: this.castDamage,
+                bumps: [],
+                messy: this.kos > 0,
+                donkey: (this.backdrop?.crossings.length ?? 0) > 0,
+            };
+            this.castDamage = [];
+
+            const r = stepDirector(this.cast, dt, world, () => this.rng.frac());
+            this.cast = r.members;
+
+            for (const e of r.effects) {
+                switch (e.kind) {
+                    case 'hurtPlayer': {
+                        // The effect names who swung, not where from, so the
+                        // knockback direction comes from the member's own x.
+                        const who = this.cast.find(m => m.id === e.from);
+                        this.hurtPlayer(e.amount, who?.x ?? this.player.x);
+                        break;
+                    }
+                    case 'throw':
+                        this.throwStock(e.x, e.y, e.toX, e.toY, e.item);
+                        break;
+                    case 'takeLoot': {
+                        const k = (this.pickups.getChildren() as Img[]).filter(p => p.active)[e.lootIndex];
+                        k?.destroy();
+                        break;
+                    }
+                    case 'dropLoot':
+                        for (let i = 0; i < e.count; i++) this.dropLoot(e.x + i * 6);
+                        break;
+                    case 'spill':
+                        // A counter going over is physics, not an attack: it puts
+                        // food in the air and the food does whatever it does.
+                        this.spillFood(e.x, e.y);
+                        break;
+                    case 'died':
+                        this.kos++;
+                        this.score += 60;
+                        this.pBoom.emitParticleAt(e.x, e.y - 12, 1);
+                        this.duckNearby(e.x, 80);
+                        if (e.drop) this.dropLoot(e.x);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            syncCast(this, this.castView, this.cast, (x, y, h) => mkFigure(this, x, y, h, KITS.militant));
+
+            // Shots are checked against the cast here rather than through an
+            // arcade overlap, because the cast's positions live in the director
+            // and its sprites are a view of them. Giving the view a body would
+            // make the picture authoritative over the simulation, which is the
+            // wrong way round and the sort of thing that desyncs quietly.
+            for (const obj of this.shots.getChildren() as Img[]) {
+                if (!obj.active) continue;
+                for (const m of this.cast) {
+                    if (!CAST[m.state.kind].enemy) continue;
+                    if (Math.abs(obj.x - m.x) > 12) continue;
+                    if (Math.abs(obj.y - (m.y - 12)) > 16) continue;
+                    const sd = (obj as unknown as Shot).sd;
+                    this.castDamage.push({ id: m.id, amount: sd?.dmg ?? 8 });
+                    this.pBoom.emitParticleAt(obj.x, obj.y, 1);
+                    obj.destroy();
+                    break;
+                }
+            }
+        }
+
+        /** One thrown piece of a shop owner's stock. */
+        private throwStock(x: number, y: number, toX: number, toY: number, item: string) {
+            const key = this.textures.exists(throwArt(item)) ? throwArt(item) : TG('bureka');
+            const s = this.hostiles.create(x, y - 10, key) as Img;
+            if (!s) return;
+            s.setDepth(12).setDisplaySize(...this.artSize(key, 10, 8));
+            const b = body(s);
+            b.setAllowGravity(true);
+            const t = 0.7;
+            b.setVelocity((toX - x) / t, (toY - y) / t - 0.5 * GRAVITY * t);
+            this.time.delayedCall(2600, () => s.destroy());
+        }
+
+        /** A falafel stand going over. The field takes it from here. */
+        private spillFood(x: number, y: number) {
+            for (let i = 0; i < 5; i++) {
+                this.food = addHummus(this.food, x, y - 14,
+                    x + (this.rng.frac() * 90 - 45), FLOOR_Y, 4 + this.rng.frac() * 5, () => this.rng.frac());
+            }
+            for (let i = 0; i < 7; i++) {
+                this.food = addFalafel(this.food, x, y - 16,
+                    x + (this.rng.frac() * 120 - 60), FLOOR_Y, () => this.rng.frac());
+            }
+        }
+
+        /**
+         * Food in the air. The field owns the floor, so the scene hands it the
+         * platforms and the player box and nothing else — see the contract note
+         * in `foodField.ts` about not reporting floor contacts twice.
+         */
+        private stepFood(dt: number) {
+            if (!this.foodView) return;
+            const r = stepField(this.food, dt, {
+                platforms: this.terrain ? this.terrain.bodies.map(b => b.def) : [],
+                playerBox: { x: this.player.x - 6, y: this.player.y - PLAYER_H, w: 12, h: PLAYER_H },
+                targets: [],
+            }, () => this.rng.frac());
+            this.food = r.field;
+            for (const e of r.events) {
+                if (e.kind === 'hit' && e.target === 'player') this.hurtPlayer(e.damage, e.x);
+                else if (e.kind === 'burst') this.pBoom.emitParticleAt(e.x, e.y, e.big ? 3 : 1);
+            }
+            syncFood(this, this.foodView, this.food);
+        }
+
         private stepBackdrop(dt: number) {
             if (!this.backdrop || !this.backdropView) return;
             const r = stepBackdrop(this.backdrop, dt, () => this.rng.frac());
@@ -2422,6 +2580,8 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.stepShots(dt);
             this.stepHostages(dt);
             this.stepBackdrop(dt);
+            this.stepCast(dt);
+            this.stepFood(dt);
             this.stepBubbles(dt);
             this.stepDarkness();
             this.stepDoor();
