@@ -34,6 +34,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type * as PhaserNS from 'phaser';
 import PhaserHost from './PhaserHost';
+import { loadChunk } from './chunkLoad';
 import { MiniGameShell, MiniGameResult } from '../MiniGameShell';
 import { TouchPad } from '../engine/TouchPad';
 import type { Btn } from '../engine/useInput';
@@ -128,13 +129,30 @@ const Flight404Phaser: React.FC<{
      */
     type SceneFactory = (phaser: typeof PhaserNS) => PhaserNS.Types.Scenes.SceneType[];
     const [createScenes, setCreateScenes] = useState<SceneFactory | null>(null);
+    // Through a ref: the effect below runs once and a captured callback would
+    // go stale, and this is the path that reports a chunk that never arrives.
+    const errRef = useRef(onEngineError);
+    errRef.current = onEngineError;
+    //
+    // This import used to be a bare `.then` with nothing on the failure side,
+    // which is how the game could sit on "Boarding…" forever: a chunk that 404s
+    // after a deploy, or never arrives at all, left `createScenes` null, and
+    // PhaserHost — which carries the engine's own error handling — was never
+    // mounted to report anything. `loadChunk` rejects on a timeout as well as
+    // on an error, and the rejection routes to the same fallback the engine
+    // uses.
     useEffect(() => {
         let cancelled = false;
-        void loadScenes().then(mod => {
-            // Wrapped in a thunk: a bare function passed to a setter would be
-            // treated as a state updater.
-            if (!cancelled) setCreateScenes(() => mod.createFlight404Scenes);
-        });
+        loadChunk(loadScenes, 'the Flight 404 scene module').then(
+            (mod) => {
+                // Wrapped in a thunk: a bare function passed to a setter would
+                // be treated as a state updater.
+                if (!cancelled) setCreateScenes(() => mod.createFlight404Scenes);
+            },
+            (err: Error) => {
+                if (!cancelled) errRef.current?.(err.message);
+            },
+        );
         return () => { cancelled = true; };
     }, []);
 

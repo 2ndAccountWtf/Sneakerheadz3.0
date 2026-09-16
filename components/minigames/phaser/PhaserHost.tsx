@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type * as PhaserNS from 'phaser';
+import { loadChunk } from './chunkLoad';
 
 /**
  * React ↔ Phaser bridge.
@@ -79,7 +80,12 @@ export const PhaserHost: React.FC<PhaserHostProps> = ({
 
         (async () => {
             try {
-                const phaser = await import('phaser');
+                // `loadChunk` rather than a bare await: an import that never
+                // settles is not caught by this try, and the whole game then
+                // sits on "Loading engine…" with nothing to report. That is a
+                // deploy away on any static host -- an open page holds an
+                // index.html naming chunk hashes the CDN has replaced.
+                const phaser = await loadChunk(() => import('phaser'), 'the Phaser engine', 30000);
                 // React may have unmounted us while the chunk was downloading.
                 if (cancelled || !containerRef.current) return;
 
