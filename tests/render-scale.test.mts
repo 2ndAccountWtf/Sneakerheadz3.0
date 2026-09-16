@@ -73,7 +73,7 @@ function storeFor(logicalW: number, logicalH: number, cssW: number, dpr: number)
 /** `ctx.getTransform().a` is the only thing `smoothFor` reads off the context. */
 const at = (scale: number) => ({ getTransform: () => ({ a: scale }) } as unknown as CanvasRenderingContext2D);
 
-const { smoothFor, ART_SCALE } = await import('../components/minigames/engine/streetArt.ts');
+const { smoothFor, ART_SCALE, tileSize } = await import('../components/minigames/engine/streetArt.ts');
 
 {
     // The case that was destroying the art: a 272px car (the brief's 8x export)
@@ -114,10 +114,31 @@ const { smoothFor, ART_SCALE } = await import('../components/minigames/engine/st
     ok(!smoothFor({ getTransform: () => ({ a: 0 }) } as unknown as CanvasRenderingContext2D, 102, 102),
         'a zero transform falls back to 1 and stays nearest');
 }
+// ---------------------------------------------------------------------------
+// 3. Tile sizing survives the re-export.
+// ---------------------------------------------------------------------------
 {
-    // `ART_SCALE` is what `tile()` divides by, so it has to stay in step with
-    // whatever the asset brief asks for.
-    ok(ART_SCALE > 0, 'ART_SCALE is set');
+    // The whole point: the same surface, delivered at either multiple, has to
+    // lay down the same amount of road. A global divisor could not do this --
+    // it made the brief's export multiple part of the engine, so raising the
+    // brief from 3x to 8x would have made every road 2.7x too coarse silently.
+    eq(tileSize('road-asphalt', 192, 54), [64, 18], 'asphalt at the old 3x export');
+    eq(tileSize('road-asphalt', 512, 144), [64, 18], 'asphalt at the new 8x export');
+    eq(tileSize('kerb', 96, 15), [32, 5], 'kerb at 3x');
+    eq(tileSize('kerb', 256, 40), [32, 5], 'kerb at 8x');
+
+    // Every tiling id the two games actually call `tile` with must be named, or
+    // it silently falls through to the divisor this exists to replace.
+    for (const id of ['road-asphalt', 'road-centreline', 'road-edgeline', 'kerb',
+                      'pavement', 'grass-verge', 'fence-picket', 'hedge-low', 'wall-breeze']) {
+        const a = tileSize(id, 96, 24), b = tileSize(id, 256, 64);
+        eq(a, b, `${id} is pinned to a logical size, not to its file size`);
+    }
+
+    // An unlisted id still has to produce something sane rather than throw.
+    eq(tileSize('not-a-real-tile', 96, 24), [96 / ART_SCALE, 24 / ART_SCALE],
+        'an unknown tile falls back to the export multiple');
+    ok(ART_SCALE > 0, 'the fallback multiple is set');
 }
 
 console.log(`render-scale: ${checks} checks OK`);

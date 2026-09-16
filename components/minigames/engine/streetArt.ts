@@ -300,12 +300,53 @@ export function smoothFor(ctx: CanvasRenderingContext2D, srcW: number, destW: nu
 /**
  * How much bigger delivered art is than the game's own pixels.
  *
- * `docs/ASSETS-STREET.md` asks for every file at 3×, so a wheelie bin twelve
- * game pixels tall arrives as a 36px PNG. Anything drawn at its natural size
- * has to divide by this or it comes out three times too big — which for a
- * tileable surface means one flagstone filling half the road.
+ * `docs/ASSETS-STREET.md` asks for every file at a fixed multiple of the game's
+ * logical grid, so a wheelie bin twelve game pixels tall arrives as a PNG this
+ * many times larger. Anything drawn at its natural size has to divide by it or
+ * it comes out that many times too big — which for a tileable surface means one
+ * flagstone filling half the road.
+ *
+ * Only a fallback now; see `TILE_SIZE`.
  */
 export const ART_SCALE = 3;
+
+/**
+ * The logical size each tiling surface was authored at.
+ *
+ * A tile is the one kind of art whose on-screen size is not chosen by the
+ * caller: `strip` and `sprite` are told how big to draw, but asphalt is laid
+ * down at its own size however deep the road is, so the code has to work that
+ * size out from the file. It used to do that by dividing by a single global
+ * `ART_SCALE`, which quietly made the export multiple part of the engine: move
+ * the brief from 3× to 8× and every road surface silently becomes 2.7× too
+ * coarse, one flagstone per lane, with nothing failing.
+ *
+ * Naming the logical size instead makes the file size irrelevant. A 192px
+ * asphalt and a 512px asphalt both describe the same 64 game pixels of road, so
+ * either can be dropped in and the road looks the same — only sharper.
+ *
+ * These are the sizes in `docs/ASSETS-STREET.md`; an id missing here falls back
+ * to `ART_SCALE`, which is right for anything still delivered at the old
+ * multiple.
+ */
+const TILE_SIZE: Record<string, readonly [number, number]> = {
+    'road-asphalt': [64, 18],
+    'road-centreline': [32, 3],
+    'road-edgeline': [32, 2],
+    kerb: [32, 5],
+    pavement: [32, 8],
+    'grass-verge': [32, 6],
+    'fence-picket': [24, 10],
+    'hedge-low': [24, 9],
+    'wall-breeze': [24, 12],
+};
+
+/** The logical size of one tile of `id`, however large the delivered file is. */
+export function tileSize(id: string, fw: number, fh: number): [number, number] {
+    const known = TILE_SIZE[id];
+    if (known) return [known[0], known[1]];
+    return [fw / ART_SCALE, fh / ART_SCALE];
+}
 
 /**
  * Tile a surface across a rectangle at its own pixel size.
@@ -332,8 +373,7 @@ export function tile(
     const sheet = LOADED.get(id);
     if (!sheet) return false;
 
-    const tw = sheet.fw / ART_SCALE;
-    const th = sheet.fh / ART_SCALE;
+    const [tw, th] = tileSize(id, sheet.fw, sheet.fh);
     ctx.save();
     ctx.globalAlpha = alpha;
     // Nearest, even when this is a downscale. `smoothFor` is right for a

@@ -110,10 +110,6 @@ pools under the streetlights. Shared art has to survive both.
 
 ## 1.6 Scale — pinned to one number
 
-**A standing adult is 22 pixels tall.** Everything is relative to that, and every
-size below was derived from it. Check every object against this before exporting;
-it is the only measurement that matters.
-
 **A standing adult is 23 pixels tall.** That is measured, not chosen: Pizza Run
 draws its rider at 23 and Downhill Racer draws its player at 26 on the nearest
 lane, scaling to 21 on the furthest. 23 is the number both games agree on.
@@ -139,10 +135,63 @@ a generator left to itself will draw the realistic one. It will look wrong here,
 because it will be nearly a third of the screen wide. Every vehicle in this set
 is squashed toward square on purpose.
 
-**Deliver every file at 3×.** A 23px adult is drawn 69px tall. The two games run
-at different logical resolutions (320 × 180 and 352 × 198) and currently
-disagree slightly about vehicle scale; the extra resolution lets both use one
-file. **Author to the table above and the code will fit it.**
+**Deliver every file at 8×.** A 23px adult is drawn **184px tall**; a saloon car
+at 34 × 19 is delivered **272 × 152**.
+
+This replaces the 3× this document asked for until September 2026, and the whole
+delivered set needs re-exporting because of it. The reason, in full, because it
+is the single most expensive mistake in this project so far:
+
+The 320 × 180 grid was picked before any art existed and never justified. Every
+size in the table above was derived from it, so the sizes are self-consistent and
+the delivered files matched them exactly — 73 of 73, checked. What nobody checked
+was the number the whole table hangs off. On a phone held sideways in fullscreen,
+the picture is **2080 device pixels wide**. Against a 320-unit grid that is 6.5
+real pixels for every unit the art is authored in, so art delivered at 3× arrived
+with less than half the detail the screen could show, and the screen magnified
+the shortfall rather than hiding it.
+
+8× covers every display the game can reach: 6.5× on an iPhone in landscape, 7.2×
+on a Pro Max, 8.5× on a 12.9" iPad — where `MAX_STORE_SCALE` in `GameCanvas.tsx`
+caps it, because past 8× there is nothing left in the file to show. **Art at 8× is
+never magnified on any device.** The two numbers are the same number and must stay
+that way: if one moves, move the other.
+
+**`docs/ASSETS-EXPORT-V2.md` lists the exact pixel size for every existing file.**
+Use it rather than recomputing from this table — some objects are drawn larger
+than they are authored (vehicles carry a 1.3× scale so they read as bigger than a
+person on a board), and the list already accounts for that. Nothing in it is
+larger than the masters already drawn, so **no asset needs redrawing** — every one
+is a fresh export at a new size.
+
+### Do not resample down to the delivered size and back up
+
+This is what went wrong, and it is worth stating on its own because it is
+invisible in a file browser.
+
+The delivered files were drawn large — the taxi master is 1677 × 938 — and then
+reduced to 102 × 57. Reduction is destructive and one-way: at 102px the wheel
+arch, the door line and the checker stripe are no longer separate things, they are
+an average. Enlarging that back up to the 221 device pixels the screen actually
+gives it cannot recover them; it can only make the average bigger. That is the
+"looks high quality in the file, looks like mush in the game" effect exactly.
+
+So:
+
+- **Export once, from the master, straight to the size in the list.** One
+  reduction, never two, and never a reduction followed by an enlargement.
+- **Do not "clean up" by reducing to a small size and scaling back.** No step in
+  the chain may be smaller than the final size.
+- **Do not posterise or index the palette to force a pixel-art look.** The current
+  `car-taxi.png` has 102 colours and hard interior edges — an illustration flattened
+  after the fact. It fools the eye in a thumbnail and falls apart on a screen.
+  Deliver the full-colour reduction; the engine decides how to filter it.
+- **Keep real alpha at the silhouette.** Anti-aliased edges are correct and wanted
+  now. `smoothFor` in `streetArt.ts` filters any draw that shrinks the art, so soft
+  edges land softly instead of being chewed into steps.
+
+A file is right if, opened at 100% zoom, it is the size it will be on screen and
+looks finished at that size.
 
 ## 1.7 Tiling
 
@@ -656,7 +705,9 @@ These may commit to the game's night palette.
 - [ ] **No baked directional light, sunset or moonlight** on anything in §2–§8.
 - [ ] **No text, logos or numbers** on anything that mirrors.
 - [ ] Transparent background, trimmed to content, no padding.
-- [ ] **Authored at 3× the sizes given.**
+- [ ] **Exported at 8×** — the size `docs/ASSETS-EXPORT-V2.md` gives for this id.
+- [ ] **One reduction from the master**, never a reduction then an enlargement.
+- [ ] **Not posterised**; real alpha at the silhouette.
 - [ ] Sheets one row, equal frame widths, no gutters.
 - [ ] Tileable assets seamless left-to-right, with distinctive features kept away from both edges.
 - [ ] **A standing adult is 23px.** Every object checked against that before export.
