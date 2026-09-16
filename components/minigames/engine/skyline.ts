@@ -31,6 +31,22 @@ export interface Piece {
     /** Drawn size in game pixels. The art is authored at 3× these. */
     w: number;
     h: number;
+    /**
+     * A version of this building drawn for the distance, preferred when it has
+     * been delivered.
+     *
+     * The kit that arrived is close-range art — around fifty colours a building
+     * and a luminance spread of 104 to 192 against a sky at 48 to 70 — so on the
+     * horizon it reads as a row of cut-outs pasted in a line rather than as a
+     * city. The correction in the meantime is to flatten it almost to nothing
+     * (see `SKY_SHADE`), which works but throws away the detail somebody drew.
+     *
+     * The real answer is a second, flatter drawing of each building, and this is
+     * where it plugs in: deliver `far-tower-a-wide.png` and the horizon starts
+     * using it, with no code change and no manifest. Until then the detailed one
+     * is used and dimmed. See `docs/ASSETS-SKYLINE-SILHOUETTE.md`.
+     */
+    far?: string;
 }
 
 export interface BandDef {
@@ -46,21 +62,21 @@ export interface BandDef {
 }
 
 const towers: Piece[] = [
-    { id: 'tower-a-wide', w: 28, h: 40 },
-    { id: 'tower-b-narrow', w: 28, h: 40 },
-    { id: 'tower-c-stepped', w: 28, h: 40 },
-    { id: 'tower-d-box', w: 28, h: 40 },
-    { id: 'tower-e-crown', w: 28, h: 40 },
-    { id: 'tower-f-old', w: 28, h: 40 },
+    { id: 'tower-a-wide', w: 28, h: 40, far: 'far-tower-a-wide' },
+    { id: 'tower-b-narrow', w: 28, h: 40, far: 'far-tower-b-narrow' },
+    { id: 'tower-c-stepped', w: 28, h: 40, far: 'far-tower-c-stepped' },
+    { id: 'tower-d-box', w: 28, h: 40, far: 'far-tower-d-box' },
+    { id: 'tower-e-crown', w: 28, h: 40, far: 'far-tower-e-crown' },
+    { id: 'tower-f-old', w: 28, h: 40, far: 'far-tower-f-old' },
 ];
 
 const lowrise: Piece[] = [
-    { id: 'lowrise-a-strip', w: 36, h: 26 },
-    { id: 'lowrise-b-walkup', w: 36, h: 26 },
-    { id: 'lowrise-c-industrial', w: 36, h: 26 },
-    { id: 'lowrise-d-corner', w: 36, h: 26 },
-    { id: 'lowrise-e-mixed', w: 36, h: 26 },
-    { id: 'lowrise-f-rooftop', w: 36, h: 26 },
+    { id: 'lowrise-a-strip', w: 36, h: 26, far: 'far-lowrise-a-strip' },
+    { id: 'lowrise-b-walkup', w: 36, h: 26, far: 'far-lowrise-b-walkup' },
+    { id: 'lowrise-c-industrial', w: 36, h: 26, far: 'far-lowrise-c-industrial' },
+    { id: 'lowrise-d-corner', w: 36, h: 26, far: 'far-lowrise-d-corner' },
+    { id: 'lowrise-e-mixed', w: 36, h: 26, far: 'far-lowrise-e-mixed' },
+    { id: 'lowrise-f-rooftop', w: 36, h: 26, far: 'far-lowrise-f-rooftop' },
 ];
 
 /** Clutter that sits on top of a lowrise roof. Small, and mostly silhouette. */

@@ -195,4 +195,34 @@ t('a band further away has a higher ground line', () => {
     }
 });
 
+// ---------------------------------------------------------------------------
+// The distance drawings
+// ---------------------------------------------------------------------------
+// Every tower and lowrise carries the id of a flatter version of itself, so a
+// horizon redrawn for the distance can arrive one file at a time. If an id here
+// does not match what the brief asks for, the file lands in the folder and
+// nothing uses it — which is silent, and exactly the kind of thing that costs
+// somebody a day of drawing.
+
+t('every ground-standing building has a distance version to look for', () => {
+    for (const band of ['towers', 'lowrise'] as const) {
+        for (const p of BANDS[band].pieces) {
+            assert.ok(p.far, `${p.id} has no distance id`);
+            assert.equal(p.far, `far-${p.id}`,
+                `${p.id} asks for "${p.far}" — the brief names far-${p.id}`);
+        }
+    }
+});
+
+t('rooftop clutter and landmarks are deliberately not in that set', () => {
+    // Clutter is already a silhouette at 16px, and the three landmarks are
+    // supposed to be recognisable — flattening them defeats the point of having
+    // them. Asserted rather than assumed so nobody "completes" the set later.
+    for (const band of ['rooftop', 'landmarks'] as const) {
+        for (const p of BANDS[band].pieces) {
+            assert.equal(p.far, undefined, `${p.id} should not have a distance version`);
+        }
+    }
+});
+
 console.log(`\n${pass} skyline checks passed.\n`);

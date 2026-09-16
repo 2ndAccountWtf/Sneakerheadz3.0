@@ -370,8 +370,28 @@ import { layoutSkyline, BANDS, type BandName } from './skyline';
  * flattened toward the sky colour, which is the only thing selling depth on a
  * flat horizon.
  */
+/**
+ * How much of each band survives the air between you and it.
+ *
+ * This is alpha, so a band is composited over the sky and comes out that
+ * fraction of the way from the sky colour to its own — which is exactly what
+ * atmospheric perspective does, and the reason these numbers are so low.
+ *
+ * They used to be 0.55/0.78/0.78/0.66 and that was far too much. The delivered
+ * kit is close-range art: around fifty colours per building and a luminance
+ * spread of 104 to 192, against a sky sitting at 48 to 70. At 0.78 a lowrise
+ * roof came out near-white and brighter than anything else on screen at that
+ * depth, which is what "these buildings aren't working as skyline" was
+ * describing. A spread of 133 at alpha 0.28 collapses to 37 — about what a
+ * building two kilometres back through city air actually looks like.
+ *
+ * Note this is a *correction*, not the destination. The right fix is art drawn
+ * for the distance in the first place — see `docs/ASSETS-SKYLINE-SILHOUETTE.md`.
+ * Until that arrives, flattening the detailed kit is the closest thing to it,
+ * and it doubles as a preview of what the silhouette set should look like.
+ */
 export const SKY_SHADE: Record<BandName, number> = {
-    towers: 0.55, lowrise: 0.78, rooftop: 0.78, landmarks: 0.66,
+    towers: 0.22, lowrise: 0.30, rooftop: 0.26, landmarks: 0.26,
 };
 
 export function drawSkyline(
@@ -383,7 +403,11 @@ export function drawSkyline(
     let drew = false;
     for (const { band, placements } of layoutSkyline(scroll, screenW, salt)) {
         for (const p of placements) {
-            const sheet = LOADED.get(p.piece.id);
+            // A building drawn for the distance wins over the detailed one, and
+            // "wins" means nothing more than being present in the folder. See
+            // `Piece.far` in `skyline.ts` for why there are two of each.
+            const sheet = (p.piece.far ? LOADED.get(p.piece.far) : undefined)
+                ?? LOADED.get(p.piece.id);
             if (!sheet) continue;
             drew = true;
             ctx.save();
@@ -406,4 +430,17 @@ export function drawSkyline(
 
 /** Has enough of the skyline kit arrived to be worth drawing? */
 export const hasSkyline = (): boolean =>
-    BANDS.towers.pieces.some((p) => LOADED.has(p.id));
+    BANDS.towers.pieces.some((p) => LOADED.has(p.id) || (p.far ? LOADED.has(p.far) : false));
+
+/**
+ * How much of the horizon has been redrawn for the distance, 0..1.
+ *
+ * Once this reaches 1 the atmospheric correction in `SKY_SHADE` is fighting art
+ * that no longer needs it, and those numbers should go back up. Exposed so that
+ * is a thing somebody can check rather than a thing somebody remembers.
+ */
+export const farSkylineShare = (): number => {
+    const pieces = [...BANDS.towers.pieces, ...BANDS.lowrise.pieces];
+    const drawn = pieces.filter((p) => p.far && LOADED.has(p.far)).length;
+    return pieces.length ? drawn / pieces.length : 0;
+};

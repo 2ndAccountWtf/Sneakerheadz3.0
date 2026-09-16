@@ -396,6 +396,15 @@ const CAR_H = 14;
 const HOOD_ART = ['house-bungalow-far', 'house-twostorey-far', 'house-apartment-far'];
 
 /**
+ * Skyline-kit buildings, promoted to the mid-ground.
+ *
+ * These were drawn for the horizon and are far too detailed for it — see the
+ * note at the draw site. Here they are the commercial end of the street.
+ */
+const BLOCK_TALL = ['tower-b-narrow', 'tower-d-box', 'tower-f-old', 'tower-c-stepped'];
+const BLOCK_WIDE = ['lowrise-a-strip', 'lowrise-c-industrial', 'lowrise-e-mixed', 'lowrise-b-walkup'];
+
+/**
  * How long a rider's animation has been running, in a clock that does not stop.
  *
  * `stepRace` freezes `s.t` the moment the race ends and advances `s.wipe`
@@ -1544,14 +1553,43 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // facades from the shared street set, standing on the middle haze step,
     // scrolling between the skyline and the trees so the depth reads.
     //
-    // Three drawings, mirrored on alternate slots, at two heights, with a gap
-    // every fourth slot — six silhouettes and a rhythm, from three files.
+    // Three house drawings, mirrored on alternate slots, at two heights, with a
+    // gap every fourth slot — six silhouettes and a rhythm, from three files.
+    //
+    // And every seventh slot, one of the skyline kit's buildings, up close.
+    //
+    // Those pieces were drawn as close-range art: around fifty colours each and
+    // a luminance spread of 104 to 192, against a sky that sits at 48 to 70.
+    // Nothing at two kilometres looks like that — air flattens contrast, which
+    // is why a real skyline is nearly a silhouette. They were never going to
+    // work at the back, and burning them off at twenty percent opacity to force
+    // it would waste the only genuinely detailed buildings in the set. Up here,
+    // at the depth the detail actually belongs to, they read as the office
+    // blocks and walk-ups a residential street backs onto.
+    //
+    // Every seventh slot, not every second: at cruise this band moves a slot
+    // every 0.74s, so a tower comes past about every five seconds.
     const hoodScroll = WORLD * 0.46;
     band(ctx, 88, 0, W, hoodScroll, 58, PAL.panel, (c, x, y) => {
         const slot = Math.floor((x + hoodScroll) / 58);
-        const kind = ((slot % 4) + 4) % 4;
-        if (kind === 3) return;                       // a gap between properties
-        const id = HOOD_ART[kind];
+        const cycle = ((slot % 7) + 7) % 7;
+        if (cycle === 3) return;                      // a gap between properties
+
+        if (cycle === 6) {
+            // A block among the houses. Drawn from its own ground line so it
+            // stands on the same line they do, and taller than all of them,
+            // which is what makes it read as a building rather than a big shed.
+            const tall = ((slot / 7) | 0) % 2 === 0;
+            const id = tall
+                ? BLOCK_TALL[Math.abs(slot >> 3) % BLOCK_TALL.length]
+                : BLOCK_WIDE[Math.abs(slot >> 3) % BLOCK_WIDE.length];
+            const bw = tall ? 34 : 54;
+            const bh = tall ? 58 : 40;
+            art.panel(c, id, x, y - bh, bw, bh, { flip: slot % 2 === 1, alpha: 0.9 });
+            return;
+        }
+
+        const id = HOOD_ART[cycle % HOOD_ART.length];
         const w = 46 + (slot % 2) * 8;
         const h = 22 + (((slot * 7) % 3) * 5);
         // Ground line at the bottom for the far row: these are across the
