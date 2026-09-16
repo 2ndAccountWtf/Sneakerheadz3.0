@@ -1074,6 +1074,26 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         }
 
         /** Floating score/damage number. A tween, then it deletes itself. */
+        /**
+         * Shake the cabin by a fraction of the screen.
+         *
+         * Not `cameras.main.shake` directly, because its `intensity` is not the
+         * fraction of the screen it looks like. Phaser computes the offset as
+         * `intensity * camera.width * camera.zoom` (Shake.js), so on a zoomed
+         * camera the number means something different depending on the render
+         * multiple — and when that moved from 3 to 6, every shake in the game
+         * doubled. The heavy ones went to twelve per cent of the screen,
+         * re-randomised every frame, which alongside the red damage flash is
+         * not a hit landing, it is a fault.
+         *
+         * `amount` here is what you actually see: 0.04 is four per cent of the
+         * screen. Dividing by the zoom is what makes that true, and it means
+         * the render multiple can move again without retuning nine call sites.
+         */
+        private quake(duration: number, amount: number) {
+            this.cameras.main.shake(duration, amount / ZOOM);
+        }
+
         private float(x: number, y: number, str: string, color: string) {
             const t = this.add.text(x, y, str, {
                 fontFamily: MONO, fontSize: '6px', color, fontStyle: 'bold',
@@ -1354,7 +1374,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.score -= 150;
             this.say(h.hd, this.rng.pick(WITHERED_LINES), 2600, PAL.bad, 0);
             this.float(h.x, FLOOR_Y - 30, '-150', PAL.bad);
-            this.cameras.main.shake(120, 0.006);
+            this.quake(120, 0.018);
             this.killShot(s);
         };
 
@@ -1404,7 +1424,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (!left && !right) return;
             // Ran out of cabin. The bulkhead wins.
             this.say(boss.bd, YASSER_WALL, 1800, PAL.accent2, 0);
-            this.cameras.main.shake(340, 0.02);
+            this.quake(340, 0.06);
             this.duckNearby(boss.x, 150);
             this.pStars.emitParticleAt(boss.x, boss.y - 34, 6);
             this.pSplat.emitParticleAt(boss.x, boss.y - 26, 4);
@@ -1434,7 +1454,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             b.setVelocity((this.player.x < fromX ? -1 : 1) * 95, -95);
             // PHASER: camera shake and a red flash, from the camera, on the
             // world camera only. The HUD scene does not move.
-            this.cameras.main.shake(150, 0.012);
+            this.quake(150, 0.036);
             this.cameras.main.flash(90, 120, 20, 20);
             this.float(this.player.x, this.player.y - 34, `-${dmg}`, PAL.bad);
             if (this.pHp <= 0) {
@@ -1747,7 +1767,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                             m.x + Math.sign(dx || 1) * 8, FLOOR_Y - 10,
                             Math.sign(dx || 1) * 105, 0, 12, 'trolley', TG('cart'), 0, 16, 18,
                         );
-                        this.cameras.main.shake(120, 0.008);
+                        this.quake(120, 0.024);
                     }
                     break;
                 }
@@ -1918,7 +1938,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private bossRing() {
             const b = this.boss;
             if (!b || b.bd.state !== 'megaphone') return;
-            this.cameras.main.shake(180, 0.014);
+            this.quake(180, 0.042);
             this.hostileShot(b.x + b.bd.facing * 10, b.y - 22, b.bd.facing * 118, 0,
                 12, 'ring', T('ring'), 0, 12, 9);
         }
@@ -1968,14 +1988,14 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             if (bd.state === 'charge') {
                 const speed = bd.phase === 3 ? 158 : 132;
                 body(b).setVelocityX(bd.dir * speed);
-                this.cameras.main.shake(60, 0.004);
+                this.quake(60, 0.012);
                 // Contact is 16 and ends the charge.
                 // PHASER: a one-off overlap test with no callback returns a
                 // boolean, so the charge does not need its own collider or its
                 // own AABB.
                 if (this.physics.overlap(b, this.player)) {
                     this.hurtPlayer(16, b.x, 'hurtBody');
-                    this.cameras.main.shake(300, 0.02);
+                    this.quake(300, 0.06);
                     this.bossNext();
                 }
             } else if (bd.state === 'rant' && bd.phase === 3 && this.rng.frac() < 0.05 && bd.vest > 0) {
@@ -2019,7 +2039,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             this.time.removeAllEvents();
             this.tweens.killTweensOf(b.rig);
             this.score += 1000;
-            this.cameras.main.shake(400, 0.02);
+            this.quake(400, 0.06);
             bus.emit('banner', { big: 'CABIN SECURED', sub: 'HE IS TAPED TO A JUMP SEAT', ms: 4000 });
 
             // Stage 1: the trolley rolls over his foot and he hops, spinning.
@@ -2565,7 +2585,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private lose() {
             if (this.over) return;
             this.over = true;
-            this.cameras.main.shake(500, 0.02);
+            this.quake(500, 0.06);
             bus.emit('banner', { big: 'CABIN LOST', sub: 'YASSER IS STILL SHOUTING ABOUT THE PIGEONS', ms: 2200 });
             this.tweens.add({ targets: this.player.rig, angle: 90, duration: 500, ease: 'Bounce.easeOut' });
             this.time.delayedCall(1800, () => this.finish(false));
