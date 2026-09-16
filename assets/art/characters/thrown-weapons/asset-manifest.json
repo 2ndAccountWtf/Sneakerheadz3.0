@@ -1,0 +1,198 @@
+{
+  "throw-chancla@6.png": {
+    "cell": [
+      12,
+      8
+    ],
+    "frames": 6,
+    "scale": 3,
+    "file": [
+      216,
+      24
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/throw-chancla@6.png"
+  },
+  "throw-slushie@6.png": {
+    "cell": [
+      10,
+      12
+    ],
+    "frames": 6,
+    "scale": 3,
+    "file": [
+      180,
+      36
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/throw-slushie@6.png"
+  },
+  "throw-heavy@6.png": {
+    "cell": [
+      12,
+      12
+    ],
+    "frames": 6,
+    "scale": 3,
+    "file": [
+      216,
+      36
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/throw-heavy@6.png"
+  },
+  "skateboard-throw-chancla@8.png": {
+    "cell": [
+      34,
+      32
+    ],
+    "frames": 8,
+    "scale": 3,
+    "file": [
+      816,
+      96
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/skateboard-throw-chancla@8.png"
+  },
+  "skateboard-throw-slushie@8.png": {
+    "cell": [
+      34,
+      32
+    ],
+    "frames": 8,
+    "scale": 3,
+    "file": [
+      816,
+      96
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/skateboard-throw-slushie@8.png"
+  },
+  "skateboard-throw-heavy@10.png": {
+    "cell": [
+      36,
+      34
+    ],
+    "frames": 10,
+    "scale": 3,
+    "file": [
+      1080,
+      102
+    ],
+    "group": "street-games",
+    "runtime": "assets/art/characters/skateboard-throw-heavy@10.png"
+  },
+  "throw-hummus-cup@6.png": {
+    "cell": [
+      12,
+      10
+    ],
+    "frames": 6,
+    "scale": 1,
+    "file": [
+      72,
+      10
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/throw-hummus-cup@6.png"
+  },
+  "throw-falafel@6.png": {
+    "cell": [
+      8,
+      8
+    ],
+    "frames": 6,
+    "scale": 1,
+    "file": [
+      48,
+      8
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/throw-falafel@6.png"
+  },
+  "player-throw-hummus@8.png": {
+    "cell": [
+      28,
+      28
+    ],
+    "frames": 8,
+    "scale": 1,
+    "file": [
+      224,
+      28
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/player-throw-hummus@8.png"
+  },
+  "player-throw-falafel@8.png": {
+    "cell": [
+      28,
+      28
+    ],
+    "frames": 8,
+    "scale": 1,
+    "file": [
+      224,
+      28
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/player-throw-falafel@8.png"
+  },
+  "throw-bureka-potato@6.png": {
+    "cell": [
+      9,
+      7
+    ],
+    "frames": 6,
+    "scale": 1,
+    "file": [
+      54,
+      7
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/throw-bureka-potato@6.png"
+  },
+  "throw-bureka-gvinah@6.png": {
+    "cell": [
+      9,
+      8
+    ],
+    "frames": 6,
+    "scale": 1,
+    "file": [
+      54,
+      8
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/throw-bureka-gvinah@6.png"
+  },
+  "player-throw-bureka-potato@8.png": {
+    "cell": [
+      28,
+      28
+    ],
+    "frames": 8,
+    "scale": 1,
+    "file": [
+      224,
+      28
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/player-throw-bureka-potato@8.png"
+  },
+  "player-throw-bureka-gvinah@8.png": {
+    "cell": [
+      28,
+      28
+    ],
+    "frames": 8,
+    "scale": 1,
+    "file": [
+      224,
+      28
+    ],
+    "group": "flight404",
+    "runtime": "assets/art/flight404/player-throw-bureka-gvinah@8.png"
+  }
+}

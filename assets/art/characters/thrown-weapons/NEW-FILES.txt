@@ -1,0 +1,14 @@
+street-games/throw-chancla@6.png
+street-games/throw-slushie@6.png
+street-games/throw-heavy@6.png
+street-games/skateboard-throw-chancla@8.png
+street-games/skateboard-throw-slushie@8.png
+street-games/skateboard-throw-heavy@10.png
+flight404/throw-hummus-cup@6.png
+flight404/throw-falafel@6.png
+flight404/player-throw-hummus@8.png
+flight404/player-throw-falafel@8.png
+flight404/throw-bureka-potato@6.png
+flight404/throw-bureka-gvinah@6.png
+flight404/player-throw-bureka-potato@8.png
+flight404/player-throw-bureka-gvinah@8.png
