@@ -34,7 +34,7 @@ import {
     TILE, has, isFooting, conveyorDir,
     type PlatformDef,
 } from './terrain';
-import { FLOOR_Y, ZOOM } from './content';
+import { FLOOR_Y, ART_SCALE } from './content';
 import { T } from './textures';
 
 /** How thick a platform body is. The top surface is what matters; this is depth. */
@@ -168,7 +168,7 @@ export function buildPlatforms(
         // A coded placeholder has no such size and keeps filling the box.
         const src = img.texture.getSourceImage() as { width: number; height: number };
         const frames = Math.max(1, img.texture.frameTotal - 1);
-        const natural = src && src.width ? { w: src.width / frames / ZOOM, h: src.height / ZOOM } : null;
+        const natural = src && src.width ? { w: src.width / frames / ART_SCALE, h: src.height / ART_SCALE } : null;
         if (natural && natural.h > THICKNESS * 1.5) {
             img.setDisplaySize(Math.max(def.w, natural.w), natural.h);
         } else {

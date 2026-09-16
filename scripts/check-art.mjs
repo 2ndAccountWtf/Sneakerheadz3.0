@@ -136,9 +136,16 @@ function artScale(folder) {
         return m ? +m[1] : 8;
     }
     const src = readFileSync('components/minigames/phaser/flight404/content.ts', 'utf8');
-    const w = /RENDER_W = (\d+)/.exec(src);
-    const v = /VIEW_W = (\d+)/.exec(src);
-    return w && v ? +w[1] / +v[1] : 1;
+    // ART_SCALE, not the render multiple. They used to be one constant; the
+    // render multiple has since moved to 6 to reach the screen while the art is
+    // still authored at 3, and quoting 6 here would call every delivered file
+    // undersized when what it really is, is undersized *by a known amount that
+    // the engine already handles*. What this check wants to know is whether the
+    // file matches what the brief asked for.
+    const a = /ART_SCALE = (\d+)/.exec(src);
+    if (a) return +a[1];
+    const rs = /RENDER_SCALE = (\d+)/.exec(src);
+    return rs ? +rs[1] : 1;
 }
 const SCALE = artScale(FOLDER);
 
@@ -173,6 +180,7 @@ const DRAWN = (() => {
  * desktop could ask for.
  */
 const PHONE_SCALE = 2080 / 320;
+
 
 // --- what the asset document asked for --------------------------------------
 
@@ -323,9 +331,15 @@ if (!files.length) {
 }
 
 console.log(`\nChecking ${files.length} file(s) in ${FOLDER}`);
-console.log(/street|characters|rooftop/.test(FOLDER)
-    ? `A phone held sideways shows ${Math.round(320 * SCALE)}px across a 320-unit grid, so 1 unit = up to ${SCALE.toFixed(0)} device pixels.\n`
-    : `Canvas is ${Math.round(352 * SCALE)}px across a 352-unit world, so 1 world unit = ${SCALE.toFixed(3)} device pixels.\n`);
+const STREET = /street|characters|rooftop/.test(FOLDER);
+const GRID = STREET ? 320 : 352;
+// What the screen gives, against what the brief asks for. When those two differ
+// the difference is the magnification, and saying only one of them is how this
+// script spent months reporting undersized art as fine.
+const PHONE = 2080 / GRID;
+console.log(`The brief asks for ${SCALE}x. A phone held sideways gives `
+    + `${PHONE.toFixed(1)}x (2080 device pixels across a ${GRID}-unit grid), `
+    + `so art at ${SCALE}x is magnified ${(PHONE / SCALE).toFixed(1)}x.\n`);
 let blockers = 0, warnings = 0;
 
 for (const file of files.sort()) {

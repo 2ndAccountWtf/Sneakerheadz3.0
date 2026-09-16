@@ -53,18 +53,75 @@ export const VIEW_H = 198;
  * upscaled by the zoom with nearest-neighbour filtering, so they stay exactly
  * as chunky as they were. Delivered art is simply allowed to be better.
  */
-export const RENDER_W = VIEW_W * 3;   // 1056
-export const RENDER_H = VIEW_H * 3;   // 594
+/**
+ * The whole-number multiple. 6, not 3, because 3 was still short of the screen.
+ *
+ * At x3 the canvas is 1056 across. A phone held sideways shows the game across
+ * 2080 device pixels, so the compositor was stretching that 1056 by 1.97x --
+ * a fractional nearest-neighbour magnify, which is the exact defect the comment
+ * above warns about, moved one step later in the pipeline where nothing in this
+ * file could see it. x6 is 2112, past the phone, so the last step is a shrink
+ * and the uneven grid is gone.
+ */
+const RENDER_SCALE = 6;
+export const RENDER_W = VIEW_W * RENDER_SCALE;   // 2112
+export const RENDER_H = VIEW_H * RENDER_SCALE;   // 1188
 export const ZOOM = RENDER_W / VIEW_W;
 
 /**
- * The factor a delivered PNG should be authored at to land pixel-for-pixel.
+ * The factor a delivered PNG is authored at.
  *
- * A sprite the asset list calls 34 × 30 world units renders into 34 × ZOOM ≈ 93
- * device pixels, so art drawn on a 93px grid maps 1:1 and nothing is resampled.
- * This is the number to quote to whoever is drawing.
+ * **Not the same number as `ZOOM`, though it was for a long time.** ZOOM is how
+ * many device pixels the game spends on a world unit; ART_SCALE is how many
+ * pixels the art *has* per world unit. They were one constant because they
+ * happened to both be 3, and the moment the render multiple moved to reach the
+ * screen, every place that used ZOOM to read a delivered file's natural size
+ * would have halved it — a 93px sprite for a 30-unit figure reads as 30 units
+ * against ART_SCALE 3 and as 15 against 6, and the whole cast would have drawn
+ * at half height with nothing failing.
+ *
+ * So: raising ZOOM is free and costs the art nothing; the delivered 3× set is
+ * simply doubled by the camera, at a whole-number factor, which nearest
+ * neighbour handles exactly. Raising this is what needs new files, and it is
+ * what makes them 1:1 — a sprite the asset list calls 34 × 30 world units then
+ * arrives on a 34 × ART_SCALE grid and nothing is resampled at all.
  */
-export const ART_SCALE = ZOOM;
+export const ART_SCALE = 3;
+
+/**
+ * The delivery scales this engine can read, largest first.
+ *
+ * A two-way guess -- "is this file at world size or at ART_SCALE?" -- was
+ * enough while only two existed, and it is why raising ART_SCALE was a trap:
+ * with candidates {1, 1/3} a file at 3x reads correctly and one at 6x does not,
+ * and with {1, 1/6} it is the other way round. The delivered set is mixed
+ * already (the aisle props are at 1x, the side-view seat rows at 3x), and a
+ * re-export lands one folder at a time, so the answer cannot be a single
+ * number that every file has to agree with at once.
+ */
+const DELIVERY_SCALES = [8, 6, 4, 3, 2, 1];
+
+/**
+ * Work out how much to shrink a delivered texture, from the texture itself.
+ *
+ * `texH` is the frame height in pixels, `wantH` the height in world units the
+ * game expects. The right scale is whichever candidate puts the sprite closest
+ * to that, which is a fact about the file rather than about the brief -- so a
+ * folder re-exported at 6x drops in beside one still at 1x and both draw at the
+ * same size.
+ *
+ * Returns 1 for anything that matches nothing, which is the coded-placeholder
+ * case: it has no natural size and should fill the box it was given.
+ */
+export function fitScale(texH: number, wantH: number): number {
+    if (!(texH > 0) || !(wantH > 0)) return 1;
+    let best = 1, bestErr = Infinity;
+    for (const n of DELIVERY_SCALES) {
+        const err = Math.abs(texH / n - wantH);
+        if (err < bestErr - 1e-9) { bestErr = err; best = 1 / n; }
+    }
+    return best;
+}
 
 /**
  * How much the delivered parallax plates are shrunk to match the characters.

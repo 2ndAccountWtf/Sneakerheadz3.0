@@ -96,7 +96,7 @@ at least honest", not as "leave it alone".
 
 | folder | verdict |
 |---|---|
-| `assets/art/flight404/` — **all 156 files** | **leave alone.** Mean run 1.17. Every file is native, including the new `side-view-seat-rows/`. Flight 404 looks soft for a different reason (its Phaser canvas renders at 1056px and gets stretched), and that is a code fix, not an art fix. |
+| ~~`assets/art/flight404/`~~ | **Wrong — see `docs/ASSETS-FLIGHT404-EXPORT-V2.md`.** Clean of enlargement, yes, but all 115 spec'd files are delivered at **1× world size** against a screen that gives 5.9×. The worst-magnified folder in the project, and this row said it was fine because the checker's own scale had silently fallen back to 1. |
 | `assets/art/characters/` — the **17 files in the root** | **leave alone.** All the rider sheets: `skateboard-ride@12`, `bike-ride@12`, `skateboard-ollie@10`, `tiny-bicycle` and the rest. Runs of 1.2–1.3. |
 | `assets/art/street/skyline-kit/landmarks/` — all 3 | **leave alone.** Capitol Records, Griffith, the Hellaweird sign. Runs of 1.1–1.3. |
 | every `far-*.png` silhouette + the flat rooftop props | **leave alone.** 21 files. Two-colour by design, so there is no detail to lose. |

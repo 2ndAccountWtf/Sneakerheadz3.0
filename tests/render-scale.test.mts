@@ -141,4 +141,67 @@ const { smoothFor, ART_SCALE, tileSize } = await import('../components/minigames
     ok(ART_SCALE > 0, 'the fallback multiple is set');
 }
 
+
+
+// ---------------------------------------------------------------------------
+// 4. Flight 404: render resolution and art scale are different numbers.
+// ---------------------------------------------------------------------------
+{
+    const f404 = await import('../components/minigames/phaser/flight404/content.ts');
+    const { VIEW_W, RENDER_W, ZOOM, ART_SCALE } = f404;
+
+    // The canvas has to reach the screen. A phone held sideways shows the game
+    // across 2080 device pixels; at the old x3 the canvas was 1056 and the
+    // compositor stretched it 1.97x -- a fractional nearest-neighbour magnify,
+    // which is the exact artefact this constant exists to avoid, just moved one
+    // step later in the pipeline.
+    ok(RENDER_W >= 2080, 'the canvas is at least as wide as a phone in landscape');
+
+    // Whole-number or the pixel grid goes uneven: at 2.727 device pixels per
+    // source pixel, some come out 3 wide and some 2.
+    eq(ZOOM, Math.round(ZOOM), 'the render multiple is a whole number');
+    eq(RENDER_W, VIEW_W * ZOOM, 'the camera zoom is exactly the canvas multiple');
+
+    // The one that would have broken the whole cast silently. These were a
+    // single constant; raising the render multiple with them joined makes every
+    // delivered file read as half its real size, because the code asks "how many
+    // pixels does this file have per world unit" and gets told the render
+    // number instead.
+    ok(ART_SCALE !== ZOOM, 'art scale and render zoom are separate numbers');
+    eq(ART_SCALE, 3, 'the delivered set is authored at 3x');
+
+    // Raising ZOOM is free only while it stays a whole multiple of ART_SCALE --
+    // then the delivered art is doubled by an exact integer and nearest
+    // neighbour is lossless. 6/3 is 2.
+    eq(ZOOM % ART_SCALE, 0, 'the render multiple is a whole multiple of the art scale');
+
+    // `fitScale` is what `skin.ts` and `gameScene.artSize` run. Whatever
+    // multiple a file was delivered at, it has to read back at its world size,
+    // because the delivered set is mixed -- the aisle props are at 1x, the
+    // side-view seat rows at 3x -- and a re-export lands one folder at a time.
+    const { fitScale } = f404;
+    const H = 30;
+    for (const n of [1, 2, 3, 4, 6, 8]) {
+        eq(fitScale(H * n, H) * (H * n), H, `art delivered at ${n}x reads back at its world height`);
+    }
+
+    // The trap this replaced: a two-way guess against one constant. With
+    // candidates {1, 1/3} a 6x file reads as half size; with {1, 1/6} a 3x file
+    // does. Both are silent -- the cast just draws small.
+    const twoWay = (texH: number, want: number, k: number) =>
+        Math.abs(texH - want) <= Math.abs(texH / k - want) ? 1 : 1 / k;
+    ok(twoWay(H * 6, H, 3) * (H * 6) !== H, 'the old two-way guess got a 6x file wrong');
+    ok(fitScale(H * 6, H) * (H * 6) === H, '...and fitScale gets it right');
+
+    // Degenerate inputs are the coded-placeholder case: no natural size, so
+    // fill the box you were given rather than scaling by a guess.
+    eq(fitScale(0, H), 1, 'a texture with no height scales by 1');
+    eq(fitScale(H, 0), 1, 'a zero expected height scales by 1');
+
+    // An off-grid file still lands on its nearest candidate rather than
+    // throwing or returning something wild.
+    const odd = fitScale(H * 3.2, H);
+    ok(odd > 0 && odd <= 1, 'an off-grid delivery still returns a sane scale');
+}
+
 console.log(`render-scale: ${checks} checks OK`);

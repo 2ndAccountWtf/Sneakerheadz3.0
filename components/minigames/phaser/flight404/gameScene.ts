@@ -34,7 +34,7 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
-import { ZOOM, PLATE_SHRINK, CABIN_BASE } from './content';
+import { ZOOM, ART_SCALE, fitScale, PLATE_SHRINK, CABIN_BASE } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import { attachSkin, type Skin } from './skin';
 import { openRoster, stepDirector, type Member, type World as CastWorld } from './castDirector';
@@ -647,8 +647,9 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const frames = Math.max(1, tex.frameTotal - 1);
             const natW = src.width / frames;
             const natH = src.height;
-            const near = Math.abs(natH - h) <= Math.abs(natH / ZOOM - h);
-            const k = near ? 1 : 1 / ZOOM;
+            // Read the scale off the file, not off the brief: the delivered
+            // set is mixed and a re-export lands one folder at a time.
+            const k = fitScale(natH, h);
             // Only trust the art's own proportions when they are in the right
             // ballpark; anything wilder is a mis-sized delivery and the game's
             // own number is the safer answer.
@@ -763,7 +764,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
 
                 const band = this.contentBand(key);
                 const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
-                const scale = 1 / (ZOOM * PLATE_SHRINK);
+                const scale = 1 / (ART_SCALE * PLATE_SHRINK);
                 const drawnH = src.height * band.h * scale;
 
                 const ts = this.add.tileSprite(0, sitOn - drawnH, VIEW_W, drawnH, key).setOrigin(0, 0);
