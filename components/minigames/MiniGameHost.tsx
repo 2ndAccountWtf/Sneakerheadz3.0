@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { useGame } from '../../hooks/useGame';
 import StreetFighter from './StreetFighter';
 import HypecastRoulette from './HypecastRoulette';
@@ -43,6 +43,48 @@ function canUseWebGL(): boolean {
     return webglSupport;
 }
 
+/**
+ * Flight 404 exists twice: a hand-rolled canvas build and a Phaser one.
+ *
+ * The Phaser build looks considerably better and costs nothing until it is
+ * opened (Phaser is a separate ~380KB chunk fetched on mount, and only +5KB in
+ * the main bundle), so it is what players get. The canvas build is the same
+ * game — same sections, same cast, same boss — on a 2D context, and it is the
+ * version `tests/` can drive headlessly, since its world is a pure step
+ * function.
+ *
+ * `canUseWebGL` picks between them up front, and that probe is necessary but
+ * not sufficient: it answers "can this browser make a context at all", which is
+ * a different question from "will Phaser start, with a drawing buffer this
+ * size, on this connection, and keep it". A chunk that never arrives, a buffer
+ * the browser declines, a phone that drops the context under memory pressure,
+ * or a driver blocklisted after the probe all end the same way — and until now
+ * they all ended on a red box reading "the engine failed to load", with a
+ * complete, working build of the same level sitting unused in the next file.
+ *
+ * So the probe chooses, and a failure re-chooses. Losing the engine costs the
+ * player the nicer renderer, not the game.
+ */
+export const Flight404Route: React.FC<{
+    onFinish: (won: boolean, note: string) => void;
+    onQuit: () => void;
+}> = ({ onFinish, onQuit }) => {
+    const [engineDown, setEngineDown] = useState<string | null>(null);
+
+    // One-way. Re-mounting Phaser after it has failed once would almost always
+    // fail the same way, and the second attempt would land on a player who is
+    // already looking at a working game.
+    const fail = useCallback((reason: string) => {
+        console.warn(`[flight 404] falling back to the canvas build: ${reason}`);
+        setEngineDown(reason);
+    }, []);
+
+    if (engineDown === null && canUseWebGL()) {
+        return <Flight404Phaser onFinish={onFinish} onQuit={onQuit} onEngineError={fail} />;
+    }
+    return <Flight404 onFinish={onFinish} onQuit={onQuit} />;
+};
+
 const MiniGameHost: React.FC = () => {
     const { gameState, dispatch } = useGame();
     const req = gameState.activeMiniGame;
@@ -84,17 +126,7 @@ const MiniGameHost: React.FC = () => {
         case 'cart-race':
             return <CartRace thief={req.config?.thief} onFinish={finish} onQuit={quit} />;
         case 'flight-404':
-            // Flight 404 exists twice: a hand-rolled canvas build and a Phaser
-            // one. The Phaser build looks considerably better and costs nothing
-            // until it is opened (Phaser is a separate ~380KB chunk fetched on
-            // mount, and only +5KB in the main bundle), so it is what players
-            // get. The canvas build is the fallback for anything without WebGL
-            // — Phaser cannot start at all there, whereas a 2D context is
-            // essentially guaranteed — and it is the version `tests/` can drive
-            // headlessly, since its world is a pure step function.
-            return canUseWebGL()
-                ? <Flight404Phaser onFinish={finish} onQuit={quit} />
-                : <Flight404 onFinish={finish} onQuit={quit} />;
+            return <Flight404Route onFinish={finish} onQuit={quit} />;
         case 'street-dice':
             return <DiceGame opponent={req.config?.opponent} onFinish={finish} onQuit={quit} />;
         case 'drunk-darts':

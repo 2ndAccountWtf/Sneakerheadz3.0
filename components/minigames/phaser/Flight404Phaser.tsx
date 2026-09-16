@@ -55,7 +55,9 @@ const loadScenes = () => import('./flight404');
 const Flight404Phaser: React.FC<{
     onFinish: (won: boolean, note: string) => void;
     onQuit: () => void;
-}> = ({ onFinish, onQuit }) => {
+    /** The engine could not start. The caller swaps in the canvas build. */
+    onEngineError?: (reason: string) => void;
+}> = ({ onFinish, onQuit, onEngineError }) => {
     const { gameState } = useGame();
     const { player } = gameState;
 
@@ -180,6 +182,7 @@ const Flight404Phaser: React.FC<{
                         // of the pilot: real bodies rather than hand-written AABB.
                         physics={{ gravityY: 620 }}
                         onFinish={finish}
+                        onEngineError={onEngineError}
                     />
                 ) : (
                     <div

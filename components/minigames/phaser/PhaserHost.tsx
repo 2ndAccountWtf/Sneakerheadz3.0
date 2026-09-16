@@ -41,13 +41,32 @@ interface PhaserHostProps extends PhaserSceneFactory {
     /** Called by the scene via `game.registry.get('onFinish')`. */
     onFinish: (won: boolean, note: string) => void;
     className?: string;
+    /**
+     * The engine could not start, or its GPU context went away mid-game.
+     *
+     * Without this the only thing a player gets is the red box below, which is
+     * a dead end — and for the one game on Phaser there is a complete canvas
+     * build of the same level sitting in the repo, already wired for the
+     * no-WebGL case. A caller that passes this can send them there instead.
+     *
+     * Reasons this fires that no amount of testing here will predict: the chunk
+     * fails to arrive on a bad connection, the browser refuses a drawing buffer
+     * of the size asked for, a phone drops the context under memory pressure,
+     * or a driver blocklists WebGL after `canUseWebGL` already said yes.
+     */
+    onEngineError?: (reason: string) => void;
 }
 
 export const PhaserHost: React.FC<PhaserHostProps> = ({
-    width, height, createScenes, data, physics, onFinish, className = '',
+    width, height, createScenes, data, physics, onFinish, className = '', onEngineError,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const gameRef = useRef<PhaserNS.Game | null>(null);
+
+    // Through a ref for the same reason `onFinish` is: the effect below mounts
+    // once on purpose, so a callback captured in its closure would go stale.
+    const failRef = useRef(onEngineError);
+    failRef.current = onEngineError;
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
     // Keep the latest callback reachable without re-creating the game, which
@@ -96,11 +115,26 @@ export const PhaserHost: React.FC<PhaserHostProps> = ({
                 game.registry.set('onFinish', (won: boolean, note: string) => finishRef.current(won, note));
                 for (const [k, v] of Object.entries(data ?? {})) game.registry.set(k, v);
 
+                // A context that goes away mid-game is not an exception and
+                // will not reach the catch below; the canvas simply stops
+                // painting and the player is left looking at the last frame.
+                const canvas = game.canvas;
+                if (canvas) {
+                    canvas.addEventListener('webglcontextlost', (ev) => {
+                        ev.preventDefault();
+                        if (cancelled) return;
+                        setStatus('error');
+                        failRef.current?.('the graphics context was lost');
+                    }, { once: true });
+                }
+
                 gameRef.current = game;
                 setStatus('ready');
             } catch (err) {
                 console.error('Phaser failed to load', err);
-                if (!cancelled) setStatus('error');
+                if (cancelled) return;
+                setStatus('error');
+                failRef.current?.(err instanceof Error ? err.message : String(err));
             }
         })();
 
