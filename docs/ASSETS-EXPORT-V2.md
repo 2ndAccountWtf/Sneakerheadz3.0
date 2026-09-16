@@ -45,11 +45,54 @@ beats an enlarged 360px one.
 Flight 404's 156 files are unaffected — mean run 1.17, all native. Nothing in
 `assets/art/flight404` needs re-exporting for this reason.
 
-## Which folders you can leave alone
+## Correction: "native" is not the same as "big enough"
 
-Scanned every delivered PNG. **199 of 312 files are fine and must not be
-touched** — re-exporting a good file from a master through the same broken step
-is how you lose the ones that work.
+An earlier pass in this document rated the character sheets clean and said to
+leave them alone. That was wrong, and wrong about the most visible art in the
+game.
+
+There are **two independent defects** and only one of them shows up as run
+length:
+
+1. **Enlarged before delivery** — the drawing is smaller than the file claims.
+   Run length catches this. 113 files.
+2. **Too small for the screen** — the file is honest but there is not enough of
+   it. Run length is blind to this, and it is worse on the characters than
+   anywhere else.
+
+`skateboard-ride@12` is the case that makes the point. Nothing was enlarged
+(run 1.2), so it passed. It ships **40 pixels per frame** for something the game
+draws **38 logical pixels** wide — so it is delivered at roughly 1× when the
+brief asked for 3×, and a phone stretches it **6.2×**. It is the player
+character, on screen for the entire game, and it was the softest asset in the
+project while being rated fine.
+
+Multiply the two and you get how many screen pixels one really-drawn pixel has
+to cover. Worst first:
+
+| id | stretched | enlarged | total | drawn per run |
+|---|---|---|---|---|
+| `throw-chancla` | 3.5× | 2.6× | **9.2×** | 505 |
+| `doormat` | 2.7× | 3.0× | **8.1×** | 1413 |
+| `skateboard-ride` | 6.1× | 1.2× | **7.3×** | 846 |
+| `road-asphalt` | 2.2× | 3.2× | **6.9×** | 1090 |
+| `drain-grate` | 2.2× | 3.2× | **6.9×** | 4571 |
+| `manhole` | 2.2× | 3.0× | **6.5×** | 4571 |
+| `bike-ride` | 4.1× | 1.3× | **5.3×** | 366 |
+
+`node scripts/check-art.mjs` now reports both, per file, and `scripts/drawn-sizes.json`
+holds the sizes the games actually draw at — measured from a live run, not copied
+from the table below, because the code and the table disagree and the code wins.
+
+So the honest summary is: **almost everything wants re-exporting.** The list
+below still says which files have defect 1; treat defect 2 as near-universal, and
+work down the ranking above rather than through the folders.
+
+## Which folders are free of defect 1 (enlargement)
+
+These 199 files were not enlarged before delivery. Most of them are still too
+small for the screen — see the correction above — so read this as "this one is
+at least honest", not as "leave it alone".
 
 | folder | verdict |
 |---|---|

@@ -142,6 +142,38 @@ function artScale(folder) {
 }
 const SCALE = artScale(FOLDER);
 
+/**
+ * How big the two street games actually draw each id, in logical pixels.
+ *
+ * Recorded from a live run of both games rather than copied out of the brief,
+ * because the code and the brief disagree and the code wins: vehicles carry a
+ * 1.3x scale so they read as bigger than a person on a board, so a taxi the
+ * brief calls 34 wide is drawn at 45.
+ *
+ * This exists because file size alone cannot answer the question that matters.
+ * `skateboard-ride@12` is native to its file -- nothing was enlarged, it passes
+ * every other check here -- and it ships 40 pixels per frame for something drawn
+ * 38 logical pixels wide, so the phone stretches it 6.1x. It is the player
+ * character, on screen for the whole game, and it was the softest thing in it
+ * while being rated clean.
+ *
+ * Regenerate by instrumenting the draw calls in `streetArt.ts` and driving
+ * `__street_harness.html`; see docs/ASSETS-EXPORT-V2.md.
+ */
+const DRAWN = (() => {
+    try { return JSON.parse(readFileSync(new URL('./drawn-sizes.json', import.meta.url), 'utf8')); }
+    catch { return {}; }
+})();
+
+/**
+ * Device pixels per logical pixel on the reference display.
+ *
+ * A phone held sideways shows the 320-unit grid across 2080 device pixels. That
+ * is the number the art has to survive -- not the cap, which is what a large
+ * desktop could ask for.
+ */
+const PHONE_SCALE = 2080 / 320;
+
 // --- what the asset document asked for --------------------------------------
 
 /**
@@ -374,6 +406,25 @@ for (const file of files.sort()) {
         notes.push(line);
     } else if (grid) {
         notes.push(`detail is native to the file (runs of ${grid.block.toFixed(1)})`);
+    }
+
+    // 5. Is the file big enough for the screen at all?
+    //
+    // Separate question from detail, and the one that was missed: a file can be
+    // perfectly native and still be six times too small, in which case the
+    // screen magnifies it and it looks exactly as bad.
+    const drawnAt = DRAWN[id];
+    if (drawnAt && drawnAt.w > 0) {
+        const perLogical = fw / drawnAt.w;
+        const magnify = PHONE_SCALE / perLogical;
+        const want = { w: Math.ceil(drawnAt.w * SCALE), h: Math.ceil(drawnAt.h * SCALE) };
+        if (magnify > 1.25) {
+            notes.push(`the game draws this ${drawnAt.w}x${drawnAt.h}, so a phone gives it `
+                + `${Math.round(drawnAt.w * PHONE_SCALE)} device pixels from a ${Math.round(fw)}px frame — `
+                + `magnified ${magnify.toFixed(1)}x. ${want.w}x${want.h} per frame is 1:1.`);
+        } else {
+            notes.push(`big enough for the screen (${magnify.toFixed(2)}x)`);
+        }
     }
 
     const ok = problems.length === 0;

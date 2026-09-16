@@ -1,0 +1,660 @@
+{
+ "sun-low": {
+  "w": 30,
+  "h": 30,
+  "draws": 622,
+  "games": [
+   "cart"
+  ]
+ },
+ "sky-hills": {
+  "w": 128,
+  "h": 24,
+  "draws": 622,
+  "games": [
+   "cart"
+  ]
+ },
+ "far-tower-d-box": {
+  "w": 26,
+  "h": 37,
+  "draws": 2534,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-tower-a-wide": {
+  "w": 26,
+  "h": 37,
+  "draws": 2254,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-tower-c-stepped": {
+  "w": 26,
+  "h": 38,
+  "draws": 3239,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-tower-b-narrow": {
+  "w": 26,
+  "h": 37,
+  "draws": 1718,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-tower-f-old": {
+  "w": 26,
+  "h": 36,
+  "draws": 4196,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-tower-e-crown": {
+  "w": 24,
+  "h": 35,
+  "draws": 1090,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "landmark-griffith-observatory": {
+  "w": 72,
+  "h": 32,
+  "draws": 987,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "landmark-capitol-records": {
+  "w": 30,
+  "h": 48,
+  "draws": 1856,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-lowrise-d-corner": {
+  "w": 24,
+  "h": 18,
+  "draws": 1287,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-lowrise-a-strip": {
+  "w": 24,
+  "h": 17,
+  "draws": 1874,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "far-lowrise-e-mixed": {
+  "w": 23,
+  "h": 16,
+  "draws": 1090,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "roof-vent": {
+  "w": 16,
+  "h": 16,
+  "draws": 678,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "access-shed": {
+  "w": 16,
+  "h": 16,
+  "draws": 828,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "antenna-e": {
+  "w": 12,
+  "h": 20,
+  "draws": 865,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "wall-breeze": {
+  "w": 24,
+  "h": 12,
+  "draws": 1090,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "tiny-bicycle": {
+  "w": 20,
+  "h": 16,
+  "draws": 2358,
+  "games": [
+   "cart"
+  ]
+ },
+ "palm-short": {
+  "w": 16,
+  "h": 26,
+  "draws": 1163,
+  "games": [
+   "cart"
+  ]
+ },
+ "palm-sway": {
+  "w": 18,
+  "h": 44,
+  "draws": 1168,
+  "games": [
+   "cart"
+  ]
+ },
+ "palm-tall": {
+  "w": 18,
+  "h": 44,
+  "draws": 1186,
+  "games": [
+   "cart"
+  ]
+ },
+ "cat-street": {
+  "w": 17,
+  "h": 9,
+  "draws": 1580,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "pigeon-flock": {
+  "w": 14,
+  "h": 7,
+  "draws": 1845,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "feather-puff": {
+  "w": 8,
+  "h": 6,
+  "draws": 299,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "gull": {
+  "w": 11,
+  "h": 6,
+  "draws": 2548,
+  "games": [
+   "cart"
+  ]
+ },
+ "grass-verge": {
+  "w": 32,
+  "h": 6,
+  "draws": 1090,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "pavement": {
+  "w": 32,
+  "h": 8,
+  "draws": 1558,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "bin-wheelie": {
+  "w": 10,
+  "h": 12,
+  "draws": 8554,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "hedge-low": {
+  "w": 24,
+  "h": 9,
+  "draws": 1222,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "tree-street": {
+  "w": 19,
+  "h": 30,
+  "draws": 1188,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "streetlight": {
+  "w": 10,
+  "h": 36,
+  "draws": 2823,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "hydrant": {
+  "w": 6,
+  "h": 8,
+  "draws": 711,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "mailbox": {
+  "w": 7,
+  "h": 9,
+  "draws": 1204,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "fence-picket": {
+  "w": 24,
+  "h": 10,
+  "draws": 1179,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "road-asphalt": {
+  "w": 64,
+  "h": 18,
+  "draws": 1090,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "kerb": {
+  "w": 32,
+  "h": 5,
+  "draws": 1558,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "road-crack": {
+  "w": 28,
+  "h": 7,
+  "draws": 4769,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "manhole": {
+  "w": 12,
+  "h": 5,
+  "draws": 4571,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "drain-grate": {
+  "w": 10,
+  "h": 4,
+  "draws": 4571,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "skid-mark": {
+  "w": 25,
+  "h": 5,
+  "draws": 4331,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "road-centreline": {
+  "w": 32,
+  "h": 3,
+  "draws": 2334,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "road-edgeline": {
+  "w": 32,
+  "h": 2,
+  "draws": 1558,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "roadworks": {
+  "w": 23,
+  "h": 14,
+  "draws": 456,
+  "games": [
+   "cart"
+  ]
+ },
+ "bike-ride": {
+  "w": 37,
+  "h": 31,
+  "draws": 366,
+  "games": [
+   "cart"
+  ]
+ },
+ "skateboard-ride": {
+  "w": 38,
+  "h": 30,
+  "draws": 846,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "cat-dart": {
+  "w": 20,
+  "h": 9,
+  "draws": 285,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "skateboard-throw-chancla": {
+  "w": 32,
+  "h": 30,
+  "draws": 91,
+  "games": [
+   "cart"
+  ]
+ },
+ "throw-chancla": {
+  "w": 20,
+  "h": 13,
+  "draws": 505,
+  "games": [
+   "cart"
+  ]
+ },
+ "skateboard-hit-stumble": {
+  "w": 28,
+  "h": 28,
+  "draws": 50,
+  "games": [
+   "cart"
+  ]
+ },
+ "impact-star": {
+  "w": 12,
+  "h": 12,
+  "draws": 39,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "bike-thumb-suck": {
+  "w": 37,
+  "h": 30,
+  "draws": 43,
+  "games": [
+   "cart"
+  ]
+ },
+ "bike-hit-chancla": {
+  "w": 34,
+  "h": 30,
+  "draws": 77,
+  "games": [
+   "cart"
+  ]
+ },
+ "bike-fall-off": {
+  "w": 36,
+  "h": 30,
+  "draws": 136,
+  "games": [
+   "cart"
+  ]
+ },
+ "antenna-d": {
+  "w": 12,
+  "h": 20,
+  "draws": 750,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "hydrant-blown": {
+  "w": 9,
+  "h": 11,
+  "draws": 242,
+  "games": [
+   "cart"
+  ]
+ },
+ "car-wreck": {
+  "w": 38,
+  "h": 17,
+  "draws": 156,
+  "games": [
+   "cart"
+  ]
+ },
+ "trash-pile": {
+  "w": 17,
+  "h": 9,
+  "draws": 154,
+  "games": [
+   "cart"
+  ]
+ },
+ "car-taxi": {
+  "w": 45,
+  "h": 25,
+  "draws": 388,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "trolley-bay": {
+  "w": 33,
+  "h": 17,
+  "draws": 173,
+  "games": [
+   "cart"
+  ]
+ },
+ "billboard-frame": {
+  "w": 16,
+  "h": 16,
+  "draws": 150,
+  "games": [
+   "cart"
+  ]
+ },
+ "dog-stray": {
+  "w": 15,
+  "h": 9,
+  "draws": 122,
+  "games": [
+   "cart"
+  ]
+ },
+ "skateboard-front-collision-backward": {
+  "w": 37,
+  "h": 30,
+  "draws": 58,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "skateboard-burpee-to-stand": {
+  "w": 29,
+  "h": 30,
+  "draws": 30,
+  "games": [
+   "cart",
+   "pizza"
+  ]
+ },
+ "car-van": {
+  "w": 44,
+  "h": 24,
+  "draws": 4,
+  "games": [
+   "cart"
+  ]
+ },
+ "antenna-c": {
+  "w": 12,
+  "h": 20,
+  "draws": 40,
+  "games": [
+   "pizza"
+  ]
+ },
+ "dog-bark": {
+  "w": 15,
+  "h": 9,
+  "draws": 676,
+  "games": [
+   "pizza"
+  ]
+ },
+ "doormat": {
+  "w": 15,
+  "h": 5,
+  "draws": 1413,
+  "games": [
+   "pizza"
+  ]
+ },
+ "window-lit": {
+  "w": 6,
+  "h": 6,
+  "draws": 1095,
+  "games": [
+   "pizza"
+  ]
+ },
+ "cone": {
+  "w": 6,
+  "h": 7,
+  "draws": 844,
+  "games": [
+   "pizza"
+  ]
+ },
+ "bin-wheelie-down": {
+  "w": 14,
+  "h": 7,
+  "draws": 874,
+  "games": [
+   "pizza"
+  ]
+ },
+ "planter": {
+  "w": 9,
+  "h": 8,
+  "draws": 920,
+  "games": [
+   "pizza"
+  ]
+ },
+ "streetlight-glow": {
+  "w": 20,
+  "h": 20,
+  "draws": 2207,
+  "games": [
+   "pizza"
+  ]
+ },
+ "pizza-bag-spill": {
+  "w": 20,
+  "h": 16,
+  "draws": 25,
+  "games": [
+   "pizza"
+  ]
+ },
+ "dust-plume": {
+  "w": 14,
+  "h": 10,
+  "draws": 18,
+  "games": [
+   "pizza"
+  ]
+ },
+ "skateboard-ground-roll": {
+  "w": 42,
+  "h": 30,
+  "draws": 15,
+  "games": [
+   "pizza"
+  ]
+ },
+ "restock-crate": {
+  "w": 13,
+  "h": 11,
+  "draws": 243,
+  "games": [
+   "pizza"
+  ]
+ },
+ "pizza-stack": {
+  "w": 6,
+  "h": 7,
+  "draws": 243,
+  "games": [
+   "pizza"
+  ]
+ }
+}
