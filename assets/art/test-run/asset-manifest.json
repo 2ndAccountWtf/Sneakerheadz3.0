@@ -1,0 +1,86 @@
+{
+  "skateboard-ride-native@12.png": {
+    "final_cell": [
+      120,
+      96
+    ],
+    "frames": 12,
+    "file": [
+      1440,
+      96
+    ],
+    "category": "characters",
+    "uniform_3x3_ratio": 0.0,
+    "passes_no_block_enlargement": true
+  },
+  "bike-ride-native@12.png": {
+    "final_cell": [
+      174,
+      144
+    ],
+    "frames": 12,
+    "file": [
+      2088,
+      144
+    ],
+    "category": "characters",
+    "uniform_3x3_ratio": 0.0001,
+    "passes_no_block_enlargement": true
+  },
+  "house-bungalow-far-native.png": {
+    "final_cell": [
+      132,
+      102
+    ],
+    "frames": 1,
+    "file": [
+      132,
+      102
+    ],
+    "category": "buildings",
+    "uniform_3x3_ratio": 0.0,
+    "passes_no_block_enlargement": true
+  },
+  "house-apartment-far-native.png": {
+    "final_cell": [
+      144,
+      156
+    ],
+    "frames": 1,
+    "file": [
+      144,
+      156
+    ],
+    "category": "buildings",
+    "uniform_3x3_ratio": 0.0,
+    "passes_no_block_enlargement": true
+  },
+  "tower-c-stepped-native.png": {
+    "final_cell": [
+      84,
+      120
+    ],
+    "frames": 1,
+    "file": [
+      84,
+      120
+    ],
+    "category": "buildings",
+    "uniform_3x3_ratio": 0.0,
+    "passes_no_block_enlargement": true
+  },
+  "lowrise-e-mixed-native.png": {
+    "final_cell": [
+      108,
+      78
+    ],
+    "frames": 1,
+    "file": [
+      108,
+      78
+    ],
+    "category": "buildings",
+    "uniform_3x3_ratio": 0.0,
+    "passes_no_block_enlargement": true
+  }
+}
