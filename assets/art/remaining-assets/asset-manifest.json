@@ -1,0 +1,330 @@
+{
+  "cross-donkey": {
+    "cell": [
+      26,
+      22
+    ],
+    "frames": 6,
+    "file": [
+      156,
+      22
+    ],
+    "tileable_lr": false
+  },
+  "cross-sheep": {
+    "cell": [
+      34,
+      18
+    ],
+    "frames": 6,
+    "file": [
+      204,
+      18
+    ],
+    "tileable_lr": false
+  },
+  "cross-camel": {
+    "cell": [
+      32,
+      34
+    ],
+    "frames": 8,
+    "file": [
+      256,
+      34
+    ],
+    "tileable_lr": false
+  },
+  "cross-goats": {
+    "cell": [
+      30,
+      18
+    ],
+    "frames": 6,
+    "file": [
+      180,
+      18
+    ],
+    "tileable_lr": false
+  },
+  "cross-chickens": {
+    "cell": [
+      26,
+      12
+    ],
+    "frames": 8,
+    "file": [
+      208,
+      12
+    ],
+    "tileable_lr": false
+  },
+  "cross-cart": {
+    "cell": [
+      30,
+      24
+    ],
+    "frames": 6,
+    "file": [
+      180,
+      24
+    ],
+    "tileable_lr": false
+  },
+  "cross-tea": {
+    "cell": [
+      20,
+      28
+    ],
+    "frames": 6,
+    "file": [
+      120,
+      28
+    ],
+    "tileable_lr": false
+  },
+  "cross-rug": {
+    "cell": [
+      44,
+      26
+    ],
+    "frames": 6,
+    "file": [
+      264,
+      26
+    ],
+    "tileable_lr": false
+  },
+  "cross-bread": {
+    "cell": [
+      22,
+      30
+    ],
+    "frames": 6,
+    "file": [
+      132,
+      30
+    ],
+    "tileable_lr": false
+  },
+  "cross-bicycle": {
+    "cell": [
+      26,
+      24
+    ],
+    "frames": 6,
+    "file": [
+      156,
+      24
+    ],
+    "tileable_lr": false
+  },
+  "bg-coffee-crew": {
+    "cell": [
+      34,
+      26
+    ],
+    "frames": 6,
+    "file": [
+      204,
+      26
+    ],
+    "tileable_lr": false
+  },
+  "bg-donkey": {
+    "cell": [
+      26,
+      22
+    ],
+    "frames": 6,
+    "file": [
+      156,
+      22
+    ],
+    "tileable_lr": false
+  },
+  "bg-sheep": {
+    "cell": [
+      30,
+      18
+    ],
+    "frames": 6,
+    "file": [
+      180,
+      18
+    ],
+    "tileable_lr": false
+  },
+  "bg-porter": {
+    "cell": [
+      20,
+      32
+    ],
+    "frames": 6,
+    "file": [
+      120,
+      32
+    ],
+    "tileable_lr": false
+  },
+  "bg-argument": {
+    "cell": [
+      28,
+      26
+    ],
+    "frames": 6,
+    "file": [
+      168,
+      26
+    ],
+    "tileable_lr": false
+  },
+  "bg-duck": {
+    "cell": [
+      20,
+      28
+    ],
+    "frames": 3,
+    "file": [
+      60,
+      28
+    ],
+    "tileable_lr": false
+  },
+  "dress-aisle": {
+    "cell": [
+      64,
+      40
+    ],
+    "frames": 1,
+    "file": [
+      64,
+      40
+    ],
+    "tileable_lr": true
+  },
+  "dress-aisle-wrecked": {
+    "cell": [
+      64,
+      40
+    ],
+    "frames": 1,
+    "file": [
+      64,
+      40
+    ],
+    "tileable_lr": true
+  },
+  "aisle-luggage": {
+    "cell": [
+      24,
+      18
+    ],
+    "frames": 1,
+    "file": [
+      24,
+      18
+    ],
+    "tileable_lr": false
+  },
+  "aisle-spill": {
+    "cell": [
+      30,
+      8
+    ],
+    "frames": 3,
+    "file": [
+      90,
+      8
+    ],
+    "tileable_lr": false
+  },
+  "aisle-crate-broken": {
+    "cell": [
+      24,
+      20
+    ],
+    "frames": 4,
+    "file": [
+      96,
+      20
+    ],
+    "tileable_lr": false
+  },
+  "aisle-luggage-open": {
+    "cell": [
+      28,
+      18
+    ],
+    "frames": 4,
+    "file": [
+      112,
+      18
+    ],
+    "tileable_lr": false
+  },
+  "bg-economy-near": {
+    "file": [
+      960,
+      540
+    ],
+    "opaque_lip_max_height": 82,
+    "transparent_above_y": 458
+  },
+  "bg-galley-near": {
+    "file": [
+      960,
+      540
+    ],
+    "opaque_lip_max_height": 82,
+    "transparent_above_y": 458
+  },
+  "bg-business-near": {
+    "file": [
+      960,
+      540
+    ],
+    "opaque_lip_max_height": 82,
+    "transparent_above_y": 458
+  },
+  "bg-first-near": {
+    "file": [
+      960,
+      540
+    ],
+    "opaque_lip_max_height": 82,
+    "transparent_above_y": 458
+  },
+  "bg-cockpit-near": {
+    "file": [
+      960,
+      540
+    ],
+    "opaque_lip_max_height": 82,
+    "transparent_above_y": 458
+  },
+  "aisle-crate": {
+    "cell": [
+      20,
+      20
+    ],
+    "frames": 1,
+    "file": [
+      20,
+      20
+    ],
+    "source": "../crate.png"
+  },
+  "aisle-cart": {
+    "cell": [
+      22,
+      26
+    ],
+    "frames": 1,
+    "file": [
+      22,
+      26
+    ],
+    "source": "../cart.png"
+  }
+}
