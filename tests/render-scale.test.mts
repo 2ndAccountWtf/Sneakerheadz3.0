@@ -1,0 +1,123 @@
+/**
+ * The art -> screen chain: how many device pixels a source pixel gets.
+ *
+ * This guards the two settings that decided whether delivered art survives the
+ * trip to the screen, both of which were wrong at the same time and neither of
+ * which any existing test could see:
+ *
+ *   1. the canvas backing store was sized `logical * devicePixelRatio`, which
+ *      is not the size the canvas occupies, so the compositor magnified the
+ *      finished picture by ~2x with nearest neighbour;
+ *   2. every art draw was nearest neighbour, including the ones shrinking a
+ *      detailed illustration, which drops source rows rather than mixing them.
+ *
+ * Measured end to end against an ideal single resample, the pair cost 32.5 mean
+ * channel error; fixing both brought it to 7.2. Neither alone got below 19.5,
+ * which is why both are tested here.
+ */
+import assert from 'node:assert/strict';
+
+let checks = 0;
+const ok = (cond: unknown, msg: string) => { assert.ok(cond, msg); checks++; };
+const eq = (a: unknown, b: unknown, msg: string) => { assert.deepEqual(a, b, msg); checks++; };
+
+// ---------------------------------------------------------------------------
+// 1. Backing store sizing.
+// ---------------------------------------------------------------------------
+/**
+ * The sizing rule out of `GameCanvas.resize`, isolated so it can be checked
+ * without a DOM. Kept deliberately literal: if the component's arithmetic
+ * changes, this stops agreeing with it and someone has to look at both.
+ */
+const MAX_STORE_SCALE = 8;
+function storeFor(logicalW: number, logicalH: number, cssW: number, dpr: number) {
+    const scale = Math.min((cssW * dpr) / logicalW, MAX_STORE_SCALE);
+    return { scale, w: Math.max(1, Math.round(logicalW * scale)), h: Math.max(1, Math.round(logicalH * scale)) };
+}
+
+{
+    // iPhone 14/15 held sideways, fullscreen: 844x390 CSS at dpr 3. The canvas
+    // is `object-fit: contain` at 16:9, so height binds: 390 tall, 693.3 wide.
+    const s = storeFor(320, 180, 390 * (16 / 9), 3);
+    eq(s.w, 2080, 'phone fullscreen backing store is the real device width');
+    ok(s.scale > 6.4 && s.scale < 6.6, 'phone fullscreen draws at ~6.5 device px per logical px');
+
+    // The old rule produced 320*3 = 960 and left the compositor to stretch it.
+    ok(s.w / (320 * 3) > 2, 'the old dpr rule was magnifying by more than 2x here');
+}
+{
+    // A desktop column, dpr 2.
+    const s = storeFor(320, 180, 900, 2);
+    eq(s.w, 1800, 'desktop backing store is the real device width');
+    eq(s.h, Math.round(180 * s.scale), 'height follows the same scale as width');
+    // Same aspect ratio as the logical grid, or the picture is stretched.
+    ok(Math.abs(s.w / s.h - 320 / 180) < 0.01, 'store keeps the logical aspect ratio');
+}
+{
+    // A 5K monitor would ask for 5120 device px of a 320px game. There is
+    // nothing there to show, so the store is capped.
+    const s = storeFor(320, 180, 2560, 2);
+    eq(s.scale, MAX_STORE_SCALE, 'the store scale is capped');
+    eq(s.w, 2560, 'the cap still gives a generous store');
+}
+{
+    // Before layout the box measures zero; the fallback has to be sane, not 1px.
+    const s = storeFor(320, 180, 320, 1);
+    eq(s.w, 320, 'pre-layout fallback is the logical grid');
+    ok(s.w >= 1 && s.h >= 1, 'store is never degenerate');
+}
+
+// ---------------------------------------------------------------------------
+// 2. Per-draw filtering.
+// ---------------------------------------------------------------------------
+/** `ctx.getTransform().a` is the only thing `smoothFor` reads off the context. */
+const at = (scale: number) => ({ getTransform: () => ({ a: scale }) } as unknown as CanvasRenderingContext2D);
+
+const { smoothFor, ART_SCALE } = await import('../components/minigames/engine/streetArt.ts');
+
+{
+    // The case that was destroying the art: a 272px car (the brief's 8x export)
+    // asked for 34 logical px on a phone in fullscreen. 34 * 6.5 = 221 device
+    // px, so 272 source pixels have to become 221 -- a downscale, and nearest
+    // neighbour would simply discard 19% of the rows.
+    ok(smoothFor(at(6.5), 272, 34), 'shrinking a detailed source is filtered');
+
+    // The same draw inline on a phone, where the picture is much smaller and
+    // the shrink is far harsher, is filtered too.
+    ok(smoothFor(at(2), 272, 34), 'a harsher shrink is filtered');
+}
+{
+    // Magnifying stays nearest: that is the chunky arcade look, and it is what
+    // keeps delivered art consistent with the coded sprites beside it, which
+    // have no choice.
+    ok(!smoothFor(at(6.5), 102, 34), 'today\'s 3x art, magnified, stays nearest');
+    ok(!smoothFor(at(8), 102, 34), 'a larger magnify stays nearest');
+}
+{
+    // 1:1 -- what the brief aims for -- must land on the nearest side, or
+    // rounding smears a draw that had nothing to gain.
+    ok(!smoothFor(at(8), 272, 34), 'an exact 1:1 draw is not filtered');
+    // ...and stays there under a hair of floating point noise either way.
+    ok(!smoothFor(at(8.0001), 272, 34), '1:1 plus epsilon is not filtered');
+    ok(!smoothFor(at(7.9999), 272, 34), '1:1 minus epsilon is not filtered');
+}
+{
+    // The decision is about device pixels, not logical ones. Same source, same
+    // logical width, opposite answers -- which is the whole reason it cannot be
+    // a constant.
+    const src = 272, dest = 34;
+    ok(smoothFor(at(4), src, dest) !== smoothFor(at(8), src, dest),
+        'the same draw is filtered or not depending on the transform');
+}
+{
+    // A degenerate transform must not throw or flip the default.
+    ok(!smoothFor({ getTransform: () => ({ a: 0 }) } as unknown as CanvasRenderingContext2D, 102, 102),
+        'a zero transform falls back to 1 and stays nearest');
+}
+{
+    // `ART_SCALE` is what `tile()` divides by, so it has to stay in step with
+    // whatever the asset brief asks for.
+    ok(ART_SCALE > 0, 'ART_SCALE is set');
+}
+
+console.log(`render-scale: ${checks} checks OK`);

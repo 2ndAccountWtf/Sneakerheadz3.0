@@ -209,7 +209,7 @@ export function sprite(
     if (flip) ctx.scale(-1, 1);
     // Pixel art: never smooth it. The canvas default is bilinear, which turns
     // a hand-drawn sprite into a smudge at any scale but 1.
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = smoothFor(ctx, sheet.fw, w);
     ctx.drawImage(sheet.img, f * sheet.fw, 0, sheet.fw, sheet.fh, -w / 2, -h, w, h);
     ctx.restore();
 }
@@ -262,7 +262,7 @@ export function panel(
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = smoothFor(ctx, sheet.fw, w);
     if (flip) {
         ctx.translate(x + w / 2, 0);
         ctx.scale(-1, 1);
@@ -271,6 +271,30 @@ export function panel(
     ctx.drawImage(sheet.img, f * sheet.fw, 0, sheet.fw, sheet.fh, x, y, w, h);
     ctx.restore();
     return true;
+}
+
+/**
+ * Should this draw be filtered, or snapped to the nearest source pixel?
+ *
+ * Nearest neighbour is right for pixel art and for magnifying: it keeps hard
+ * edges hard and gives the chunky look the coded sprites already have. It is
+ * badly wrong for *shrinking* a detailed illustration, because it simply drops
+ * whichever source rows do not line up and keeps the rest -- a 400px car
+ * squeezed into 220 device pixels loses 45% of its rows outright, which reads
+ * as the jagged, half-dissolved edges that made the delivered art look worse in
+ * game than it does in a file browser.
+ *
+ * So decide per draw, by comparing the source against the *device* pixels it is
+ * headed for. `destW` is in logical units, so it has to go through the current
+ * transform first -- the same logical rect is 68 device pixels in a column and
+ * 220 in fullscreen, and only one of those is a downscale.
+ *
+ * The 2% slack keeps a 1:1 draw (the case the asset brief aims for) on the
+ * nearest-neighbour side, where rounding cannot smear it.
+ */
+export function smoothFor(ctx: CanvasRenderingContext2D, srcW: number, destW: number): boolean {
+    const k = ctx.getTransform().a || 1;
+    return destW * k < srcW * 0.98;
 }
 
 /**
@@ -312,6 +336,11 @@ export function tile(
     const th = sheet.fh / ART_SCALE;
     ctx.save();
     ctx.globalAlpha = alpha;
+    // Nearest, even when this is a downscale. `smoothFor` is right for a
+    // sprite and wrong for anything that repeats: a filtered draw samples
+    // past the edge of the source rect, so every seam between two copies
+    // picks up the clamped edge colour and the surface gains a ruled line at
+    // the tile pitch. A visible grid is worse than a slightly harsh texture.
     ctx.imageSmoothingEnabled = false;
     ctx.beginPath();
     ctx.rect(x, y, w, h);
@@ -351,6 +380,7 @@ export function strip(
     // runs backwards is the normal case in both of these games.
     let sx = -(((offset % w) + w) % w);
     ctx.save();
+    // Nearest — same seam argument as `tile`; this repeats too.
     ctx.imageSmoothingEnabled = false;
     ctx.beginPath();
     ctx.rect(x, y, width, height);
@@ -550,7 +580,7 @@ export function drawSkyline(
                 : sheet.img;
             ctx.save();
             if (!fog) ctx.globalAlpha = keep;
-            ctx.imageSmoothingEnabled = false;
+            ctx.imageSmoothingEnabled = smoothFor(ctx, sheet.fw, p.w);
             if (p.flip) {
                 ctx.translate(p.x + p.w / 2, 0);
                 ctx.scale(-1, 1);
