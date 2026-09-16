@@ -17,6 +17,7 @@ import {
 import {
     createRunState, riderState,
 } from '../components/minigames/PizzaRun.tsx';
+import { loops } from '../components/minigames/engine/streetAnim.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -85,6 +86,39 @@ t('a wipeout falls first and then slides', () => {
     );
 });
 
+t('a light clip is ridden out, a heavy one puts you down', () => {
+    // A six-damage wheelie bin and a fourteen-damage Camry used to play the
+    // identical full wipeout, which flattened the whole damage table into one
+    // event. The board stays under you for the light one.
+    assert.equal(
+        boardState(race({ invT: 0.7, hitLight: true, hitBy: 'bin' })),
+        'skateboard-hit-stumble',
+    );
+    assert.equal(
+        boardState(race({ invT: 0.7, hitLight: false, hitBy: 'car', hitKind: 'wall' })),
+        'skateboard-front-collision-backward',
+    );
+});
+
+t('going through a pedestrian is its own thing', () => {
+    // The only obstacle that is a person, and the only one where two bodies go
+    // down. It outranks the light/heavy split because it is about what you hit,
+    // not how hard.
+    assert.equal(
+        boardState(race({ invT: 0.7, hitBy: 'ped', hitLight: true })),
+        'skateboard-ped-collide',
+    );
+});
+
+t('oil has a tell now', () => {
+    // Oil does no damage and takes your steering for 1.1s. Until the sheet
+    // arrived the rider kept his normal pose while the controls stopped
+    // working, which reads as a bug rather than as a hazard.
+    assert.equal(boardState(race({ oilT: 0.8 })), 'skateboard-oil-wobble');
+    // And it is a loop, because how long you are on the slick is not fixed.
+    assert.ok(loops('skateboard-oil-wobble'));
+});
+
 t('every delivered board sheet is reachable from some state', () => {
     // The check that would have caught the original problem: four of the ten
     // sheets were dead weight because nothing could ever select them.
@@ -95,6 +129,7 @@ t('every delivered board sheet is reachable from some state', () => {
         { invT: 0.7, hitKind: 'trip' }, { invT: 0.7, hitKind: 'wall' },
         { invT: 0.1, hitKind: 'trip' }, { invT: 0.1, hitKind: 'wall' },
         { outcome: 'wipeout', wipe: 0.2 }, { outcome: 'wipeout', wipe: 1.4 },
+        { invT: 0.7, hitLight: true }, { invT: 0.7, hitBy: 'ped' }, { oilT: 0.8 },
     ]) reached.add(boardState(race(over)));
 
     const DELIVERED = [
@@ -103,6 +138,7 @@ t('every delivered board sheet is reachable from some state', () => {
         'skateboard-front-collision-backward', 'skateboard-pushup-recover',
         'skateboard-burpee-to-stand', 'skateboard-balance-fall',
         'skateboard-ground-roll',
+        'skateboard-hit-stumble', 'skateboard-ped-collide', 'skateboard-oil-wobble',
     ];
     for (const id of DELIVERED) {
         assert.ok(reached.has(id), `${id} was drawn and nothing ever plays it`);
@@ -116,9 +152,28 @@ t('every delivered board sheet is reachable from some state', () => {
 t('the thief has a state for each of his sheets too', () => {
     assert.equal(bikeState(race()), 'bike-ride');
     assert.equal(bikeState(race({ crashT: 0.4 })), 'bike-fall-off');
-    assert.equal(bikeState(race({ thiefStun: 0.4 })), 'bike-banana-slip');
     assert.equal(bikeState(race({ draft: 0.2 })), 'bike-look-back');
     assert.equal(bikeState(race({ thiefSpeed: 40 })), 'bike-wheelie-sparks');
+});
+
+t('what he was hit with decides how he reacts to it', () => {
+    // Every weapon used to fold him identically, which made a sandal and a
+    // frozen slushie indistinguishable from the saddle and quietly undid the
+    // point of carrying a kit.
+    const hit = (id: string) => bikeState(race({ thiefStun: 0.4, thiefHitBy: id }));
+    assert.equal(hit('itm-banana-peel'), 'bike-banana-slip');
+    assert.equal(hit('itm-chancla'), 'bike-hit-chancla');
+    assert.equal(hit('itm-slushie'), 'bike-hit-slushie');
+    // Anything with mass and no sheet of its own falls to the heavy reaction
+    // rather than to a sandal, which is the safe direction for a default.
+    assert.equal(hit('itm-frozen-bureka'), 'bike-hit-heavy');
+    assert.equal(hit(''), 'bike-hit-heavy');
+});
+
+t('the delivered reactions are all distinct states', () => {
+    const seen = new Set(['itm-banana-peel', 'itm-chancla', 'itm-slushie', 'itm-anvil']
+        .map(id => bikeState(race({ thiefStun: 0.4, thiefHitBy: id }))));
+    assert.equal(seen.size, 4, `four weapons produced ${seen.size} reactions`);
 });
 
 t('the thumb-suck is only for when he is comfortably clear', () => {
@@ -151,6 +206,24 @@ t('a pizza crash falls the way the thing that caused it would make you fall', ()
     assert.equal(riderState(run({ wipeT: 0.5, wipe: 0.5, hitKind: 'trip' })), 'skateboard-ground-roll');
     assert.equal(riderState(run({ wipeT: 0.1, wipe: 0.8, hitKind: 'wall' })), 'skateboard-burpee-to-stand');
     assert.equal(riderState(run({ wipeT: 0.1, wipe: 0.8, hitKind: 'trip' })), 'skateboard-pushup-recover');
+});
+
+t('rear-ending the slower skater is not a head-on', () => {
+    // He is going the same way you are, so the pile-up is two riders and two
+    // boards rather than a wall impact, and it should not look like one.
+    assert.equal(
+        riderState(run({ wipeT: 0.8, wipe: 0.1, hitBy: 'skater', hitKind: 'wall' })),
+        'skateboard-hit-skater',
+    );
+});
+
+t('a sprinkler leaves you wet rather than broken', () => {
+    // It does no damage, and the soaking outlives the crash window — you get up
+    // and spend a couple of seconds shaking it off.
+    assert.equal(riderState(run({ soakT: 1.5 })), 'skateboard-soaked');
+    assert.ok(loops('skateboard-soaked'), 'shaking it off is a cycle');
+    // But being down outranks being wet.
+    assert.notEqual(riderState(run({ soakT: 1.5, wipeT: 0.8, wipe: 0.1 })), 'skateboard-soaked');
 });
 
 t('no board means the BMX branch, which has its own art', () => {

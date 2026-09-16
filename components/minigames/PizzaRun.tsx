@@ -146,6 +146,8 @@ const SPEED_RAMP = 105;   // px/s of cruise added across the whole route
  * animation, so the rider is back on his feet exactly when control returns.
  */
 const WIPE_TIME = 0.85;
+/** How long you stay visibly wet after a sprinkler. Cosmetic only. */
+const SOAK_TIME = 2.4;
 
 const SCORE_DELIVER = 100;
 const SCORE_WINDOW = 250;
@@ -369,6 +371,10 @@ export function riderState(s: RunState): string {
         // wheel and pitches you forward onto your hands, so you push up. Using
         // one pair for everything wasted half the delivered sheets and made
         // every crash look identical regardless of what caused it.
+        // Rear-ending the slower skater is its own animation: two riders, two
+        // boards, both down. He is going the same way you are, so it is not a
+        // head-on and it should not look like one.
+        if (s.hitBy === 'skater') return 'skateboard-hit-skater';
         if (s.wipeT < WIPE_TIME * 0.3) {
             return s.hitKind === 'wall'
                 ? 'skateboard-burpee-to-stand'
@@ -381,6 +387,9 @@ export function riderState(s: RunState): string {
     }
     // Real air gets a kickflip; a kerb hop does not.
     if (s.air > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
+    // Drenched, riding on, shaking it off. A sprinkler is a nuisance rather
+    // than a hazard and there was nothing on screen saying you got wet.
+    if (s.soakT > 0) return 'skateboard-soaked';
     if (s.charging) return 'skateboard-manual';
     return 'skateboard-ride';
 }
@@ -445,6 +454,9 @@ function riderFrame(s: RunState): number {
             ? anim.fitRate(n, WIPE_TIME * 0.4)
         : id === 'skateboard-burpee-to-stand' || id === 'skateboard-pushup-recover'
             ? anim.fitRate(n, WIPE_TIME * 0.3)
+        // The skater pile-up owns the whole crash window — it is one continuous
+        // tangle rather than a fall, a slide and a stand.
+        : id === 'skateboard-hit-skater' ? anim.fitRate(n, WIPE_TIME)
         : undefined;
     return anim.frameFor(s.anim, id, clockOf(s), n, rate);
 }
@@ -571,6 +583,10 @@ export interface RunState {
      * different falls and different ways of getting up.
      */
     hitKind: 'wall' | 'trip';
+    /** The obstacle kind that last hit you — the skater gets his own collision. */
+    hitBy: string;
+    /** Counts down while you are wet. Cosmetic; a sprinkler does no damage. */
+    soakT: number;
     prevHold: boolean;
     /** Set when a wind-up auto-fires, so one hold cannot machine-gun the rack. */
     throwLock: boolean;
@@ -826,7 +842,7 @@ export function createRunState(opts: {
         bestStreak: 0, dryT: 0,
 
         charge: 0, charging: false, prevHold: false, throwLock: false, armT: 0, facing: -1,
-        anim: anim.makeClock(), bursts: [], hitKind: 'trip',
+        anim: anim.makeClock(), bursts: [], hitKind: 'trip', hitBy: '', soakT: 0,
 
         houses: [], nextHouseX: 210, sideFlip: -1, houseId: 0,
         obs: [], nextObsX: 300, obsId: 0,
@@ -1105,13 +1121,23 @@ function crash(s: RunState, o: Obs) {
     breakStreak(s);
     award(s, -PEN_CRASH);
     // A crash scatters a box off the rack. Crashing while dry costs you nothing
-    // but dignity, which you can't spend.
-    if (s.ammo > 0) { s.ammo--; addSpark(s, RIDER_X + 10, laneY(s.laneF) - 6, '🍕'); }
+    // but dignity, which you can't spend. The box leaving the bag is drawn now
+    // rather than only decremented on the counter.
+    if (s.ammo > 0) {
+        s.ammo--;
+        fx(s, 'pizza-bag-spill', RIDER_X + 6, laneY(s.laneF) + 1, 16);
+        addSpark(s, RIDER_X + 10, laneY(s.laneF) - 6, '🍕');
+    }
+    // Water outlives the crash: you get up wet and spend a couple of seconds
+    // shaking it off, which is the whole difference between a sprinkler and
+    // something that actually hurts.
+    if (o.def.kind === 'sprink' || o.def.kind === 'hydrant') s.soakT = SOAK_TIME;
     s.flash = o.def.label;
     s.flashT = 1.1;
     // Anything you cannot clear is a wall: it stops the board and puts you over
     // the front. Anything you could have hopped catches a wheel instead.
     s.hitKind = o.def.clear === 'none' ? 'wall' : 'trip';
+    s.hitBy = o.def.kind;
     fx(s, 'impact-star', RIDER_X, laneY(s.laneF) - 10, 12);
     // A sprinkler or a hydrant soaks you; everything else just hurts.
     if (o.def.kind === 'sprink' || o.def.kind === 'hydrant') {
@@ -1241,6 +1267,7 @@ export function stepRun(s: RunState, inp: RunInput, dt: number): void {
     s.armT = Math.max(0, s.armT - dt);
     s.holdT = Math.max(0, s.holdT - dt);
     if (s.wipeT > 0) { s.wipeT -= dt; s.wipe += dt; } else s.wipe = 0;
+    s.soakT = Math.max(0, s.soakT - dt);
 
     // --- speed ------------------------------------------------------------
     // Cruise ramps with the shift and is capped by the rig. Holding right is a

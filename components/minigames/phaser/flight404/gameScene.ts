@@ -1376,7 +1376,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         private onMookTouch = (a: unknown, b: unknown) => {
             const [m] = sort2<Mook, unknown>(a, b, isMook);
             if (!m?.md) return;
-            this.hurtPlayer(m.md.kind === 'charger' ? 6 : 5, m.x);
+            this.hurtPlayer(m.md.kind === 'charger' ? 6 : 5, m.x, 'hurtBody');
             m.md.hitCd = 0.9;
             body(m).setVelocityX(-m.md.facing * 70);
             if (m.md.kind === 'charger') { m.md.state = 'stumble'; m.md.t = 0; }
@@ -1413,7 +1413,18 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
         // ==================================================================
         // Damage
         // ==================================================================
-        private hurtPlayer(dmg: number, fromX: number) {
+        /**
+         * Which flinch the last hit earned.
+         *
+         * A thrown item, a shoulder charge and standing in a hazard were all
+         * one sheet, so the hypebeast's fourteen-damage charge — the hardest
+         * hit in the game — played the same flinch as a five-damage shoe.
+         * Set alongside the damage rather than guessed from it.
+         */
+        private pHurtKind = 'hurt';
+
+        private hurtPlayer(dmg: number, fromX: number, kind = 'hurtThrown') {
+            this.pHurtKind = kind;
             if (this.pInvuln > 0 || this.over) return;
             this.pHp -= dmg;
             this.pInvuln = 1.0;
@@ -1593,6 +1604,10 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // new mook state cannot make a character vanish.
             md.skin?.play(
                 md.ko ? 'die'
+                // `hurtT` has been counted down on every mook since the hitstop
+                // went in and nothing ever read it, so absorbing a shot and
+                // being untouched looked identical until the thing fell over.
+                : md.hurtT > 0 ? 'hit'
                 : md.state === 'throw' || md.state === 'wind' ? 'throw'
                 : md.state === 'run' || md.state === 'charge' ? 'run'
                 : 'idle',
@@ -1958,7 +1973,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 // boolean, so the charge does not need its own collider or its
                 // own AABB.
                 if (this.physics.overlap(b, this.player)) {
-                    this.hurtPlayer(16, b.x);
+                    this.hurtPlayer(16, b.x, 'hurtBody');
                     this.cameras.main.shake(300, 0.02);
                     this.bossNext();
                 }
@@ -2097,7 +2112,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // What is underfoot, and what it does about it. `platforms.ts` owns
             // the table; the scene only asks.
             const under = onGround ? footingFlags(this.terrain, this.player.x, this.player.y) : 0;
-            if (harms(under) && this.pInvuln <= 0) this.hurtPlayer(4, this.player.x);
+            if (harms(under) && this.pInvuln <= 0) this.hurtPlayer(4, this.player.x, 'hurtHazard');
 
             const wasCrouch = this.pCrouch;
             this.pCrouch = inp.down && onGround;
@@ -2146,7 +2161,7 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             // The drawn skin reads the same facts the rig does, so there is one
             // notion of what the player is doing and the two can never disagree.
             this.playerSkin?.play(
-                this.pHurt > 0 ? 'hurt'
+                this.pHurt > 0 ? this.pHurtKind
                 : !onGround ? 'jump'
                 : this.pFireCd > 0.03 ? (this.pAimUp ? 'shootUp' : 'shoot')
                 : this.pCrouch ? 'crouch'

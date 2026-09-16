@@ -47,17 +47,25 @@ export const SKINS: Record<string, SkinSet> = {
         shoot: 'player-shoot',
         shootUp: 'player-shoot-up',
         hurt: 'player-hurt',
+        // Four things used to share one flinch: a thrown item, a shoulder
+        // charge, standing in a hazard and a boss hit. They are not the same
+        // event, and the hardest of them read as the softest.
+        hurtThrown: 'player-hurt-thrown',
+        hurtBody: 'player-hurt-body',
+        hurtHazard: 'player-hurt-hazard',
+        trampled: 'player-trampled',
+        doused: 'player-doused',
         die: 'player-die',
     },
     charger: { idle: 'mook-charger-run', run: 'mook-charger-run', die: 'mook-charger-die' },
     thrower: { idle: 'mook-thrower-idle', throw: 'mook-thrower-throw', die: 'mook-thrower-die' },
     hostage: { idle: 'hostage-tied', freed: 'hostage-freed' },
-    yasser: { idle: 'yasser-idle', throw: 'yasser-throw', run: 'yasser-charge', die: 'yasser-defeat' },
-    scalper: { idle: 'scalper-approach', run: 'scalper-approach', throw: 'scalper-throw', photo: 'scalper-photo', grab: 'scalper-grab', die: 'scalper-die' },
-    hypebeast: { idle: 'hypebeast-stalk', run: 'hypebeast-stalk', wind: 'hypebeast-wind', charge: 'hypebeast-charge', stunned: 'hypebeast-stunned', die: 'hypebeast-die' },
-    reseller: { idle: 'reseller-seek', run: 'reseller-seek', bag: 'reseller-bag', flee: 'reseller-flee', die: 'reseller-drop' },
-    security: { idle: 'security-patrol', run: 'security-patrol', attack: 'security-baton', radio: 'security-radio', die: 'security-die' },
-    shopOwner: { idle: 'owner-stock', run: 'owner-stock', throw: 'owner-throw', tidy: 'owner-tidy', die: 'owner-die' },
+    yasser: { idle: 'yasser-idle', throw: 'yasser-throw', run: 'yasser-charge', die: 'yasser-defeat', hit: 'yasser-hit' },
+    scalper: { idle: 'scalper-approach', run: 'scalper-approach', throw: 'scalper-throw', photo: 'scalper-photo', grab: 'scalper-grab', die: 'scalper-die', hit: 'scalper-hit' },
+    hypebeast: { idle: 'hypebeast-stalk', run: 'hypebeast-stalk', wind: 'hypebeast-wind', charge: 'hypebeast-charge', stunned: 'hypebeast-stunned', die: 'hypebeast-die', hit: 'hypebeast-hit' },
+    reseller: { idle: 'reseller-seek', run: 'reseller-seek', bag: 'reseller-bag', flee: 'reseller-flee', die: 'reseller-drop', hit: 'reseller-hit' },
+    security: { idle: 'security-patrol', run: 'security-patrol', attack: 'security-baton', radio: 'security-radio', die: 'security-die', hit: 'security-hit' },
+    shopOwner: { idle: 'owner-stock', run: 'owner-stock', throw: 'owner-throw', tidy: 'owner-tidy', die: 'owner-die', hit: 'owner-hit' },
     falafelGuy: { idle: 'falafel-serve', spill: 'falafel-spill', recover: 'falafel-recover' },
 };
 
@@ -78,6 +86,7 @@ export const RATE: Record<string, number> = {
     idle: 6, crouch: 6, jump: 12, shoot: 18, shootUp: 18, hurt: 14, die: 9,
     throw: 14, photo: 7, grab: 12, bag: 12, flee: 16, radio: 6, tidy: 7,
     attack: 16, wind: 9, charge: 14, stunned: 5, spill: 12, recover: 7, freed: 10,
+    hit: 15, hurtThrown: 14, hurtBody: 12, hurtHazard: 8, trampled: 11, doused: 10,
 };
 export const DEFAULT_RATE = 8;
 
@@ -89,7 +98,13 @@ export const DEFAULT_RATE = 8;
  * shot kept firing after the bullet had gone. A one-shot that holds is also
  * what lets the last frame of a death be the thing left lying on the floor.
  */
-export const ONCE = new Set(['shoot', 'shootUp', 'hurt', 'die', 'throw', 'grab', 'bag', 'spill']);
+export const ONCE = new Set([
+    'shoot', 'shootUp', 'hurt', 'die', 'throw', 'grab', 'bag', 'spill',
+    // Getting hit ends back where the idle begins, so it plays once and holds.
+    // `hurtHazard` is deliberately absent: hazard damage ticks for as long as
+    // you stand in it, so that one has to be a loop.
+    'hit', 'hurtThrown', 'hurtBody', 'trampled', 'doused',
+]);
 
 /**
  * How fast a run cycle should play so the feet stay planted.
@@ -110,6 +125,12 @@ const FALLBACK: Record<string, string> = {
     flee: 'run', radio: 'idle', tidy: 'idle', attack: 'idle', wind: 'idle',
     charge: 'run', stunned: 'idle', spill: 'idle', recover: 'idle',
     freed: 'idle', die: 'idle',
+    // A specific reaction degrades to the generic flinch, and only then to
+    // standing there — so a half-delivered set is a game where some hits read
+    // better than others, never one where a character freezes.
+    hit: 'hurt',
+    hurtThrown: 'hurt', hurtBody: 'hurt', hurtHazard: 'hurt',
+    trampled: 'hurt', doused: 'hurt',
 };
 
 export interface Skin {

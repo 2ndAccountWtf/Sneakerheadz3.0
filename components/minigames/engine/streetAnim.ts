@@ -50,6 +50,18 @@ export const RATE: Record<string, number> = {
     'skateboard-ground-roll': 13,  // tumbling along the tarmac, keeps rolling
     'tiny-bicycle': 12,
 
+    // --- riders: getting hit ----------------------------------------------
+    // A clip you ride out, and the two collisions that are with a person.
+    'skateboard-hit-stumble': 13,
+    'skateboard-ped-collide': 13,
+    'skateboard-hit-skater': 13,
+    'skateboard-oil-wobble': 9,     // fighting the slick, a loop
+    'skateboard-soaked': 8,         // shaking it off, a loop
+    'bike-hit-chancla': 14,
+    'bike-hit-slushie': 12,
+    'bike-hit-heavy': 13,
+    'pizza-bag-spill': 14,
+
     // --- riders: one-shots -------------------------------------------------
     'skateboard-ollie': 16,
     'skateboard-kickflip': 20,
@@ -112,6 +124,16 @@ export const ONCE: ReadonlySet<string> = new Set([
     'skateboard-pushup-recover',
     'bike-fall-off',
     'bike-banana-slip',
+    // Getting hit is a one-shot: you are clipped, you wobble, you ride on. It
+    // ends back in the ride cycle's own first pose, so it must not loop --
+    // looping a stumble is a rider tripping over the same bin forever.
+    'skateboard-hit-stumble',
+    'skateboard-ped-collide',
+    'skateboard-hit-skater',
+    'bike-hit-chancla',
+    'bike-hit-slushie',
+    'bike-hit-heavy',
+    'pizza-bag-spill',
     'car-door-open',
     'window-open',
     'door-front',

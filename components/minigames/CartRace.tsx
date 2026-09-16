@@ -357,6 +357,14 @@ export function boardState(s: RaceState): string {
     // your rider on the floor every time he binned it. Your own hit window is
     // the invulnerability the crash handler grants.
     if (s.invT > 0) {
+        // A pedestrian is the only obstacle that is a person, and going through
+        // one is its own animation — two bodies, both down. It is also the joke.
+        if (s.hitBy === 'ped') return 'skateboard-ped-collide';
+        // Anything light is a clip, not a crash: the board stays under you and
+        // you ride it out. Without this a six-damage wheelie bin and a
+        // fourteen-damage Camry played the same full wipeout and the damage
+        // table might as well not have existed.
+        if (s.hitLight) return 'skateboard-hit-stumble';
         // Two ways to go down, and the way you went down decides how you get
         // back up. Trip over a bin and you land face-first, so you push up off
         // the tarmac. Go into a parked car and you land on your back, so you
@@ -374,13 +382,35 @@ export function boardState(s: RaceState): string {
     // Real air off a ramp gets a kickflip; a hop over a bin does not. This is
     // the only place the game shows off, and it should be the place you earned.
     if (s.airT > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
+    // On the slick. Oil does no damage and takes your steering for 1.1s, and
+    // until now nothing on screen said so — the rider kept his normal pose
+    // while the controls stopped working, which reads as a bug rather than as
+    // a hazard. A loop, because the phase is not fixed.
+    if (s.oilT > 0) return 'skateboard-oil-wobble';
     if (s.tucking) return 'skateboard-manual';
     return 'skateboard-ride';
 }
 
+/**
+ * Which reaction the thief plays for the thing that just hit him.
+ *
+ * Every weapon used to fold him the same way, which made a sandal and a frozen
+ * slushie indistinguishable from the saddle and quietly undid the point of
+ * having a kit at all. A sandal snaps his head forward; a slushie blinds him
+ * and he rides one-handed wiping his eyes; anything with real mass slews the
+ * front wheel and he fights it. `bike-banana-slip` is kept for the banana
+ * specifically, which is what it was drawn for.
+ */
+function weaponHit(id: string): string {
+    if (id.includes('banana')) return 'bike-banana-slip';
+    if (id.includes('chancla') || id.includes('sandal')) return 'bike-hit-chancla';
+    if (id.includes('slush') || id.includes('drink') || id.includes('soda')) return 'bike-hit-slushie';
+    return 'bike-hit-heavy';
+}
+
 export function bikeState(s: RaceState): string {
     if (s.crashT > 0) return 'bike-fall-off';
-    if (s.thiefStun > 0) return 'bike-banana-slip';
+    if (s.thiefStun > 0) return weaponHit(s.thiefHitBy);
     // He looks back when you are on his wheel — the drafting tell, and the
     // only moment in the race where he acknowledges you at all.
     if (s.draft > 0.04) return 'bike-look-back';
@@ -483,6 +513,11 @@ function boardFrame(s: RaceState): number {
             ? anim.fitRate(n, INV_TIME * 0.66)
         : id === 'skateboard-pushup-recover' || id === 'skateboard-burpee-to-stand'
             ? anim.fitRate(n, INV_TIME * 0.34)
+        // A clip and a collision both own the whole hit window rather than a
+        // slice of it: there is no getting-up phase, because you never went
+        // down. Fitted so the last frame lands as control returns.
+        : id === 'skateboard-hit-stumble' || id === 'skateboard-ped-collide'
+            ? anim.fitRate(n, INV_TIME)
         : undefined;
     return anim.frameFor(s.animYou, id, clockOf(s), n, rate);
 }
@@ -660,6 +695,20 @@ export interface RaceState {
      * obstacle is the only way the drawing can tell them apart.
      */
     hitKind: 'wall' | 'trip';
+    /**
+     * The obstacle kind that last hit you, and whether it was a light one.
+     *
+     * `hitKind` says which way you went down; these say what put you there. A
+     * pedestrian is the only obstacle that is a person and gets a collision of
+     * its own, and anything doing eight damage or less is a clip you ride out
+     * rather than a crash — a wheelie bin and a parked Camry used to play the
+     * identical animation, which flattened the whole damage table into one
+     * event.
+     */
+    hitBy: string;
+    hitLight: boolean;
+    /** Which AM/PM item last connected with the thief, for his reaction. */
+    thiefHitBy: string;
 
     obstacles: Obs[];
     nextZ: number;
@@ -757,7 +806,7 @@ export function createRaceState(opts: {
         talk: opts.hasBoard ? 'Nah, not the skateboard kid!' : 'You on a TROLLEY? Blood, please.',
         talkT: 3.4,
         animYou: anim.makeClock(), animThief: anim.makeClock(),
-        bursts: [], hitKind: 'trip',
+        bursts: [], hitKind: 'trip', hitBy: '', hitLight: false, thiefHitBy: '',
         obstacles: [], nextZ: 40, obsId: 0, shots: [], shotId: 0,
         weapons, ammo, cool: 0,
         shake: 0, sparks: [], introT: 2.6, flash: '', flashT: 0,
@@ -919,6 +968,8 @@ function crash(s: RaceState, o: Obs) {
     // A wall you cannot clear throws you backwards over the nose; low street
     // furniture trips you forwards. The drawing needs to know which.
     s.hitKind = low ? 'trip' : 'wall';
+    s.hitBy = o.def.kind;
+    s.hitLight = o.def.dmg <= 8;
     fx(s, 'impact-star', s.px + 8, laneY(s.laneF) - 8, 12);
     addSpark(s, s.px + 8, laneY(s.laneF) - 8, '💢');
 }
@@ -969,6 +1020,7 @@ function launch(s: RaceState, dur: number, big: boolean, fromRamp: boolean) {
 
 function hitThief(s: RaceState, w: Weapon) {
     s.thiefHits++;
+    s.thiefHitBy = w.id;
     s.rattle = Math.min(100, s.rattle + w.damage * 0.8);
     // Stun scales with damage: the chancla folds him, a hot bureka just annoys.
     // `thiefGuard` is the anti-stun-lock rule — he is already staggered, so a
