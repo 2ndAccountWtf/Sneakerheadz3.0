@@ -79,14 +79,14 @@ const TEMPLATED: Record<string, string> = {
 /**
  * Ids that exist to be used *instead of* something else, so they are correctly
  * absent while the thing they replace is present. Each needs a reason.
+ *
+ * Empty, and that is the point. The twelve `far-*` silhouettes lived here while
+ * they were unbuilt; they have since been delivered, so they are held to the
+ * same rule as everything else — `skyline.ts` names each one in a `far:` field,
+ * which is a drawing file, so the plain search finds them. If the set is ever
+ * renamed and the code is not, this is what says so.
  */
 const STANDBY: Record<string, string> = {};
-for (const id of [
-    'tower-a-wide', 'tower-b-narrow', 'tower-c-stepped',
-    'tower-d-box', 'tower-e-crown', 'tower-f-old',
-    'lowrise-a-strip', 'lowrise-b-walkup', 'lowrise-c-industrial',
-    'lowrise-d-corner', 'lowrise-e-mixed', 'lowrise-f-rooftop',
-]) STANDBY[`far-${id}`] = 'the distance drawing, used the moment it is delivered';
 
 console.log('\nnothing that was drawn goes unused');
 

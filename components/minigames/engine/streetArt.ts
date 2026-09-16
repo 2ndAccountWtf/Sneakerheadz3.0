@@ -404,6 +404,30 @@ export const SKY_SHADE: Record<BandName, number> = {
 };
 
 /**
+ * How much of itself a building keeps when it was *drawn* for the distance.
+ *
+ * `SKY_SHADE` above is a correction applied to art that does not belong on a
+ * horizon — around fifty colours a building and a luminance spread of 104 to
+ * 192. Flattening that hard was the only way to make it sit back, and it cost
+ * every bit of detail somebody had drawn.
+ *
+ * The `far-*` set does not need it. Measured on delivery: two or three colours
+ * a building, a spread of 10 to 22, everything between luminance 70 and 92 —
+ * flatter than the brief asked for, which is the safe side of the target. Art
+ * like that is already the right distance, and correcting it again would only
+ * wash it into the sky.
+ *
+ * So the amount is chosen per piece rather than per band. A building using its
+ * distance drawing is left nearly alone; one still falling back to the detailed
+ * kit keeps the heavy correction. That is what makes the delivery incremental
+ * in practice and not just in principle: one file at a time, each landing at
+ * the right strength the moment it arrives.
+ */
+export const FAR_SHADE: Record<BandName, number> = {
+    towers: 0.90, lowrise: 0.92, rooftop: 0.26, landmarks: 0.26,
+};
+
+/**
  * Multiplies `SKY_SHADE` for a scene whose sky is not the one those numbers
  * were tuned against.
  *
@@ -491,9 +515,6 @@ export function drawSkyline(
     const { salt = 0, shade = 1, fog } = opts;
     let drew = false;
     for (const { band, placements } of layoutSkyline(scroll, screenW, salt)) {
-        // How much of the air is between you and this band. As a tint amount
-        // rather than as alpha: 1 means the building has become the sky.
-        const haze = Math.max(0, Math.min(0.95, 1 - Math.min(1, SKY_SHADE[band] * shade)));
         for (const p of placements) {
             /**
              * A per-building nudge to how far away it is.
@@ -514,15 +535,21 @@ export function drawSkyline(
             // A building drawn for the distance wins over the detailed one, and
             // "wins" means nothing more than being present in the folder. See
             // `Piece.far` in `skyline.ts` for why there are two of each.
-            const sheet = (p.piece.far ? LOADED.get(p.piece.far) : undefined)
-                ?? LOADED.get(p.piece.id);
+            const farSheet = p.piece.far ? LOADED.get(p.piece.far) : undefined;
+            const sheet = farSheet ?? LOADED.get(p.piece.id);
             if (!sheet) continue;
             drew = true;
+            // Drawn for the distance, or corrected into it? See `FAR_SHADE`.
+            const keep = farSheet
+                ? FAR_SHADE[band]
+                : Math.min(1, SKY_SHADE[band] * shade);
+            const bandHaze = Math.max(0, Math.min(0.95, 1 - keep));
             const img = fog
-                ? fogged(sheet, p.piece.id, fog, Math.max(0, Math.min(0.95, haze + depth)))
+                ? fogged(sheet, farSheet ? p.piece.far! : p.piece.id, fog,
+                    Math.max(0, Math.min(0.95, bandHaze + depth)))
                 : sheet.img;
             ctx.save();
-            if (!fog) ctx.globalAlpha = Math.min(1, SKY_SHADE[band] * shade);
+            if (!fog) ctx.globalAlpha = keep;
             ctx.imageSmoothingEnabled = false;
             if (p.flip) {
                 ctx.translate(p.x + p.w / 2, 0);

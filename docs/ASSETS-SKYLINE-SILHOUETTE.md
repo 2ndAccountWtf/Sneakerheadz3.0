@@ -138,14 +138,34 @@ game, which is a better brief than this document.
 
 ---
 
-## 6. One thing to change afterwards
+## 6. Delivered — what the code does with it
 
-`SKY_SHADE` in `components/minigames/engine/streetArt.ts` currently pulls the
-bands down to 0.22–0.30 to force the detailed art into the distance. Once these
-land, that correction is fighting art that no longer needs it and the bands
-should come back up to roughly **0.75–0.90** so the new drawings are seen as
-drawn. `farSkylineShare()` in the same file reports how much of the set has
-arrived.
+**All twelve arrived and are in use.** Measured on delivery:
+
+| | asked for | delivered |
+|---|---|---|
+| tones per building | 3, or 4 with windows | **2–3** |
+| luminance spread | 25–40 | **10–22** |
+| luminance range | 45–110 | **70–92** |
+| sizes | 84 × 120 / 108 × 78 | **exact** |
+
+Flatter than the brief asked, which is the safe side of the target — a distance
+drawing that is slightly too flat recedes; one that is too contrasty does not.
+
+The atmospheric correction is now chosen **per piece, not per band**. A building
+using its distance drawing keeps ~90% of itself (`FAR_SHADE` in `streetArt.ts`);
+one still falling back to the detailed kit keeps the old heavy correction
+(`SKY_SHADE`). That is what makes the incremental promise real rather than
+theoretical: each file lands at the right strength the moment it arrives, with
+no flag to flip.
+
+**Rooftop clutter and the three landmarks deliberately have no distance
+version.** Clutter is already a silhouette at 16px, and a landmark that has been
+flattened is no longer recognisable — which defeats the point of having one.
+Keeping them detailed is also what now separates them: Capitol Records reads as
+a landmark precisely because the generic towers around it do not.
+
+`farSkylineShare()` reports how much of the set is in. It currently reports 1.
 
 ---
 
