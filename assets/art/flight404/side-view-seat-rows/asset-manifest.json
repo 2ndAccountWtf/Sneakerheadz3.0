@@ -1,0 +1,74 @@
+{
+  "seat-side-row-upright": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  },
+  "seat-side-row-reclined": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  },
+  "seat-side-row-trays": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  },
+  "seat-side-row-pockets": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  },
+  "seat-side-row-bags": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  },
+  "seat-side-row-floor-junk": {
+    "logical": [
+      72,
+      42
+    ],
+    "delivered": [
+      216,
+      126
+    ],
+    "ground": "bottom",
+    "view": "side profile, seats face right"
+  }
+}
