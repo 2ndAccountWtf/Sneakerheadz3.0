@@ -326,7 +326,6 @@ const ART_ID: Record<string, string> = {
     bin: 'bin-wheelie', dog: 'dog-stray', ped: 'pedestrian', works: 'roadworks',
     oil: 'oil-slick', ramp: 'skate-ramp', car: 'car-sedan', door: 'car-door-open',
     bay: 'trolley-bay', junk: 'trash-pile',
-    traffic: 'car-sedan', oncoming: 'car-taxi',
 };
 
 /**
@@ -1451,7 +1450,10 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         // hundred times. A write-off is only ever parked, for obvious reasons.
         const car = d.kind === 'car'
             ? ['car-sedan', 'car-van', 'car-wreck'][o.id % 3]
-            : ['car-sedan', 'car-van'][o.id % 2];
+            // A taxi is only ever a moving one — nobody parks a cab and walks
+            // off — and a write-off is only ever a parked one, for the same
+            // reason in reverse. So the two lists differ by more than length.
+            : ['car-sedan', 'car-taxi', 'car-van'][o.id % 3];
         // Art is drawn nose-right. Oncoming traffic is the same car mirrored,
         // which is also the first thing that tells you it is coming at you.
         const facing = (d.vz ?? 0) < 0;
@@ -1693,6 +1695,26 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // between a Los Angeles street and the yards behind it.
     art.tile(ctx, 'wall-breeze', -50, ROAD_TOP - 20, W + 100, 12, WORLD * 0.8);
 
+    // Somebody on a bike, on the pavement, going about their evening.
+    //
+    // `tiny-bicycle` is 19x16 — too small to sit on the road next to a 19px-tall
+    // car without the scale reading wrong, and exactly right up on the verge at
+    // a distance. It is scenery: it is behind the kerb, so it can never be
+    // something you hit, which is the only reason it is allowed to be this
+    // close to the racing line.
+    const bikeScroll = WORLD * 0.93;
+    const bikeN = art.frames('tiny-bicycle');
+    band(ctx, ROAD_TOP - 9, 0, W + 60, bikeScroll, 213, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + bikeScroll) / 213);
+        // Pedalling rate from how fast the band is passing, so the legs match
+        // the ground the way the riders' do. See `engine/streetAnim.ts`.
+        const rate = anim.cycleRate(bikeN, s.speed * 0.93, 26);
+        art.sprite2(c, 'tiny-bicycle', x, y, 16, {
+            frame: anim.frameOf('tiny-bicycle', s.t, bikeN, rate) + anim.phaseOf(slot, bikeN),
+            alpha: 0.9,
+        });
+    });
+
     // Palms. Three kinds dealt off the slot index so a run of them is not one
     // tree repeated — the same reason the skyline deals from a kit. One slot in
     // three gets the sway sheet, and its fronds are offset by the slot so the
@@ -1889,6 +1911,31 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const py = laneY(s.laneF);
     const psc = laneScale(s.laneF);
     const wipe = s.outcome === 'wipeout' ? Math.min(1.6, s.wipe * 2.4) : 0;
+
+    // The board goes one way and you go the other.
+    //
+    // A wipeout used to leave the rider on the tarmac with his deck apparently
+    // still under him, because the fall sheet is a person and the board was
+    // only ever drawn by the coded rig. `longboard` is four frames of a loose
+    // deck; this sends it skidding off ahead, spinning down to a stop, which is
+    // the last thing that actually happens in a crash and the first thing you
+    // look for.
+    if (s.outcome === 'wipeout' && s.hasBoard) {
+        // Ballistic, with drag: quick at first, then it runs out. Purely a
+        // function of `s.wipe`, so there is no state to carry and it replays
+        // identically.
+        const t = Math.min(s.wipe, 2.4);
+        const slide = 54 * (1 - Math.exp(-t * 1.6));
+        const deckN = art.frames('longboard');
+        // Tumbling fast while it is in the air, settling as it loses speed.
+        const spin = Math.floor(t * 18 * Math.exp(-t * 0.9));
+        art.sprite2(ctx, 'longboard', s.px + slide, laneY(s.laneF) + 1, 5, {
+            frame: spin % Math.max(1, deckN),
+            rotation: Math.sin(t * 7) * 0.5 * Math.exp(-t * 1.4),
+            alpha: 0.95,
+        });
+    }
+
     ctx.save();
     if (wipe > 0) {
         ctx.translate(s.px, py);
