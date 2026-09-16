@@ -423,13 +423,16 @@ export function drawSkyline(
             ctx.globalAlpha = SKY_SHADE[band];
             ctx.imageSmoothingEnabled = false;
             if (p.flip) {
-                ctx.translate(p.x + p.piece.w / 2, 0);
+                ctx.translate(p.x + p.w / 2, 0);
                 ctx.scale(-1, 1);
-                ctx.translate(-(p.x + p.piece.w / 2), 0);
+                ctx.translate(-(p.x + p.w / 2), 0);
             }
+            // `p.w`/`p.h`, not `p.piece.w`/`p.piece.h`: a band with `vary` deals
+            // its pieces at a range of sizes, which is what stops the roofline
+            // being one ruled edge across the screen.
             ctx.drawImage(
                 sheet.img, 0, 0, sheet.fw, sheet.fh,
-                p.x, p.y - p.piece.h, p.piece.w, p.piece.h,
+                p.x, p.y - p.h, p.w, p.h,
             );
             ctx.restore();
         }

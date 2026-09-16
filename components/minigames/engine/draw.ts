@@ -157,6 +157,94 @@ export const figure = (ctx: Ctx, x: number, y: number, h: number, opts: FigureOp
     if (!hurt) rect(ctx, x + facing * u * 0.6, headY + u * 1.2, u * 0.7, u * 0.7, PAL.black);
 };
 
+/**
+ * A vertical ramp through a list of colours, quantised and dithered.
+ *
+ * ## Why not `createLinearGradient`
+ *
+ * A flat `fillRect` across a whole band is the loudest possible signal that
+ * nobody art-directed a scene, and this repo shipped four of them stacked up as
+ * a sky. The obvious fix is a smooth canvas gradient, and it is the wrong one
+ * here: a smooth ramp across forty pixels in a palette-limited scene is the
+ * only soft thing on screen, it bands anyway once the colours are close
+ * together, and the bands it produces land wherever the rounding puts them.
+ *
+ * So the ramp is quantised deliberately — `levels` flat steps, so the steps are
+ * where they were put — and the join between two steps is dithered with a
+ * one-pixel ordered pattern. That is how the gradient is done in pixel art:
+ * it reads as intentional texture rather than as a compression artefact, and it
+ * keeps every pixel on the palette.
+ *
+ * `stops` are spread evenly from the top of the rect to the bottom and
+ * interpolated between; `levels` is how many flat steps the whole ramp is
+ * quantised to. Nothing here is random: the pattern is a function of x and y.
+ */
+export const ditherRamp = (
+    ctx: Ctx, x: number, y: number, w: number, h: number,
+    stops: string[], levels: number,
+) => {
+    if (h <= 0 || w <= 0 || stops.length === 0) return;
+    const L = Math.max(2, Math.min(levels, h));
+    // The quantised palette: `L` colours sampled evenly along the stop list.
+    const pal: string[] = [];
+    for (let j = 0; j < L; j++) {
+        const u = (j / (L - 1)) * (stops.length - 1);
+        const k = Math.min(stops.length - 2, Math.floor(u));
+        pal.push(stops.length === 1 ? stops[0] : lerpHex(stops[k], stops[k + 1], u - k));
+    }
+
+    for (let r = 0; r < h; r++) {
+        const p = ((r + 0.5) / h) * (L - 1);
+        const j = Math.min(L - 2, Math.floor(p));
+        const f = p - j;
+        rect(ctx, x, y + r, w, 1, pal[j]);
+        // Only the last part of each step is dithered. Dithering every row
+        // would be a smooth ramp made of dots — the point is a flat step with a
+        // transition at its bottom edge, which is what a hand-drawn sky does.
+        const duty = f < 0.6 ? 0 : f < 0.8 ? 0.25 : 0.5;
+        if (duty === 0) continue;
+        ditherRow(ctx, x, y + r, w, pal[j + 1], duty);
+    }
+};
+
+/**
+ * One row of an ordered dither: `colour` laid over whatever is there at a
+ * fraction `duty` of the pixels, on a four-pixel pattern that shifts with `y`
+ * so the on-pixels do not line up into vertical stripes.
+ */
+const ditherRow = (ctx: Ctx, x: number, y: number, w: number, colour: string, duty: number) => {
+    const phase = (Math.round(y) * 2) & 3;
+    ctx.fillStyle = colour;
+    const x0 = Math.round(x);
+    for (let i = 0; i < w; i++) {
+        const m = (i + phase) & 3;
+        const on = duty >= 0.5 ? (m & 1) === 0 : m === 0;
+        if (on) ctx.fillRect(x0 + i, Math.round(y), 1, 1);
+    }
+};
+
+/**
+ * A round glow: bright in the middle, gone at the edge.
+ *
+ * A circle of one flat colour at low alpha is a disc, not a glow, and the eye
+ * reads the disc's edge before it reads the light. `createRadialGradient` costs
+ * one object a frame and is the difference between a sun and a grey blob.
+ */
+export const glow = (
+    ctx: Ctx, x: number, y: number, r: number, colour: string, alpha = 0.3,
+) => {
+    if (r <= 0) return;
+    const [cr, cg, cb] = parseColor(colour);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha})`);
+    g.addColorStop(0.55, `rgba(${cr},${cg},${cb},${alpha * 0.42})`);
+    g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+};
+
 /** Scrolling parallax band — sky, skyline, road, whatever. */
 export const band = (
     ctx: Ctx, y: number, h: number, w: number,
@@ -467,6 +555,12 @@ export const lerpHex = (a: string, b: string, t: number): string => {
     return `rgb(${Math.round(ar + (br - ar) * k)},`
         + `${Math.round(ag + (bg - ag) * k)},`
         + `${Math.round(ab + (bb - ab) * k)})`;
+};
+
+/** Any colour this module understands, at a given alpha. */
+export const withAlpha = (c: string, a: number): string => {
+    const [r, g, b] = parseColor(c);
+    return `rgba(${r},${g},${b},${a})`;
 };
 
 /** `#rgb`, `#rrggbb` or `rgb(r,g,b)` to a triplet. Unparseable input is black. */

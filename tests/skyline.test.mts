@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import {
     BANDS, BAND_ORDER, pieceAt, flipAt, layoutBand, layoutSkyline, slotHash,
+    slotRange, clumpAt, sizeAt, slotsPerScreen, type BandName,
 } from '../components/minigames/engine/skyline.ts';
 
 let pass = 0;
@@ -90,19 +91,38 @@ t('mirroring is used sparingly — it is a fix, not a feature', () => {
 
 t('a long drive uses the whole kit, not a favourite corner of it', () => {
     for (const name of BAND_ORDER) {
-        const seen = new Map<string, number>();
+        const seen = new Set<string>();
         for (let i = 0; i < 4000; i++) {
             const p = pieceAt(BANDS[name], i);
-            if (p) seen.set(p.id, (seen.get(p.id) ?? 0) + 1);
+            if (p) seen.add(p.id);
         }
         const kit = BANDS[name].pieces.length;
         assert.equal(seen.size, kit, `${name} used ${seen.size} of its ${kit} pieces`);
-        // And used them at roughly the same rate — a piece that turns up ten
-        // times as often as its neighbours is the repeat the kit was meant to
-        // avoid, wearing a different hat.
+    }
+});
+
+t('the kit is dealt evenly, with no favourite', () => {
+    // A piece that turns up twice as often as its neighbours is the repeat the
+    // kit was meant to avoid, wearing a different hat.
+    //
+    // Measured over far more slots than one drive covers, deliberately. The
+    // claim is about the dealer, not about a drive, and the sample has to be
+    // big enough that the answer is about the dealer too. This check used 4000
+    // slots and broke the day the rooftop band stopped filling every third slot
+    // unconditionally: 24 pieces over 4000 slots at 29% fill is 48 expected
+    // hits each, and the square-root noise on 48 alone spans 27 to 63 — a 2.3x
+    // spread from a dealer that is provably even at 60000 (1.08x). The old
+    // number was measuring its own sample size.
+    const N = 60000;
+    for (const name of BAND_ORDER) {
+        const seen = new Map<string, number>();
+        for (let i = 0; i < N; i++) {
+            const p = pieceAt(BANDS[name], i);
+            if (p) seen.set(p.id, (seen.get(p.id) ?? 0) + 1);
+        }
         const counts = [...seen.values()];
         const hi = Math.max(...counts), lo = Math.min(...counts);
-        assert.ok(hi < lo * 2.2, `${name}: one piece appears ${hi} times and another only ${lo}`);
+        assert.ok(hi < lo * 1.5, `${name}: one piece appears ${hi} times and another only ${lo}`);
     }
 });
 
@@ -125,7 +145,7 @@ t('the whole skyline is above the road', () => {
     for (const { placements } of layoutSkyline(1234, 352)) {
         for (const p of placements) {
             assert.ok(p.y <= 100, `a ${p.piece.id} has its ground line at y${p.y}, on the road`);
-            assert.ok(p.y - p.piece.h > -60, `a ${p.piece.id} reaches ${p.piece.h}px off the top of the screen`);
+            assert.ok(p.y - p.h > -60, `a ${p.piece.id} reaches ${p.h}px off the top of the screen`);
         }
     }
 });
@@ -134,19 +154,46 @@ t('the far band moves slower than the near one', () => {
     // Parallax, stated as a fact rather than trusted to the numbers looking
     // about right.
     assert.ok(BANDS.towers.factor < BANDS.lowrise.factor, 'the far towers keep pace with the street');
-    const a = layoutBand('towers', 0, 352)[0].x;
-    const b = layoutBand('towers', 600, 352)[0].x;
-    const c = layoutBand('lowrise', 0, 352)[0].x;
-    const d = layoutBand('lowrise', 600, 352)[0].x;
-    assert.ok(Math.abs(b - a) < Math.abs(d - c), 'both bands scrolled by the same amount');
+    // Followed by slot, not by list position. Once the city has gaps in it the
+    // first entry of a layout is the first *filled* slot, which moves for
+    // reasons that have nothing to do with parallax.
+    const moved = (name: BandName, from: number, to: number): number => {
+        const before = new Map(layoutBand(name, from, 352).map(p => [p.slot, p.x]));
+        for (const p of layoutBand(name, to, 352)) {
+            const was = before.get(p.slot);
+            if (was !== undefined) return Math.abs(p.x - was);
+        }
+        throw new Error(`${name}: no building survived the scroll to compare`);
+    };
+    assert.ok(moved('towers', 0, 600) < moved('lowrise', 0, 600),
+        'both bands scrolled by the same amount');
 });
 
 t('a screenful is covered, with a slot of margin either side', () => {
     // A piece wider than its spacing has to slide in from off-screen rather
     // than appear at the edge.
+    //
+    // Stated about the slot range rather than about the placements. This used
+    // to assert that the first building sat at or left of x=0, which was only
+    // ever true because every slot was filled; a city with gaps in it can
+    // legitimately have its first building a third of the way across the
+    // screen, and the check would have been failing on correct output. What
+    // still has to hold is that the range considered brackets the screen.
+    for (const name of BAND_ORDER) {
+        const band = BANDS[name];
+        for (const scroll of [0, 777, 5000, 123456, -2400]) {
+            const [first, last] = slotRange(band, scroll, 352);
+            const shift = scroll * band.factor;
+            assert.ok(first * band.spacing - shift <= -band.spacing,
+                `${name} at ${scroll}: the left margin is inside the screen`);
+            assert.ok(last * band.spacing - shift >= 352,
+                `${name} at ${scroll}: the city stops short of the right edge`);
+        }
+    }
+    // And the range is actually what gets laid out — every placement inside it.
     const p = layoutBand('lowrise', 777, 352);
-    assert.ok(p[0].x <= 0, 'the first building starts on screen, so it will pop in');
-    assert.ok(p[p.length - 1].x >= 352 - BANDS.lowrise.spacing, 'the city stops short of the right edge');
+    const [first, last] = slotRange(BANDS.lowrise, 777, 352);
+    assert.ok(p.every(q => q.slot >= first && q.slot <= last), 'a placement escaped its range');
 });
 
 t('the hash is stable and spread', () => {
@@ -223,6 +270,150 @@ t('rooftop clutter and landmarks are deliberately not in that set', () => {
             assert.equal(p.far, undefined, `${p.id} should not have a distance version`);
         }
     }
+});
+
+// ---------------------------------------------------------------------------
+// Rhythm
+// ---------------------------------------------------------------------------
+// "Too evenly spaced" was the first thing anybody said about this skyline, and
+// they were right: `density: 1` on both ground bands meant every slot filled,
+// at a fixed pitch, for ever. A picket fence. These checks are what stops it
+// coming back, because it is not a thing a screenshot of one frame shows.
+
+/** Runs of consecutive filled slots, and of consecutive gaps. */
+function runs(name: BandName, from: number, to: number): { filled: number[]; gaps: number[] } {
+    const out = { filled: [] as number[], gaps: [] as number[] };
+    let run = 0;
+    let on = pieceAt(BANDS[name], from) !== null;
+    for (let i = from; i < to; i++) {
+        const now = pieceAt(BANDS[name], i) !== null;
+        if (now === on) { run++; continue; }
+        (on ? out.filled : out.gaps).push(run);
+        on = now; run = 1;
+    }
+    (on ? out.filled : out.gaps).push(run);
+    return out;
+}
+
+t('the city clumps — dense stretches, then thin ones', () => {
+    // Count filled slots in windows of eight. If every window holds the same
+    // number, the band is still a fence however the pieces are dealt.
+    for (const name of ['towers', 'lowrise'] as const) {
+        const windows: number[] = [];
+        for (let w = 0; w < 120; w++) {
+            let n = 0;
+            for (let i = w * 8; i < w * 8 + 8; i++) if (pieceAt(BANDS[name], i)) n++;
+            windows.push(n);
+        }
+        const hi = Math.max(...windows), lo = Math.min(...windows);
+        assert.ok(hi - lo >= 5,
+            `${name}: every window of 8 slots holds ${lo}..${hi} buildings — that is a fence`);
+        // And the spread is a spread, not one outlier: at least a fifth of
+        // windows are near-solid and at least a fifth are near-empty.
+        const dense = windows.filter(n => n >= 7).length;
+        const thin = windows.filter(n => n <= 3).length;
+        assert.ok(dense >= windows.length / 5, `${name}: only ${dense}/${windows.length} windows are dense`);
+        assert.ok(thin >= windows.length / 5, `${name}: only ${thin}/${windows.length} windows are thin`);
+    }
+});
+
+t('runs of one building and runs of four or more both happen', () => {
+    for (const name of ['towers', 'lowrise'] as const) {
+        const r = runs(name, -400, 400);
+        assert.ok(r.filled.includes(1), `${name}: never a lone building`);
+        assert.ok(r.filled.some(n => n >= 4), `${name}: never a terrace`);
+        assert.ok(r.gaps.some(n => n >= 2), `${name}: never more than one slot of open sky`);
+    }
+});
+
+t('the clumping does not keep step with the screen', () => {
+    // If the clump wavelength lands near the number of slots a screen shows,
+    // every screenful gets its clump in the same place and the fence is back
+    // with a wobble in it. Both waves have to be several screens long.
+    for (const name of ['towers', 'lowrise'] as const) {
+        const c = BANDS[name].clump!;
+        const perScreen = slotsPerScreen(BANDS[name], 320);
+        for (const [label, f] of [['long', c.f1], ['short', c.f2]] as const) {
+            const wavelength = (Math.PI * 2) / f;
+            assert.ok(wavelength > perScreen * 2.5,
+                `${name}: the ${label} wave repeats every ${wavelength.toFixed(1)} slots `
+                + `and a screen shows ${perScreen.toFixed(1)}`);
+        }
+        // ...and the two waves must not be the same wave.
+        assert.ok(Math.abs(c.f1 / c.f2 - Math.round(c.f1 / c.f2)) > 0.1,
+            `${name}: the two clump waves are harmonics — they will beat as one`);
+    }
+});
+
+t('the two ground bands do not thin out together', () => {
+    // A hole in the towers behind a hole in the lowrise is a hole in the city.
+    let bothThin = 0;
+    for (let i = 0; i < 600; i++) {
+        // Same world x, each band in its own slot units.
+        const x = i * 10;
+        const a = clumpAt(BANDS.towers.clump!, x / BANDS.towers.spacing);
+        const b = clumpAt(BANDS.lowrise.clump!, x / BANDS.lowrise.spacing);
+        if (a < 0.35 && b < 0.35) bothThin++;
+    }
+    assert.ok(bothThin / 600 < 0.1, `${(bothThin / 6).toFixed(0)}% of the horizon is thin in both bands at once`);
+});
+
+t('buildings vary in height, not only in presence', () => {
+    // A clumped row of identical 40px towers is still a ruled line.
+    for (const name of ['towers', 'lowrise'] as const) {
+        const sizes = new Set<number>();
+        let lo = 1, hi = 0;
+        for (let i = 0; i < 400; i++) {
+            const p = pieceAt(BANDS[name], i);
+            if (!p) continue;
+            const k = sizeAt(BANDS[name], i);
+            lo = Math.min(lo, k); hi = Math.max(hi, k);
+            sizes.add(Math.round(p.h * k));
+        }
+        assert.ok(sizes.size >= 8, `${name}: only ${sizes.size} distinct drawn heights`);
+        assert.ok(hi - lo > 0.25, `${name}: drawn size only spans ${lo.toFixed(2)}..${hi.toFixed(2)}`);
+        assert.ok(lo > 0.4, `${name}: something is drawn at ${lo.toFixed(2)} of its size`);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Nothing floats
+// ---------------------------------------------------------------------------
+
+t('rooftop clutter stands on an actual roof', () => {
+    // Clutter used to be placed independently of the buildings under it, which
+    // was harmless only while the lowrise band had no gaps. Now it has gaps,
+    // and an aerial over one of them is an aerial hanging in the sky.
+    const roof = BANDS.rooftop;
+    const host = BANDS.lowrise;
+    assert.equal(roof.roofOf, 'lowrise');
+    assert.equal(roof.factor, host.factor, 'the clutter would slide off the roof it was placed on');
+    let checked = 0;
+    for (let i = -500; i < 500; i++) {
+        if (!pieceAt(roof, i)) continue;
+        checked++;
+        const hostSlot = Math.floor((i * roof.spacing) / host.spacing);
+        assert.ok(pieceAt(host, hostSlot), `clutter at slot ${i} is over open sky`);
+    }
+    assert.ok(checked > 100, `only ${checked} pieces of clutter in a thousand slots`);
+});
+
+t('clutter sits on the roof it was dealt onto, whatever size it came out', () => {
+    // The host varies in drawn height, so a fixed baseline would bury the
+    // clutter on a tall building and float it over a short one.
+    const seen = new Set<number>();
+    for (const scroll of [0, 900, 4300]) {
+        const hosts = new Map(layoutBand('lowrise', scroll, 352).map(p => [p.slot, p]));
+        for (const p of layoutBand('rooftop', scroll, 352)) {
+            const h = hosts.get(Math.floor((p.slot * BANDS.rooftop.spacing) / BANDS.lowrise.spacing));
+            assert.ok(h, `clutter at slot ${p.slot} has no building under it`);
+            const roofTop = h!.y - h!.h;
+            assert.ok(Math.abs(p.y - (roofTop + 1)) < 0.001,
+                `clutter stands at y${p.y} on a roof at y${roofTop}`);
+            seen.add(p.y);
+        }
+    }
+    assert.ok(seen.size > 4, 'every roof came out at the same height');
 });
 
 console.log(`\n${pass} skyline checks passed.\n`);

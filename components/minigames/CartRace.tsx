@@ -27,6 +27,7 @@ import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
     shakeOffset, banner, actor, art, anim, addBurst, stepBursts, lerpHex,
+    ditherRamp, glow, withAlpha,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -1370,11 +1371,94 @@ const SKY_DUSK = ['#2a0f1e', '#5a1f2e', '#9a3a3a', '#e08a4a'];
 /**
  * The valley floor the city stands on, far to near, dawn and dusk.
  *
- * Three steps rather than a gradient, because the rest of the game is flat
- * colour and a smooth ramp here would be the only soft thing on screen.
+ * These are the stops of a ramp, not three slabs. They were three slabs, on the
+ * grounds that a smooth gradient would be the only soft thing on screen — true,
+ * and the wrong conclusion from it. The answer to "a smooth ramp would look out
+ * of place" is a dithered one, not a flat fill; see `ditherRamp`.
  */
 const HAZE_DAWN = ['#3b4b63', '#334258', '#2b394d'];
 const HAZE_DUSK = ['#5e4554', '#523a49', '#46313e'];
+/** Where the sky stops and the valley floor starts, in game pixels. */
+const HAZE_TOP = 58;
+const HAZE_BOT = ROAD_TOP - 8;
+/**
+ * Flat steps in the sky and in the haze.
+ *
+ * Twelve across 58 rows is a step every five pixels, which is coarse enough to
+ * read as drawn rather than as a smooth gradient and fine enough that the eye
+ * does not count them. Nine across the 34 rows of the valley floor is the same
+ * pitch. See `ditherRamp` for why it is stepped at all.
+ */
+const SKY_LEVELS = 12;
+const HAZE_LEVELS = 9;
+
+/**
+ * The sky and the valley floor, drawn once and kept.
+ *
+ * Both are a pure function of `hillT` and both are dithered, which is a few
+ * thousand one-pixel fills — fine once, not fine sixty times a second. So the
+ * whole backdrop is rendered into an offscreen canvas and blitted, and rebuilt
+ * only when `hillT` has moved a sixteenth of the way down the hill. Sixteen
+ * steps over 1900m is a colour change roughly every two seconds and about one
+ * unit per channel, which is below the point at which anything is visible.
+ *
+ * Falls back to drawing straight onto the target when there is no `document` —
+ * a headless test has no canvas to cache into and does not care about the cost.
+ */
+const BACKDROP_STEPS = 16;
+let bdCanvas: HTMLCanvasElement | null = null;
+let bdCtx: Ctx | null = null;
+let bdKey = -1;
+
+const skyStops = (hillT: number) => [0, 1, 2, 3].map(i => lerpHex(SKY_DAWN[i], SKY_DUSK[i], hillT));
+
+const paintSky = (c: Ctx, hillT: number) => {
+    // Light at the horizon, dark at the top — which is what sky does, and the
+    // reverse of nothing in particular, which is what four equal bands of flat
+    // colour were doing.
+    ditherRamp(c, 0, 0, W, HAZE_TOP, skyStops(hillT), SKY_LEVELS);
+};
+
+const paintHaze = (c: Ctx, hillT: number) => {
+    // The valley floor: lighter where it meets the sky, darker as it comes
+    // toward you, because air thins with proximity. The first stop is half the
+    // sky's own horizon colour, so the ground emerges out of the haze instead
+    // of starting at a hard line the eye reads as a shelf — which is what three
+    // flat steps and a 0.4-alpha wash over the seam used to give.
+    const haze = HAZE_DAWN.map((d, i) => lerpHex(d, HAZE_DUSK[i], hillT));
+    ditherRamp(c, 0, HAZE_TOP, W, HAZE_BOT - HAZE_TOP + 1, [
+        lerpHex(skyStops(hillT)[3], haze[0], 0.5), haze[0], haze[1], haze[2],
+    ], HAZE_LEVELS);
+};
+
+/**
+ * Blit rows `y0..y1` of the cached backdrop.
+ *
+ * Two calls, not one, because the far ridge and the sun belong between the sky
+ * and the valley floor: the ridge's feet have to be buried in the haze or it
+ * stands in front of the ground it is supposed to be behind.
+ */
+const backdrop = (ctx: Ctx, hillT: number, y0: number, y1: number) => {
+    const paint = (c: Ctx, t: number) => { if (y0 === 0) paintSky(c, t); else paintHaze(c, t); };
+    if (typeof document === 'undefined') { paint(ctx, hillT); return; }
+    const key = Math.round(clamp(hillT, 0, 1) * BACKDROP_STEPS);
+    if (!bdCanvas) {
+        bdCanvas = document.createElement('canvas');
+        bdCanvas.width = W;
+        bdCanvas.height = HAZE_BOT + 1;
+        bdCtx = bdCanvas.getContext('2d');
+        bdKey = -1;
+    }
+    if (!bdCtx) { paint(ctx, hillT); return; }
+    if (key !== bdKey) {
+        bdKey = key;
+        bdCtx.imageSmoothingEnabled = false;
+        paintSky(bdCtx, key / BACKDROP_STEPS);
+        paintHaze(bdCtx, key / BACKDROP_STEPS);
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bdCanvas, 0, y0, W, y1 - y0, 0, y0, W, y1 - y0);
+};
 /** Base road tilt, radians; steepens slightly further down the hill. */
 const TILT_BASE = 0.055;
 
@@ -1599,17 +1683,23 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const WORLD = s.z * PX_PER_M;
 
     // --- sky — lighting changes across the descent -------------------------
-    const skyCols = [0, 1, 2, 3].map(i => lerpHex(SKY_DAWN[i], SKY_DUSK[i], hillT));
-    clear(ctx, W, H, skyCols[0]);
-    for (let i = 0; i < skyCols.length; i++) rect(ctx, 0, i * 26, W, 27, skyCols[i]);
+    // A dithered ramp from the horizon up, not four flat bars. The old version
+    // drew 26px slabs from y=0 down, which put the fourth and brightest colour
+    // at y=78 — underneath the valley floor, where it was never once visible.
+    // So the sky was two flat rectangles and a hard line between them, which is
+    // exactly what it looked like.
+    clear(ctx, W, H, lerpHex(SKY_DAWN[0], SKY_DUSK[0], hillT));
+    backdrop(ctx, hillT, 0, HAZE_TOP);
     // The sun sinks and reddens as the hill goes on — the one cue that this
     // has been a long way down, even though the terrain loop never changes.
     const sunY = 18 + hillT * 44;
     const sunCol = lerpHex('#ffb347', '#ff5b3a', hillT);
+    // The halo goes down first: a glow is light in the air, and light in the air
+    // is behind the thing emitting it, not smeared over the front of it.
+    glow(ctx, 268, sunY, 30 + hillT * 18, sunCol, 0.3);
     if (!art.sprite2(ctx, 'sun-low', 268, sunY + 14 + hillT * 6, 28 + hillT * 12)) {
         circle(ctx, 268, sunY, 12 + hillT * 6, sunCol);
     }
-    circle(ctx, 268, sunY, 18 + hillT * 10, `rgba(255,${Math.round(179 - 70 * hillT)},${Math.round(71 - 20 * hillT)},0.14)`);
 
     // Far ridge, then the skyline, then palms: three speeds of parallax,
     // recoloured toward dusk along with the sky so the whole scene commits
@@ -1629,21 +1719,9 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // the verge starts at ROAD_TOP-8, so without this there are eighteen pixels
     // of open sky under the buildings and the whole city hangs in the air. This
     // is the flat of the valley between the hill you are on and the one they
-    // are on: three steps rather than one slab, each darker than the last, so
-    // it reads as ground receding into haze instead of as a wall.
-    const hazeTop = 58;
-    const hazeBot = ROAD_TOP - 8;
-    for (let i = 0; i < HAZE_DAWN.length; i++) {
-        const y0 = hazeTop + ((hazeBot - hazeTop) * i) / HAZE_DAWN.length;
-        const y1 = hazeTop + ((hazeBot - hazeTop) * (i + 1)) / HAZE_DAWN.length;
-        rect(ctx, 0, y0, W, y1 - y0 + 1, lerpHex(HAZE_DAWN[i], HAZE_DUSK[i], hillT));
-    }
-    // A softer wash over the top edge, so the ground fades into the sky rather
-    // than starting at a hard line the eye reads as a shelf.
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    rect(ctx, 0, hazeTop - 3, W, 4, lerpHex(HAZE_DAWN[0], HAZE_DUSK[0], hillT));
-    ctx.restore();
+    // are on, drawn as a dithered ramp rather than the three flat steps it used
+    // to be, so it reads as ground receding into haze instead of as a wall.
+    backdrop(ctx, hillT, HAZE_TOP, HAZE_BOT + 1);
 
     // The delivered skyline kit assembles a horizon that does not repeat; the
     // coded band below is the fallback for before it arrives. See `skyline.ts`
@@ -1846,9 +1924,21 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         // dusk, so it is knocked back toward the sky's own colour, harder the
         // further down the hill you are. Without it the road is the brightest
         // thing on screen and both riders sink into it.
+        //
+        // Graded, not flat. Light falls off with distance, so the far end of the
+        // road takes more of the knock-back than the tarmac under your own
+        // wheels — which is the whole of the depth cue a road this shallow can
+        // carry. This one is a smooth gradient rather than a dithered ramp
+        // because it modulates an already-textured surface: there is no flat
+        // field here for it to band across.
+        const knock = lerpHex('#141b26', '#2a1420', hillT);
+        const a = 0.34 + hillT * 0.16;
+        const g = ctx.createLinearGradient(0, ROAD_TOP, 0, H + 50);
+        g.addColorStop(0, withAlpha(knock, Math.min(1, a * 1.35)));
+        g.addColorStop(1, withAlpha(knock, a * 0.62));
         ctx.save();
-        ctx.globalAlpha = 0.34 + hillT * 0.16;
-        rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, lerpHex('#141b26', '#2a1420', hillT));
+        ctx.fillStyle = g;
+        ctx.fillRect(-50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP);
         ctx.restore();
     } else {
         rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, '#20242b');  // asphalt
