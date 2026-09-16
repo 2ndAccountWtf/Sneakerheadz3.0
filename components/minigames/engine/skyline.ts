@@ -111,7 +111,18 @@ export const BANDS: Record<BandName, BandDef> = {
     landmarks: { pieces: landmarks, spacing: 190, factor: 0.14, baseline: 66, density: 2 },
 };
 
-export const BAND_ORDER: BandName[] = ['towers', 'lowrise', 'rooftop', 'landmarks'];
+/**
+ * Back to front, and it must stay sorted by `factor`.
+ *
+ * Draw order *is* depth. A band that scrolls slower is further away, so it has
+ * to be painted first and be overlapped by everything nearer. Landmarks used to
+ * be drawn last — in front of the lowrise band — while scrolling slower than
+ * it, which is a contradiction the eye reads immediately: the Hellaweird sign
+ * sat in front of buildings it was supposed to be behind, so a 96px sign looked
+ * smaller and nearer than a 36px shopfront. There is a check on this in
+ * `tests/skyline.test.mts`; if you reorder this, fix the factors too.
+ */
+export const BAND_ORDER: BandName[] = ['towers', 'landmarks', 'lowrise', 'rooftop'];
 
 /**
  * A stable hash of a slot index. Small, fast, and the same everywhere — which

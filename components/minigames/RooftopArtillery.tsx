@@ -849,7 +849,18 @@ export const stepArtillery = (w: World, dt: number, cmd: Cmd) => {
 
     if (w.phase === 'flight') {
         const p = w.proj!;
-        const profile = profileFor(w);
+        // The profile the shot was *launched* with, not whatever the player has
+        // selected right now.
+        //
+        // `fire()` is careful about this — the house throws a plain shoe, never
+        // your AM/PM kit — and then this read it straight back off the world and
+        // threw that care away. Equip the frisbee and the opponent's shoe became
+        // piercing with a fifth of the gravity; equip the chancla and it homed
+        // on you. The AI silently got harder the better your loadout was, which
+        // is precisely backwards, and nothing on screen explained it.
+        //
+        // `profileId` has been on the projectile since it was launched. Use it.
+        const profile = PROFILES[p.profileId] ?? PROFILES.shoe;
         const target = w.turn === 0 ? w.throwers[1] : w.throwers[0];
         p.trail.push({ x: p.x, y: p.y });
         if (p.trail.length > 40) p.trail.shift();

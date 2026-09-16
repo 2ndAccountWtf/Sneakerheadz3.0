@@ -357,14 +357,27 @@ const RIDER_H = 30;
  * Named states rather than frame indices, so the drawn rider and the simulated
  * one cannot disagree about what is happening.
  */
-function riderState(s: RunState): string {
+export function riderState(s: RunState): string {
     if (!s.hasBoard) return 'bmx';
     if (s.wipeT > 0) {
         // Fall, slide, get up: three sheets across the one crash window rather
         // than a ten-frame fall looping you back onto your feet and down again.
-        if (s.wipeT < WIPE_TIME * 0.3) return 'skateboard-burpee-to-stand';
+        //
+        // Which fall and which recovery both come from what hit you. A car or a
+        // swinging door is a wall — it stops the board dead and puts you over
+        // the front on your back, so you burpee up. A bin or a dog catches a
+        // wheel and pitches you forward onto your hands, so you push up. Using
+        // one pair for everything wasted half the delivered sheets and made
+        // every crash look identical regardless of what caused it.
+        if (s.wipeT < WIPE_TIME * 0.3) {
+            return s.hitKind === 'wall'
+                ? 'skateboard-burpee-to-stand'
+                : 'skateboard-pushup-recover';
+        }
         if (s.wipe > WIPE_TIME * 0.4) return 'skateboard-ground-roll';
-        return 'skateboard-balance-fall';
+        return s.hitKind === 'wall'
+            ? 'skateboard-front-collision-backward'
+            : 'skateboard-balance-fall';
     }
     // Real air gets a kickflip; a kerb hop does not.
     if (s.air > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
@@ -418,8 +431,10 @@ function riderFrame(s: RunState): number {
         // owns the last 30%; the slide in between just keeps rolling. Fitting
         // each to its own slice is what stops a sheet playing halfway and
         // cutting away mid-tumble.
-        : id === 'skateboard-balance-fall' ? anim.fitRate(n, WIPE_TIME * 0.4)
-        : id === 'skateboard-burpee-to-stand' ? anim.fitRate(n, WIPE_TIME * 0.3)
+        : id === 'skateboard-balance-fall' || id === 'skateboard-front-collision-backward'
+            ? anim.fitRate(n, WIPE_TIME * 0.4)
+        : id === 'skateboard-burpee-to-stand' || id === 'skateboard-pushup-recover'
+            ? anim.fitRate(n, WIPE_TIME * 0.3)
         : undefined;
     return anim.frameFor(s.anim, id, clockOf(s), n, rate);
 }
@@ -539,6 +554,13 @@ export interface RunState {
     anim: anim.AnimClock;
     /** One-shot effect sheets in flight — dust, impact stars, water. */
     bursts: Burst[];
+    /**
+     * What last hit you: 'wall' for anything that stops the board dead and puts
+     * you over the front — a car, a taxi, a swinging door, a hedge — and 'trip'
+     * for anything that catches a wheel and pitches you forward. The two have
+     * different falls and different ways of getting up.
+     */
+    hitKind: 'wall' | 'trip';
     prevHold: boolean;
     /** Set when a wind-up auto-fires, so one hold cannot machine-gun the rack. */
     throwLock: boolean;
@@ -794,7 +816,7 @@ export function createRunState(opts: {
         bestStreak: 0, dryT: 0,
 
         charge: 0, charging: false, prevHold: false, throwLock: false, armT: 0, facing: -1,
-        anim: anim.makeClock(), bursts: [],
+        anim: anim.makeClock(), bursts: [], hitKind: 'trip',
 
         houses: [], nextHouseX: 210, sideFlip: -1, houseId: 0,
         obs: [], nextObsX: 300, obsId: 0,
@@ -1077,6 +1099,9 @@ function crash(s: RunState, o: Obs) {
     if (s.ammo > 0) { s.ammo--; addSpark(s, RIDER_X + 10, laneY(s.laneF) - 6, '🍕'); }
     s.flash = o.def.label;
     s.flashT = 1.1;
+    // Anything you cannot clear is a wall: it stops the board and puts you over
+    // the front. Anything you could have hopped catches a wheel instead.
+    s.hitKind = o.def.clear === 'none' ? 'wall' : 'trip';
     fx(s, 'impact-star', RIDER_X, laneY(s.laneF) - 10, 12);
     // A sprinkler or a hydrant soaks you; everything else just hurts.
     if (o.def.kind === 'sprink' || o.def.kind === 'hydrant') {

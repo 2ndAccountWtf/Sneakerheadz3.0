@@ -7,6 +7,7 @@
  * types nothing knows how to apply.
  */
 import assert from 'node:assert/strict';
+import { lerpHex } from '../components/minigames/engine/draw.ts';
 import { applyOutcomes, expireBuffs, durationToDays } from '../systems/outcomes/outcomeEngine.ts';
 import { getSellPrice, getBuyPrice } from '../systems/pricing.ts';
 import { INITIAL_PLAYER } from '../constants.ts';
@@ -227,6 +228,44 @@ t('every scenario the travel resolver can reach actually exists', () => {
     assert.ok(resolvedSomewhere, `category "${category}" resolves to nothing playable in any city`);
   }
   console.log(`      (${categories.length} travel categories all resolve)`);
+});
+
+// ---------------------------------------------------------------------------
+// Colour blending
+// ---------------------------------------------------------------------------
+// `lerpHex` returns `rgb(r,g,b)`, and the obvious way to build a graded band is
+// to blend two of its results. That used to run parseInt over "gb(49,65,90)",
+// get NaN, mask it to zero and paint pure black — silently, in a draw loop,
+// which is how thirty pixels of Downhill Racer's horizon turned into a void.
+
+t('a blend of two blends is not black', () => {
+    const a = lerpHex('#31415a', '#523a48', 0.15);
+    const b = lerpHex('#25334a', '#3e2c39', 0.15);
+    const mid = lerpHex(a, b, 0.5);
+    assert.notEqual(mid, 'rgb(0,0,0)');
+    // Halfway between two near-identical dark blues is another one of those.
+    const [r, g, bl] = mid.match(/\d+/g)!.map(Number);
+    assert.ok(r > 20 && r < 90, `red channel ${r} is nowhere near either input`);
+    assert.ok(bl > 40 && bl < 110, `blue channel ${bl} is nowhere near either input`);
+});
+
+t('the endpoints come back unchanged', () => {
+    assert.equal(lerpHex('#000000', '#ffffff', 0), 'rgb(0,0,0)');
+    assert.equal(lerpHex('#000000', '#ffffff', 1), 'rgb(255,255,255)');
+    assert.equal(lerpHex('#204060', '#204060', 0.5), 'rgb(32,64,96)');
+});
+
+t('halfway is halfway', () => {
+    assert.equal(lerpHex('#000000', '#ffffff', 0.5), 'rgb(128,128,128)');
+});
+
+t('t is clamped, so an overshoot does not wrap round', () => {
+    assert.equal(lerpHex('#000000', '#ffffff', 4), 'rgb(255,255,255)');
+    assert.equal(lerpHex('#000000', '#ffffff', -4), 'rgb(0,0,0)');
+});
+
+t('short hex works as well as long', () => {
+    assert.equal(lerpHex('#f00', '#f00', 0.5), 'rgb(255,0,0)');
 });
 
 console.log(`\n${pass} checks passed`);

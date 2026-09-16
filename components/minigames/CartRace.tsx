@@ -26,7 +26,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
-    shakeOffset, banner, actor, art, anim, addBurst, stepBursts,
+    shakeOffset, banner, actor, art, anim, addBurst, stepBursts, lerpHex,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -259,15 +259,27 @@ interface ObsDef {
     oil?: boolean;
     /** Lanes per second of wandering (dogs, pedestrians). */
     drift?: number;
+    /**
+     * Belongs against a kerb rather than out in the running lanes.
+     *
+     * A parked car in the middle of a four-lane street is not an obstacle, it
+     * is a mistake — and with cars, doors, bins and trolley bays all spawning
+     * on a uniform lane roll, that is what the road looked like: everything
+     * abandoned down the crown of it. Kerb things now take an outside lane, so
+     * the two middle lanes are the racing line and the edges are where the
+     * street furniture lives. That is how a real road reads, and it turns
+     * "which lane" into a decision instead of a dice roll.
+     */
+    kerb?: boolean;
 }
 
 const OBS: ObsDef[] = [
-    { kind: 'car', glyph: '🚗', label: 'parked Camry', len: 3.2, wide: 0.6, clear: 'none', dmg: 14, keep: 0.55, weight: 18 },
-    { kind: 'door', glyph: '🚪', label: 'car door', len: 1.8, wide: 0.55, clear: 'none', dmg: 12, keep: 0.5, weight: 9 },
-    { kind: 'bay', glyph: '🛒', label: 'AM/PM trolley bay', len: 3.6, wide: 1.05, clear: 'none', dmg: 13, keep: 0.5, weight: 6 },
+    { kind: 'car', glyph: '🚗', label: 'parked Camry', len: 3.2, wide: 0.6, clear: 'none', dmg: 14, keep: 0.55, weight: 18, kerb: true },
+    { kind: 'door', glyph: '🚪', label: 'car door', len: 1.8, wide: 0.55, clear: 'none', dmg: 12, keep: 0.5, weight: 9, kerb: true },
+    { kind: 'bay', glyph: '🛒', label: 'AM/PM trolley bay', len: 3.6, wide: 1.05, clear: 'none', dmg: 13, keep: 0.5, weight: 6, kerb: true },
     { kind: 'ped', glyph: '🚶', label: 'pedestrian', len: 1.4, wide: 0.5, clear: 'none', dmg: 9, keep: 0.62, weight: 9, drift: 0.35 },
     { kind: 'works', glyph: '🚧', label: 'roadworks', len: 2.0, wide: 0.55, clear: 'ollie', dmg: 8, keep: 0.66, weight: 14 },
-    { kind: 'bin', glyph: '🗑️', label: 'wheelie bin', len: 1.6, wide: 0.5, clear: 'ollie', dmg: 6, keep: 0.72, weight: 13 },
+    { kind: 'bin', glyph: '🗑️', label: 'wheelie bin', len: 1.6, wide: 0.5, clear: 'ollie', dmg: 6, keep: 0.72, weight: 13, kerb: true },
     { kind: 'dog', glyph: '🐕', label: 'loose dog', len: 1.4, wide: 0.5, clear: 'ollie', dmg: 7, keep: 0.7, weight: 10, drift: 0.9 },
     { kind: 'oil', glyph: '🛢️', label: 'oil slick', len: 3.0, wide: 0.7, clear: 'hop', dmg: 0, keep: 0.9, weight: 10, oil: true },
     { kind: 'ramp', glyph: '', label: 'plywood ramp', len: 2.2, wide: 0.6, clear: 'none', dmg: 0, keep: 1, weight: 12, ramp: true },
@@ -308,7 +320,7 @@ const RIDER_H = 30;
  * delivered falls back through `art.sprite` to the coded figure, so a partial
  * delivery is a game with one drawn rider and one blocky one.
  */
-function boardState(s: RaceState): string {
+export function boardState(s: RaceState): string {
     // A wipeout falls first and then slides: the fall sheet ends on the tarmac
     // and the roll keeps going for as long as the ending cinematic runs, rather
     // than the fall looping and standing you up to knock you down again.
@@ -319,10 +331,16 @@ function boardState(s: RaceState): string {
     // your rider on the floor every time he binned it. Your own hit window is
     // the invulnerability the crash handler grants.
     if (s.invT > 0) {
-        // Two ways to go down and two sheets for them: a wall puts you over the
-        // nose backwards, street furniture catches a wheel and trips you
-        // forward. The last third of the window is getting back up.
-        if (s.invT < INV_TIME * 0.34) return 'skateboard-pushup-recover';
+        // Two ways to go down, and the way you went down decides how you get
+        // back up. Trip over a bin and you land face-first, so you push up off
+        // the tarmac. Go into a parked car and you land on your back, so you
+        // have to roll and burpee to your feet. Four sheets, one crash window,
+        // and no pose that contradicts the one before it.
+        if (s.invT < INV_TIME * 0.34) {
+            return s.hitKind === 'wall'
+                ? 'skateboard-burpee-to-stand'
+                : 'skateboard-pushup-recover';
+        }
         return s.hitKind === 'wall'
             ? 'skateboard-front-collision-backward'
             : 'skateboard-obstacle-trip-forward';
@@ -334,7 +352,7 @@ function boardState(s: RaceState): string {
     return 'skateboard-ride';
 }
 
-function bikeState(s: RaceState): string {
+export function bikeState(s: RaceState): string {
     if (s.crashT > 0) return 'bike-fall-off';
     if (s.thiefStun > 0) return 'bike-banana-slip';
     // He looks back when you are on his wheel — the drafting tell, and the
@@ -368,6 +386,16 @@ const RIDE_CYCLE_M = 28;
 const CAR_H = 14;
 
 /**
+ * Far-row house facades for the mid-ground, from the shared street set.
+ *
+ * The `-far` variants specifically: their ground line is at the bottom, because
+ * a house across the valley rises up-screen away from you. The `-near` pair is
+ * drawn the other way up and belongs to Pizza Run, where houses stand on the
+ * kerb you are riding along. Using the wrong one puts every roof in the dirt.
+ */
+const HOOD_ART = ['house-bungalow-far', 'house-twostorey-far', 'house-apartment-far'];
+
+/**
  * How long a rider's animation has been running, in a clock that does not stop.
  *
  * `stepRace` freezes `s.t` the moment the race ends and advances `s.wipe`
@@ -394,7 +422,8 @@ function boardFrame(s: RaceState): number {
         // playing halfway and cutting to a rider already back on his feet.
         : id === 'skateboard-obstacle-trip-forward' || id === 'skateboard-front-collision-backward'
             ? anim.fitRate(n, INV_TIME * 0.66)
-        : id === 'skateboard-pushup-recover' ? anim.fitRate(n, INV_TIME * 0.34)
+        : id === 'skateboard-pushup-recover' || id === 'skateboard-burpee-to-stand'
+            ? anim.fitRate(n, INV_TIME * 0.34)
         : undefined;
     return anim.frameFor(s.animYou, id, clockOf(s), n, rate);
 }
@@ -694,14 +723,27 @@ function spawnObstacle(s: RaceState, def: ObsDef, z: number, lane: number) {
     });
 }
 
+/**
+ * Which lane a thing spawns in.
+ *
+ * Kerb furniture takes an outside lane, either side. Anything wide is kept off
+ * the very edges so it cannot hang half off the road. Everything else is a
+ * uniform roll across all four, which is what the whole table used to be.
+ */
+function laneFor(s: RaceState, def: ObsDef): number {
+    if (def.kerb) return rnd(s) < 0.5 ? 0 : LANES - 1;
+    const lane = Math.floor(rnd(s) * LANES);
+    return def.wide > 1 ? clamp(lane, 1, LANES - 2) : lane;
+}
+
 function fillStreet(s: RaceState) {
     while (s.nextZ < s.z + SPAWN_AHEAD) {
         let roll = rnd(s) * OBS_TOTAL;
         let def = OBS[0];
         for (const o of OBS) { roll -= o.weight; if (roll <= 0) { def = o; break; } }
 
-        const lane = Math.floor(rnd(s) * LANES);
-        spawnObstacle(s, def, s.nextZ, def.wide > 1 ? clamp(lane, 1, LANES - 2) : lane);
+        const lane = laneFor(s, def);
+        spawnObstacle(s, def, s.nextZ, lane);
 
         // A second obstacle two lanes away sometimes, so you have to actually
         // pick a line. Never enough to seal the street — one lane is always open.
@@ -710,7 +752,13 @@ function fillStreet(s: RaceState) {
             let roll2 = rnd(s) * OBS_TOTAL;
             let def2 = OBS[0];
             for (const o of OBS) { roll2 -= o.weight; if (roll2 <= 0) { def2 = o; break; } }
-            if (def2.wide <= 1) spawnObstacle(s, def2, s.nextZ + (rnd(s) - 0.5) * 3, clamp(far, 0, LANES - 1));
+            // The second one keeps its own rule about where it belongs: a car
+            // dealt into the far slot still parks at a kerb, so this can never
+            // put a Camry back in the middle of the road by the side door.
+            if (def2.wide <= 1) {
+                const lane2 = def2.kerb ? laneFor(s, def2) : clamp(far, 0, LANES - 1);
+                spawnObstacle(s, def2, s.nextZ + (rnd(s) - 0.5) * 3, lane2);
+            }
         }
 
         // The street tightens as the hill gets steeper.
@@ -1229,21 +1277,19 @@ function stepSparks(s: RaceState, dt: number) {
  */
 const SKY_DAWN = ['#10203a', '#1b3357', '#2f4a6e', '#4a6483'];
 const SKY_DUSK = ['#2a0f1e', '#5a1f2e', '#9a3a3a', '#e08a4a'];
+/**
+ * The valley floor the city stands on, far to near, dawn and dusk.
+ *
+ * Three steps rather than a gradient, because the rest of the game is flat
+ * colour and a smooth ramp here would be the only soft thing on screen.
+ */
+const HAZE_DAWN = ['#3b4b63', '#334258', '#2b394d'];
+const HAZE_DUSK = ['#5e4554', '#523a49', '#46313e'];
 /** Base road tilt, radians; steepens slightly further down the hill. */
 const TILT_BASE = 0.055;
 
 /** Linear-interpolate two '#rrggbb' colours. Used for the sky and nothing
  * performance-sensitive, so a string return is fine. */
-function lerpHex(a: string, b: string, t: number): string {
-    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
-    const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
-    const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
-    const lr = Math.round(ar + (br - ar) * t);
-    const lg = Math.round(ag + (bg - ag) * t);
-    const lb = Math.round(ab + (bb - ab) * t);
-    return `rgb(${lr},${lg},${lb})`;
-}
-
 const drawTrolley = (ctx: Ctx, x: number, y: number, sc: number, main: string, roll: number, spin = 0) => {
     const w = 18 * sc, h = 10 * sc;
     ctx.save();
@@ -1405,6 +1451,23 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const catchT = s.outcome === 'caught' ? clamp(s.wipe / 1.1, 0, 1) : 0;
     const catchEase = catchT * catchT * (3 - 2 * catchT);
 
+    /**
+     * How far the world has scrolled, in screen pixels.
+     *
+     * Every parallax layer is a fraction of this, and that is the point. The
+     * skyline used to be handed `s.z * 26` while the road scrolled at
+     * `s.z * PX_PER_M` — five px per metre — so the background moved 5.2x
+     * faster than the tarmac under the wheels. Two things followed. The horizon
+     * outran the foreground, which is backwards and is most of why a run felt
+     * sickening; and the six delivered towers cycled past every two seconds at
+     * cruise, which reads as one building on a loop rather than as a city.
+     *
+     * Deriving every layer from the same number as the road means the depth
+     * ordering cannot drift again: a layer is further away exactly when its
+     * fraction is smaller.
+     */
+    const WORLD = s.z * PX_PER_M;
+
     // --- sky — lighting changes across the descent -------------------------
     const skyCols = [0, 1, 2, 3].map(i => lerpHex(SKY_DAWN[i], SKY_DUSK[i], hillT));
     clear(ctx, W, H, skyCols[0]);
@@ -1423,26 +1486,48 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // to the same lighting change instead of just the strip at the top.
     const ridgeCol = lerpHex('#243a55', '#4a2f3f', hillT);
     const ridgeCol2 = lerpHex('#1d3049', '#3a2233', hillT);
-    if (!art.tile(ctx, 'sky-hills', 0, 64, W, 24, s.z * 0.9)) {
-        band(ctx, 74, 12, W, s.z * 0.9, 90, PAL.panel, (c, x, y) => {
+    if (!art.tile(ctx, 'sky-hills', 0, 52, W, 24, WORLD * 0.05)) {
+        band(ctx, 62, 12, W, WORLD * 0.05, 90, PAL.panel, (c, x, y) => {
             rect(c, x, y, 60, 14, ridgeCol);
             rect(c, x + 44, y - 6, 26, 20, ridgeCol2);
         });
     }
 
+    // Ground for the city to stand on.
+    //
+    // The skyline bands have ground lines at y=62..74 (see `skyline.ts`) and
+    // the verge starts at ROAD_TOP-8, so without this there are eighteen pixels
+    // of open sky under the buildings and the whole city hangs in the air. This
+    // is the flat of the valley between the hill you are on and the one they
+    // are on: three steps rather than one slab, each darker than the last, so
+    // it reads as ground receding into haze instead of as a wall.
+    const hazeTop = 58;
+    const hazeBot = ROAD_TOP - 8;
+    for (let i = 0; i < HAZE_DAWN.length; i++) {
+        const y0 = hazeTop + ((hazeBot - hazeTop) * i) / HAZE_DAWN.length;
+        const y1 = hazeTop + ((hazeBot - hazeTop) * (i + 1)) / HAZE_DAWN.length;
+        rect(ctx, 0, y0, W, y1 - y0 + 1, lerpHex(HAZE_DAWN[i], HAZE_DUSK[i], hillT));
+    }
+    // A softer wash over the top edge, so the ground fades into the sky rather
+    // than starting at a hard line the eye reads as a shelf.
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    rect(ctx, 0, hazeTop - 3, W, 4, lerpHex(HAZE_DAWN[0], HAZE_DUSK[0], hillT));
+    ctx.restore();
+
     // The delivered skyline kit assembles a horizon that does not repeat; the
     // coded band below is the fallback for before it arrives. See `skyline.ts`
     // for why a kit beats a tiling strip.
-    if (!art.drawSkyline(ctx, s.z * 26, W)) {
+    if (!art.drawSkyline(ctx, WORLD, W)) {
         // No kit yet: the flat horizon strips delivered before it, and only
         // then the coded band. Not drawn behind the kit as well — a strip
         // repeats its whole contents every screen width, which is the thing the
         // kit exists to avoid, and having both on screen is worse than either.
-        art.tile(ctx, 'sky-towers', 0, 34, W, 40, s.z * 1.8);
-        art.sprite2(ctx, 'sky-watertower', ((80 - s.z * 2.2) % 440 + 440) % 440 - 60, 74, 26);
-        art.sprite2(ctx, 'sky-billboard', ((300 - s.z * 2.4) % 540 + 540) % 540 - 70, 72, 20);
-        if (!art.tile(ctx, 'sky-lowrise', 0, 56, W, 26, s.z * 2.6)) {
-            band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
+        art.tile(ctx, 'sky-towers', 0, 34, W, 40, WORLD * 0.10);
+        art.sprite2(ctx, 'sky-watertower', ((80 - WORLD * 0.12) % 440 + 440) % 440 - 60, 74, 26);
+        art.sprite2(ctx, 'sky-billboard', ((300 - WORLD * 0.13) % 540 + 540) % 540 - 70, 72, 20);
+        if (!art.tile(ctx, 'sky-lowrise', 0, 56, W, 26, WORLD * 0.20)) {
+            band(ctx, 62, 40, W, WORLD * 0.20, 54, PAL.panel, (c, x, y) => {
                 rect(c, x, y + 6, 20, 36, '#16202e');
                 rect(c, x + 24, y - 4, 14, 46, '#101923');
                 rect(c, x + 41, y + 12, 11, 30, '#18222f');
@@ -1450,11 +1535,38 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
             });
         }
     }
+    // The neighbourhood between the skyline and the kerb.
+    //
+    // Without this the band from the city's ground line down to the verge is
+    // thirty pixels of empty haze, which is what "there's no place with other
+    // stuff in the background" meant: you descend a hill through a city and
+    // pass nothing but a horizon and some palms. These are the far-row house
+    // facades from the shared street set, standing on the middle haze step,
+    // scrolling between the skyline and the trees so the depth reads.
+    //
+    // Three drawings, mirrored on alternate slots, at two heights, with a gap
+    // every fourth slot — six silhouettes and a rhythm, from three files.
+    const hoodScroll = WORLD * 0.46;
+    band(ctx, 88, 0, W, hoodScroll, 58, PAL.panel, (c, x, y) => {
+        const slot = Math.floor((x + hoodScroll) / 58);
+        const kind = ((slot % 4) + 4) % 4;
+        if (kind === 3) return;                       // a gap between properties
+        const id = HOOD_ART[kind];
+        const w = 46 + (slot % 2) * 8;
+        const h = 22 + (((slot * 7) % 3) * 5);
+        // Ground line at the bottom for the far row: these are across the
+        // valley from you, so the wall rises up-screen away from the camera.
+        art.panel(c, id, x, y - h, w, h, { flip: slot % 2 === 1, alpha: 0.82 });
+    });
+    // A breeze-block wall along the top of the verge, which is what is actually
+    // between a Los Angeles street and the yards behind it.
+    art.tile(ctx, 'wall-breeze', -50, ROAD_TOP - 20, W + 100, 12, WORLD * 0.8);
+
     // Palms. Three kinds dealt off the slot index so a run of them is not one
     // tree repeated — the same reason the skyline deals from a kit. One slot in
     // three gets the sway sheet, and its fronds are offset by the slot so the
     // whole avenue does not breathe in unison.
-    const palmScroll = s.z * 4.4;
+    const palmScroll = WORLD * 0.88;
     const swayN = art.frames('palm-sway');
     band(ctx, 60, 40, W, palmScroll, 88, PAL.panel, (c, x, y) => {
         const slot = Math.floor((x + palmScroll) / 88);
@@ -1472,8 +1584,8 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // Wildlife on the far verge: a cat that bolts as you come past, a flock
     // that goes up. Keyed to where the player actually is on screen, so it
     // reads as a reaction rather than a loop that happens to be playing.
-    band(ctx, 92, 8, W, s.z * 6.2, 171, PAL.panel, (c, x, y) => {
-        const slot = Math.floor((x + s.z * 6.2) / 171);
+    band(ctx, 92, 8, W, WORLD * 0.96, 171, PAL.panel, (c, x, y) => {
+        const slot = Math.floor((x + WORLD * 0.96) / 171);
         const near = Math.abs(x - s.px) < 52;
         const cat = ((slot % 2) + 2) % 2 === 0;
         const id = cat ? (near ? 'cat-dart' : 'cat-street') : 'pigeon-flock';
@@ -1498,7 +1610,7 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         rect(ctx, wx, wy, 1.3, 1.3, PAL.dim);
     }
     ctx.restore();
-    band(ctx, 44, 14, W, s.z * 1.3, 150, PAL.panel, (c, x, y) => {
+    band(ctx, 44, 14, W, WORLD * 0.26, 150, PAL.panel, (c, x, y) => {
         const gy = y + Math.sin(s.t * 2.4) * 2;
         if (!art.sprite2(c, 'gull', x, gy, 6, { frame: anim.frameOf('gull', s.t, art.frames('gull')), alpha: 0.55 })) {
             glyph(c, '🕊️', x, gy, 6, Math.sin(s.t * 2.4) * 0.1, 0.55);
@@ -1521,9 +1633,9 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
 
     // Verge: grass, then the pavement slabs, then the things standing on them.
     rect(ctx, -50, ROAD_TOP - 8, W + 100, 8, '#3b3f34');                  // verge
-    art.tile(ctx, 'grass-verge', -50, ROAD_TOP - 14, W + 100, 6, s.z * PX_PER_M);
-    art.tile(ctx, 'pavement', -50, ROAD_TOP - 8, W + 100, 8, s.z * PX_PER_M);
-    band(ctx, ROAD_TOP - 8, 8, W + 60, s.z * PX_PER_M, 34, PAL.line, (c, x, y) => {
+    art.tile(ctx, 'grass-verge', -50, ROAD_TOP - 14, W + 100, 6, WORLD);
+    art.tile(ctx, 'pavement', -50, ROAD_TOP - 8, W + 100, 8, WORLD);
+    band(ctx, ROAD_TOP - 8, 8, W + 60, WORLD, 34, PAL.line, (c, x, y) => {
         rect(c, x - 30, y - 2, 3, 10, PAL.faint);
         if (!art.sprite2(c, 'bin-wheelie', x - 12, y + 5, 12, { alpha: 0.85 })) {
             glyph(c, '🗑️', x - 12, y + 1, 8, 0, 0.85);
@@ -1531,8 +1643,8 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     });
     // Roadside dressing at a wider pitch than the bins, dealt off the slot so
     // a descent passes a sequence of things rather than one thing repeatedly.
-    band(ctx, ROAD_TOP - 8, 8, W + 60, s.z * PX_PER_M, 129, PAL.line, (c, x, y) => {
-        const slot = Math.floor((x + s.z * PX_PER_M) / 129);
+    band(ctx, ROAD_TOP - 8, 8, W + 60, WORLD, 129, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + WORLD) / 129);
         const kind = ((slot % 5) + 5) % 5;
         if (kind === 0) art.tile(c, 'fence-picket', x - 30, y - 10, 72, 10);
         else if (kind === 1) art.tile(c, 'hedge-low', x - 30, y - 9, 72, 9);
@@ -1550,20 +1662,29 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
             art.sprite2(c, 'mailbox', x + 34, y + 8, 8);
         }
     });
-    if (!art.tile(ctx, 'road-asphalt', -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, s.z * PX_PER_M)) {
+    if (art.tile(ctx, 'road-asphalt', -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, WORLD)) {
+        // The delivered tarmac is lit for daylight and this is a descent into
+        // dusk, so it is knocked back toward the sky's own colour, harder the
+        // further down the hill you are. Without it the road is the brightest
+        // thing on screen and both riders sink into it.
+        ctx.save();
+        ctx.globalAlpha = 0.34 + hillT * 0.16;
+        rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, lerpHex('#141b26', '#2a1420', hillT));
+        ctx.restore();
+    } else {
         rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, '#20242b');  // asphalt
     }
-    if (!art.tile(ctx, 'kerb', -50, ROAD_TOP - 1, W + 100, 5, s.z * PX_PER_M)) {
+    if (!art.tile(ctx, 'kerb', -50, ROAD_TOP - 1, W + 100, 5, WORLD)) {
         rect(ctx, -50, ROAD_TOP, W + 100, 2, '#2e343d');                  // kerb lip
     }
     // Wear in the tarmac. Sparse, scrolling with the road, behind everything
     // that drives on it.
-    band(ctx, ROAD_TOP + 4, 6, W + 60, s.z * PX_PER_M, 163, PAL.faint, (c, x, y) => {
+    band(ctx, ROAD_TOP + 4, 6, W + 60, WORLD, 163, PAL.faint, (c, x, y) => {
         art.sprite2(c, 'road-crack', x - 30, y + 7, 7, { alpha: 0.7 });
         art.sprite2(c, 'manhole', x + 52, y + 7, 5);
         art.sprite2(c, 'drain-grate', x + 108, y + 7, 4);
     });
-    band(ctx, H - 22, 6, W + 60, s.z * PX_PER_M, 197, PAL.faint, (c, x, y) => {
+    band(ctx, H - 22, 6, W + 60, WORLD, 197, PAL.faint, (c, x, y) => {
         art.sprite2(c, 'skid-mark', x - 20, y + 7, 5, { alpha: 0.5 });
     });
 
@@ -1571,13 +1692,13 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // sensation of speed at low velocity.
     for (let l = 1; l < LANES; l++) {
         const y = laneY(l) - LANE_H / 2;
-        if (art.tile(ctx, 'road-centreline', -50, y - 1.5, W + 100, 3, s.z * PX_PER_M)) continue;
-        band(ctx, y, 2, W + 60, s.z * PX_PER_M, 26, PAL.faint, (c, x, yy) => {
+        if (art.tile(ctx, 'road-centreline', -50, y - 1.5, W + 100, 3, WORLD)) continue;
+        band(ctx, y, 2, W + 60, WORLD, 26, PAL.faint, (c, x, yy) => {
             rect(c, x - 30, yy, 12, 1.6, '#4a535e');
         });
     }
-    if (!art.tile(ctx, 'road-edgeline', -50, H - 4, W + 100, 2, s.z * PX_PER_M)) {
-        band(ctx, H - 4, 4, W + 60, s.z * PX_PER_M, 40, PAL.faint, (c, x, y) => {
+    if (!art.tile(ctx, 'road-edgeline', -50, H - 4, W + 100, 2, WORLD)) {
+        band(ctx, H - 4, 4, W + 60, WORLD, 40, PAL.faint, (c, x, y) => {
             rect(c, x - 30, y, 20, 3, '#39414b');
         });
     }
@@ -1701,32 +1822,39 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     ctx.restore();
 
     // --- speed FX -----------------------------------------------------------
-    // Perspective speed lines: they radiate from a vanishing point near the
-    // top of the road rather than running flat, so faster reads as "rushing
-    // toward camera" instead of just "more horizontal streaks". Colour tips
-    // over to the accent-2 magenta near redline as a cheap stand-in for
-    // motion-blur tinting, and a combo streak adds its own extra lines so a
-    // hot run visibly looks hotter.
-    const fxDrive = Math.max(spdFrac, s.wob * 0.8, s.combo > 0 ? 0.3 : 0);
-    if (fxDrive > 0.1) {
-        const n = Math.round(4 + fxDrive * 16);
-        const vx = W * 0.58, vy = ROAD_TOP - 8;
+    // Motion blur on the tarmac, and nothing else.
+    //
+    // This used to fan near-white lines out of a vanishing point above the
+    // road, sliding sideways at a fixed 240px/s that had no relationship to how
+    // fast you were actually going. Over a road already scrolling at its own
+    // rate, that is two contradictory motions on one surface: it read as
+    // scratches on the screen rather than as speed, which is exactly how it was
+    // described — "weird super distracting white lines, no clue what that is".
+    //
+    // So: streaks that lie along the direction of travel, scroll with the world
+    // at the world's own rate, and only appear near the top of the rig's range.
+    // The road texture and the lane markings were always doing most of the work
+    // of selling speed; this is a garnish on top of them, not a layer of its
+    // own. Faint on purpose — if you can pick out an individual line, it is too
+    // strong.
+    const fxDrive = clamp((spdFrac - 0.72) / 0.28, 0, 1);
+    if (fxDrive > 0.02) {
         ctx.save();
+        ctx.translate(sx, sy);
+        const n = 3 + Math.round(fxDrive * 4);
         for (let i = 0; i < n; i++) {
-            const seed = (s.t * 70 + i * 91.3) % 977;
-            const tx2 = (i * 67 + s.t * 240) % (W + 80) - 40;
-            const ty2 = ROAD_TOP + ((i * 43 + seed) % (H - ROAD_TOP + 20));
-            const len = 12 + fxDrive * 44 + ((i * 13) % 18);
-            const dx = tx2 - vx, dy = ty2 - vy;
-            const d = Math.hypot(dx, dy) || 1;
-            const ux = dx / d, uy = dy / d;
-            const x2 = tx2 - ux * len, y2 = ty2 - uy * len;
-            ctx.globalAlpha = clamp((0.12 + fxDrive * 0.4) * (0.55 + 0.45 * Math.sin(seed)), 0, 0.75);
-            ctx.strokeStyle = spdFrac > 0.82 ? PAL.accent2 : PAL.ink;
+            // Anchored to world scroll, so a streak sits on the road and runs
+            // off the left edge with everything else on it.
+            const lane = i % LANES;
+            const y = laneY(lane) + ((i * 37) % 9) - 4;
+            const x0 = (((i * 113) - WORLD * 1.6) % (W + 120) + (W + 120)) % (W + 120) - 60;
+            const len = 14 + fxDrive * 26;
+            ctx.globalAlpha = fxDrive * 0.16;
+            ctx.strokeStyle = spdFrac > 0.92 ? PAL.accent2 : PAL.ink;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(tx2, ty2);
-            ctx.lineTo(x2, y2);
+            ctx.moveTo(x0, y);
+            ctx.lineTo(x0 - len, y);
             ctx.stroke();
         }
         ctx.restore();

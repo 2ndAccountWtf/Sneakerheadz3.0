@@ -10,6 +10,16 @@ interface GameCanvasProps {
     /** Called at a fixed 60Hz. Advance simulation AND draw here. */
     onFrame: (ctx: CanvasRenderingContext2D, dt: number, elapsed: number) => void;
     className?: string;
+    /**
+     * Grow to fill the parent instead of the page column.
+     *
+     * Inline, a game is as wide as its column and as tall as the aspect ratio
+     * makes it. Fullscreen it should be as big as fits in *both* directions,
+     * which is a different constraint: cap on width and height, let the aspect
+     * ratio pick the smaller, and letterbox the remainder. Same canvas, same
+     * logical resolution — only the CSS box changes.
+     */
+    fill?: boolean;
 }
 
 /**
@@ -19,7 +29,7 @@ interface GameCanvasProps {
  * backing store by the device pixel ratio, then letterboxes with CSS. Nearest
  * neighbour keeps the chunky arcade look instead of blurring it.
  */
-export const GameCanvas: React.FC<GameCanvasProps> = ({ width, height, running, onFrame, className = '' }) => {
+export const GameCanvas: React.FC<GameCanvasProps> = ({ width, height, running, onFrame, className = '', fill = false }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
@@ -57,12 +67,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ width, height, running, 
     return (
         <canvas
             ref={canvasRef}
-            className={`w-full h-auto block border border-[var(--line-bright)] ${className}`}
+            className={`block ${fill ? '' : 'w-full h-auto border border-[var(--line-bright)]'} ${className}`}
             style={{
                 imageRendering: 'pixelated',
                 aspectRatio: `${width} / ${height}`,
                 background: PAL.void,
                 touchAction: 'none',
+                // Fullscreen: take the whole box and letterbox inside it.
+                //
+                // `width: auto` looks like the right answer and is not: a
+                // canvas is a replaced element, so `auto` resolves to its
+                // intrinsic size — the backing store — and the picture sits at
+                // whatever the device pixel ratio happened to make it rather
+                // than growing. 640x360 in an 844x390 viewport, with black
+                // bars, and no amount of max-* will push it bigger. Filling the
+                // box and letting `object-fit` preserve the ratio is what
+                // actually scales it up.
+                ...(fill ? { width: '100%', height: '100%', objectFit: 'contain' as const } : null),
             }}
             role="img"
             aria-label="Mini-game"

@@ -159,4 +159,40 @@ t('the hash is stable and spread', () => {
     assert.ok(Math.max(...buckets) < Math.min(...buckets) * 1.5, `uneven spread: ${buckets}`);
 });
 
+// ---------------------------------------------------------------------------
+// Depth
+// ---------------------------------------------------------------------------
+// Draw order is the only thing saying which band is in front, and parallax
+// factor is the only thing saying which is further away. If those two disagree
+// the picture contradicts itself — which is exactly what happened: landmarks
+// were painted last, over the lowrise band, while scrolling slower than it. A
+// 96px Hellaweird sign ended up looking nearer *and* smaller than a 36px
+// shopfront, which is the one thing a parallax scene must never do.
+
+t('nothing is drawn in front of a band that scrolls faster than it', () => {
+    for (let i = 1; i < BAND_ORDER.length; i++) {
+        const behind = BANDS[BAND_ORDER[i - 1]];
+        const front = BANDS[BAND_ORDER[i]];
+        assert.ok(
+            front.factor >= behind.factor,
+            `${BAND_ORDER[i]} is drawn in front of ${BAND_ORDER[i - 1]} but scrolls slower `
+            + `(${front.factor} vs ${behind.factor}) — it cannot be both nearer and further away`,
+        );
+    }
+});
+
+t('a band further away has a higher ground line', () => {
+    // The horizon is up-screen, so a more distant band stands on a line closer
+    // to it. Rooftop clutter is exempt: it sits on roofs, not on the ground.
+    const ground = BAND_ORDER.filter((b) => b !== 'rooftop');
+    for (let i = 1; i < ground.length; i++) {
+        const behind = BANDS[ground[i - 1]];
+        const front = BANDS[ground[i]];
+        assert.ok(
+            front.baseline >= behind.baseline,
+            `${ground[i]} stands higher than ${ground[i - 1]} yet is nearer`,
+        );
+    }
+});
+
 console.log(`\n${pass} skyline checks passed.\n`);

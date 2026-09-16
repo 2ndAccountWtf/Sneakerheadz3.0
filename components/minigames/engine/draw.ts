@@ -448,3 +448,34 @@ export const SWAP: Record<string, PaletteSwap> = {
 };
 
 export type { SpriteDef, PaletteSwap };
+
+/**
+ * Blend two colours.
+ *
+ * Accepts `#rrggbb` or the `rgb(r,g,b)` form it returns, and that second half
+ * is not decoration. It used to take hex only, and feeding it its own output —
+ * `lerpHex(lerpHex(a, b, t), lerpHex(c, d, t), u)`, which is the obvious way to
+ * build a graded band — ran `parseInt('gb(49,65,90)', 16)`, got NaN, masked it
+ * to zero and returned pure black. Silently. In a draw loop, thirty times a
+ * second, in a colour nobody typed anywhere. Parsing both forms means the
+ * composition that reads correctly also behaves correctly.
+ */
+export const lerpHex = (a: string, b: string, t: number): string => {
+    const [ar, ag, ab] = parseColor(a);
+    const [br, bg, bb] = parseColor(b);
+    const k = Math.max(0, Math.min(1, t));
+    return `rgb(${Math.round(ar + (br - ar) * k)},`
+        + `${Math.round(ag + (bg - ag) * k)},`
+        + `${Math.round(ab + (bb - ab) * k)})`;
+};
+
+/** `#rgb`, `#rrggbb` or `rgb(r,g,b)` to a triplet. Unparseable input is black. */
+function parseColor(c: string): [number, number, number] {
+    const m = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+    let hex = c.replace(/^#/, '');
+    if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    if (!/^[0-9a-f]{6}$/i.test(hex)) return [0, 0, 0];
+    const n = parseInt(hex, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
