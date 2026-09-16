@@ -403,12 +403,36 @@ export function bikeState(s: RaceState): string {
 const RIDE_CYCLE_M = 28;
 
 /**
- * Drawn height of a parked vehicle at lane scale 1, in game pixels.
+ * Drawn height of each vehicle at lane scale 1, in game pixels.
  *
- * Matches the coded placeholder it replaces — roof at y-13, tyres at y — so a
- * delivered car occupies exactly the space the collision box already assumed.
+ * One constant used to serve for all of them, set to 14 to match the coded
+ * rectangle it replaced. That was the wrong thing to match. The rectangle was a
+ * placeholder; the delivered art is authored to `docs/ASSETS-STREET.md`, whose
+ * reference is a 23px standing adult, and against that reference a sedan is 19
+ * and a van is 23. Drawing every one of them at 14 squashed the sedan to 74%
+ * and the van to 61%, which is most of why a parked car looked like a toy
+ * beside a rider.
+ *
+ * The other half is that the rider sheets arrived much smaller than the brief
+ * asked — `skateboard-ride` is authored 13x10 where the brief wanted about 26 —
+ * so the rider is being drawn at three times its authored size to compensate,
+ * while the cars were being drawn at three quarters of theirs. A 4x
+ * disagreement between two things standing next to each other.
+ *
+ * So: each vehicle at its own authored height, scaled by one shared factor.
+ * `CAR_SCALE` is above 1 deliberately — with the rider drawn at 30 against a
+ * brief that puts him at 26, a car matched to the brief exactly would still
+ * look small beside him, and a car is meant to be the bigger object on a road.
  */
-const CAR_H = 14;
+const CAR_SCALE = 1.3;
+const CAR_BRIEF_H: Record<string, number> = {
+    'car-sedan': 19,
+    'car-taxi': 19,
+    'car-van': 23,
+    'car-wreck': 16,
+    'car-door-open': 16,
+};
+const carHeight = (id: string): number => (CAR_BRIEF_H[id] ?? 19) * CAR_SCALE;
 
 /**
  * Far-row house facades for the mid-ground, from the shared street set.
@@ -1457,7 +1481,8 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         // Art is drawn nose-right. Oncoming traffic is the same car mirrored,
         // which is also the first thing that tells you it is coming at you.
         const facing = (d.vz ?? 0) < 0;
-        const drew = art.sprite2(ctx, car, x, y, CAR_H * sc, { height: CAR_H * sc, flip: facing });
+        const ch = carHeight(car) * sc;
+        const drew = art.sprite2(ctx, car, x, y, ch, { height: ch, flip: facing });
 
         // Lamps, and they are the whole point of this branch.
         //
@@ -1509,7 +1534,8 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         // the art and the coded panel above it agree about the same moment.
         const doorN = art.frames('car-door-open');
         const doorF = Math.min(doorN - 1, Math.floor(swing * doorN));
-        if (!art.sprite2(ctx, 'car-door-open', x + 2 * sc, y, 16 * sc, { frame: doorF })) {
+        const dh = carHeight('car-door-open') * sc;
+        if (!art.sprite2(ctx, 'car-door-open', x + 2 * sc, y, dh, { frame: doorF, height: dh })) {
             glyph(ctx, '🚪', x + 2 * sc, y - 12 * sc, 7 * sc, 0, 0.9);
         }
         return;

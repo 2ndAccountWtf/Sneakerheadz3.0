@@ -402,13 +402,23 @@ const ART_H: Record<string, number> = {
 const RIDE_CYCLE_PX = 100;
 
 /**
- * Drawn height of a car, in game pixels.
+ * Drawn height of each vehicle, in game pixels.
  *
- * `docs/ASSETS-STREET.md` puts a saloon at roughly three-quarters of a standing
- * adult from this camera angle; the coded placeholder below measures 16 from
- * roof to tyre, so the delivered art matches what was already on screen.
+ * Same correction as Downhill Racer's, for the same reason: one constant set to
+ * match a coded placeholder squashed every delivered vehicle, while the rider
+ * sheets — authored far smaller than `docs/ASSETS-STREET.md` asked — are drawn
+ * at three times their own size. See the long note beside `CAR_BRIEF_H` in
+ * `CartRace.tsx`; the numbers are shared because the art is.
  */
-const CAR_H = 16;
+const CAR_SCALE = 1.3;
+const CAR_BRIEF_H: Record<string, number> = {
+    'car-sedan': 19,
+    'car-taxi': 19,
+    'car-van': 23,
+    'car-wreck': 16,
+    'car-door-open': 16,
+};
+const carHeight = (id: string): number => (CAR_BRIEF_H[id] ?? 19) * CAR_SCALE;
 
 /**
  * How long the rider's animation has been running, on a clock that keeps going.
@@ -1580,7 +1590,8 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
         // same art mirrored, which is also how you read which way it is coming.
         const facing = (d.vx ?? 0) < 0;
         const id = d.kind === 'taxi' ? 'car-taxi' : 'car-sedan';
-        if (art.sprite2(ctx, id, x, y + 4, CAR_H, { flip: facing, height: CAR_H })) return;
+        const ch = carHeight(id);
+        if (art.sprite2(ctx, id, x, y + 4, ch, { flip: facing, height: ch })) return;
 
         const col = d.kind === 'taxi' ? '#c8a52d' : '#6d2f3a';
         rect(ctx, x - 15, y - 7, 30, 11, col);
@@ -1600,7 +1611,8 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
         // is about to take you off the board.
         const doorN = art.frames('car-door-open');
         const doorF = Math.min(doorN - 1, Math.floor(o.open * doorN));
-        if (art.sprite2(ctx, 'car-door-open', x, y + 4, CAR_H, { frame: doorF, height: CAR_H })) return;
+        const dh = carHeight('car-door-open');
+        if (art.sprite2(ctx, 'car-door-open', x, y + 4, dh, { frame: doorF, height: dh })) return;
 
         rect(ctx, x - 11, y - 6, 22, 9, '#2d4a6b');
         rect(ctx, x - 6, y - 10, 11, 5, '#3d5c80');

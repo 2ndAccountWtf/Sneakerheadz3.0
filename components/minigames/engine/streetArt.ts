@@ -43,6 +43,15 @@ try {
         ...import.meta.glob('../../../assets/art/characters/**/*.png', {
             eager: true, query: '?url', import: 'default',
         }),
+        // Rooftop Artillery's scenery. Added because the trap otherwise is
+        // silent and expensive: the sprite registry globs all of `assets/art`,
+        // so a facade dropped in the rooftop folder loads perfectly well and
+        // then never draws, because this loader — the one that actually renders
+        // scenery — could not see it. A file that loads and does nothing is
+        // harder to diagnose than one that fails.
+        ...import.meta.glob('../../../assets/art/rooftop/**/*.png', {
+            eager: true, query: '?url', import: 'default',
+        }),
     } as Record<string, string>;
 } catch {
     FILES = {};
