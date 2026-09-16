@@ -365,7 +365,7 @@ export function strip(
 // ---------------------------------------------------------------------------
 // The skyline
 // ---------------------------------------------------------------------------
-import { layoutSkyline, BANDS, type BandName } from './skyline';
+import { layoutSkyline, slotHash, BANDS, type BandName } from './skyline';
 
 /**
  * Draw the assembled skyline.
@@ -420,16 +420,97 @@ export const SKY_SHADE: Record<BandName, number> = {
  * distant city is genuinely brighter than the sky behind it — lit windows are
  * the whole reason you can see a skyline at all.
  */
+/**
+ * A copy of a sheet tinted toward `fog`, kept fully opaque.
+ *
+ * This exists because alpha is not haze, and using it as haze was wrong.
+ *
+ * Compositing a building at `globalAlpha = 0.3` does move its colour toward the
+ * sky, which is why it looked like atmospheric perspective in a swatch. What it
+ * also does is make the building *see-through*: the sky's own dither pattern
+ * showed straight through a skyscraper, two overlapping towers showed through
+ * each other, and everything on the horizon read as a decal rather than as a
+ * solid object. Real air does not make a building transparent. It shifts its
+ * colour and leaves it opaque.
+ *
+ * So each sheet is painted once into an offscreen canvas, flooded with the sky
+ * colour through `source-atop` — which respects the sprite's alpha, so the
+ * shape is untouched and only the lit pixels move — and cached. Drawing is then
+ * a plain opaque blit.
+ *
+ * The cache key quantises the amount, because the tint colour in Downhill Racer
+ * moves continuously with the descent and a key per frame would be a leak.
+ */
+const FOG_CACHE = new Map<string, HTMLCanvasElement>();
+
+function fogged(sheet: StreetSheet, id: string, fog: string, amount: number): CanvasImageSource {
+    if (amount <= 0.01 || typeof document === 'undefined') return sheet.img;
+    const step = Math.round(amount * 12) / 12;
+    const key = `${id}|${fog}|${step}`;
+    const hit = FOG_CACHE.get(key);
+    if (hit) return hit;
+
+    const c = document.createElement('canvas');
+    c.width = sheet.img.width;
+    c.height = sheet.img.height;
+    const cx = c.getContext('2d');
+    if (!cx) return sheet.img;
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(sheet.img, 0, 0);
+    // `source-atop` paints only where the sprite already has pixels, so the
+    // silhouette and its soft edges survive exactly.
+    cx.globalCompositeOperation = 'source-atop';
+    cx.globalAlpha = step;
+    cx.fillStyle = fog;
+    cx.fillRect(0, 0, c.width, c.height);
+    FOG_CACHE.set(key, c);
+    return c;
+}
+
+/** Test/hot-reload hook, and a way to drop the tint cache when a palette moves. */
+export const clearFogCache = (): void => { FOG_CACHE.clear(); };
+
+export interface SkylineOpts {
+    salt?: number;
+    /** Scales `SKY_SHADE` for a scene whose sky is not the one it was tuned to. */
+    shade?: number;
+    /**
+     * The colour the air is. Buildings are tinted toward it and stay opaque.
+     * Without it they fall back to alpha, which is the old wrong behaviour and
+     * is kept only so a caller that has not been updated still draws something.
+     */
+    fog?: string;
+}
+
 export function drawSkyline(
     ctx: CanvasRenderingContext2D,
     scroll: number,
     screenW: number,
-    salt = 0,
-    shade = 1,
+    opts: SkylineOpts = {},
 ): boolean {
+    const { salt = 0, shade = 1, fog } = opts;
     let drew = false;
     for (const { band, placements } of layoutSkyline(scroll, screenW, salt)) {
+        // How much of the air is between you and this band. As a tint amount
+        // rather than as alpha: 1 means the building has become the sky.
+        const haze = Math.max(0, Math.min(0.95, 1 - Math.min(1, SKY_SHADE[band] * shade)));
         for (const p of placements) {
+            /**
+             * A per-building nudge to how far away it is.
+             *
+             * Six lowrise pieces get dealt into the eight slots a screen shows,
+             * so by pigeonhole the same building appears twice at once — nearly
+             * two identical pairs per screen, measured. Mirroring only protects
+             * *adjacent* twins, and mirroring a near-symmetrical shopfront does
+             * not disguise it anyway.
+             *
+             * A band is not one plane, though. Some of those buildings are a
+             * street further back, and a few percent more air in front of one
+             * copy than the other is enough for the eye to file them as two
+             * buildings rather than one repeated. Hashed off the slot, so a
+             * given building keeps its depth as it crosses the screen.
+             */
+            const depth = fog ? (slotHash(p.slot, 77) - 0.5) * 0.26 : 0;
             // A building drawn for the distance wins over the detailed one, and
             // "wins" means nothing more than being present in the folder. See
             // `Piece.far` in `skyline.ts` for why there are two of each.
@@ -437,8 +518,11 @@ export function drawSkyline(
                 ?? LOADED.get(p.piece.id);
             if (!sheet) continue;
             drew = true;
+            const img = fog
+                ? fogged(sheet, p.piece.id, fog, Math.max(0, Math.min(0.95, haze + depth)))
+                : sheet.img;
             ctx.save();
-            ctx.globalAlpha = Math.min(1, SKY_SHADE[band] * shade);
+            if (!fog) ctx.globalAlpha = Math.min(1, SKY_SHADE[band] * shade);
             ctx.imageSmoothingEnabled = false;
             if (p.flip) {
                 ctx.translate(p.x + p.w / 2, 0);
@@ -449,7 +533,7 @@ export function drawSkyline(
             // its pieces at a range of sizes, which is what stops the roofline
             // being one ruled edge across the screen.
             ctx.drawImage(
-                sheet.img, 0, 0, sheet.fw, sheet.fh,
+                img, 0, 0, sheet.fw, sheet.fh,
                 p.x, p.y - p.h, p.w, p.h,
             );
             ctx.restore();

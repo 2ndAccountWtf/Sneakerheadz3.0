@@ -1726,7 +1726,10 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // The delivered skyline kit assembles a horizon that does not repeat; the
     // coded band below is the fallback for before it arrives. See `skyline.ts`
     // for why a kit beats a tiling strip.
-    if (!art.drawSkyline(ctx, WORLD, W)) {
+    // `fog` is what turns the atmospheric correction from alpha into a tint:
+    // buildings stay opaque and shift toward the air's colour, instead of going
+    // see-through and letting the sky's dither show straight through a tower.
+    if (!art.drawSkyline(ctx, WORLD, W, { fog: lerpHex(HAZE_DAWN[0], HAZE_DUSK[0], hillT) })) {
         // No kit yet: the flat horizon strips delivered before it, and only
         // then the coded band. Not drawn behind the kit as well — a strip
         // repeats its whole contents every screen width, which is the thing the

@@ -210,7 +210,12 @@ export const BANDS: Record<BandName, BandDef> = {
         // Deliberately not the towers' periods, and offset in phase: if the two
         // bands thinned out together the horizon would open into a hole.
         clump: { base: 0.58, a1: 0.28, f1: 0.167, a2: 0.13, f2: 0.061, phase: 2.4 },
-        vary: { amp: 0.30, f: 0.097, phase: 3.7 },
+        // Wider than the towers'. Six lowrise pieces get dealt into the eight
+        // slots a screen shows, so the same shopfront turning up twice at once
+        // is arithmetic rather than bad luck — a bigger size spread is half of
+        // what stops the pair reading as one building repeated. The other half
+        // is the per-building depth tint in `drawSkyline`.
+        vary: { amp: 0.44, f: 0.097, phase: 3.7 },
     },
     // Density is per *roofed* slot now: the host check below removes the rest,
     // so this is 1 in 2 of the slots that have a building under them.

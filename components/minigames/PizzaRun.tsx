@@ -1395,6 +1395,14 @@ const SKY = ['#070c18', '#0c1426', '#131e35', '#1b2942'];
  * near row, and contrasty in the way a lit city at night actually is.
  */
 const NIGHT_SHADE = 2.6;
+
+/**
+ * The flat between the city and the street, top to bottom.
+ *
+ * Starts near the sky's own horizon colour so the ground emerges out of it
+ * rather than beginning at a shelf, and darkens toward the viewer.
+ */
+const HAZE = ['#1b2942', '#16233a', '#111c30', '#0d1626'];
 /**
  * Delivered facade kinds, indexed by a house's `hue`.
  *
@@ -1730,6 +1738,19 @@ export function drawRun(ctx: Ctx, s: RunState) {
     // still belong to Downhill Racer, where the palette is warm and the sun is
     // the point; neither belongs here.
     //
+    // Something for the city to stand on.
+    //
+    // The skyline's ground lines are at y=62..74 and the far verge starts at
+    // FAR_WALL=92, so without this the buildings end and there are eighteen
+    // pixels of bare night underneath them — which is exactly what "floating
+    // above blackness" means. Downhill Racer got this fix; this game did not,
+    // and its sky is darker, so the void was more obvious here.
+    //
+    // Graded rather than flat, lightest at the top where it meets the sky and
+    // darkening toward the viewer, so it reads as ground receding rather than
+    // as a second wall.
+    ditherRamp(ctx, 0, 58, W, FAR_WALL - 58, HAZE, 6);
+
     // The delivered skyline kit assembles a horizon that does not repeat: it
     // deals thirty-nine separate buildings into slots and mirrors twins. See
     // `skyline.ts` for why that beats a strip.
@@ -1739,7 +1760,7 @@ export function drawRun(ctx: Ctx, s: RunState) {
     // and 54 over a sky of 20 — a ghost. At night a distant city is genuinely
     // brighter than the sky behind it; the lit windows are the only reason you
     // can see a skyline at all.
-    const kit = art.drawSkyline(ctx, s.x, W, 0, NIGHT_SHADE);
+    const kit = art.drawSkyline(ctx, s.x, W, { shade: NIGHT_SHADE, fog: SKY[3] });
     if (!kit) {
         // No kit yet. Fall back to the flat horizon strips that were delivered
         // before it, and only then to the coded towers. Deliberately not drawn
