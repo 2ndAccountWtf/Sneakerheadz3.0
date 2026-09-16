@@ -121,7 +121,20 @@ export interface InstallReport {
  * as a single frame rather than dropped: one wrong filename should cost the
  * animation, not the sprite.
  */
-export function installArt(scene: PhaserNS.Scene, entries: ArtEntry[]): InstallReport {
+export function installArt(
+    scene: PhaserNS.Scene,
+    entries: ArtEntry[],
+    /**
+     * Ids the game asks for by name rather than by placeholder texture.
+     *
+     * Characters are drawn as coded block rigs, so there is no baked texture
+     * under `player-idle` for a delivered file to replace — the skin resolves
+     * the id at play time instead. Without this set every character sprite
+     * looks orphaned, which is what was happening: 118 of 118 warned, including
+     * ids that have been drawing correctly for weeks.
+     */
+    known: ReadonlySet<string> = new Set(),
+): InstallReport {
     const report: InstallReport = { installed: [], skipped: [], orphans: [] };
 
     for (const e of entries) {
@@ -153,9 +166,9 @@ export function installArt(scene: PhaserNS.Scene, entries: ArtEntry[]): InstallR
         // quietest way for delivered art to be wasted, so it is said out loud.
         // It has already happened once: the asset list published `seat-row` and
         // the scene baked `seatrow`.
-        if (!scene.textures.exists(key)) {
+        if (!scene.textures.exists(key) && !known.has(e.id)) {
             report.orphans.push(e.id);
-        } else {
+        } else if (scene.textures.exists(key)) {
             // Phaser will not overwrite a key in place, so the placeholder goes.
             scene.textures.remove(key);
         }

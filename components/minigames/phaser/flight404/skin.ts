@@ -147,6 +147,21 @@ export interface Skin {
     play(state: string, facing: 1 | -1, motion?: { speed?: number; vy?: number }): void;
 }
 
+/**
+ * Every asset id any role can ask for.
+ *
+ * Exported so the loader can tell a genuinely orphaned file from one that is
+ * simply drawn by a coded rig rather than by a baked placeholder. See the
+ * orphan check in `artLoader.ts` — it used to ask whether a placeholder texture
+ * existed under the id, which is true for scenery and has never been true for a
+ * character, so it reported all 118 delivered sprites as orphans including
+ * `player-idle`. A warning that fires on everything is how a real one gets
+ * missed.
+ */
+export const SKIN_IDS: ReadonlySet<string> = new Set(
+    Object.values(SKINS).flatMap((set) => Object.values(set)),
+);
+
 const has = (scene: PhaserNS.Scene, id: string): boolean => scene.textures.exists(T(id));
 
 /**

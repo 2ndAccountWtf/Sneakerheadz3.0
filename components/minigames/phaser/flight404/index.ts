@@ -23,6 +23,7 @@
 import type * as PhaserNS from 'phaser';
 import { bakeTextures } from './textures';
 import { queueArt, installArt, buildAnims, artCount, type ArtEntry } from './artLoader';
+import { SKIN_IDS } from './skin';
 import { makeGameScene, GAME_KEY } from './gameScene';
 import { makeUIScene, UI_KEY } from './uiScene';
 
@@ -59,7 +60,7 @@ export function createFlight404Scenes(P: typeof PhaserNS): PhaserNS.Types.Scenes
             // a broken one.
             bakeTextures(this);
             if (this.art.length) {
-                const report = installArt(this, this.art);
+                const report = installArt(this, this.art, SKIN_IDS);
                 buildAnims(this, this.art);
                 for (const s of report.skipped) console.warn(`[f404 art] skipped ${s.id}: ${s.why}`);
                 for (const o of report.orphans) {
