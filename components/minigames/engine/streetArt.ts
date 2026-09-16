@@ -403,11 +403,29 @@ export const SKY_SHADE: Record<BandName, number> = {
     towers: 0.22, lowrise: 0.30, rooftop: 0.26, landmarks: 0.26,
 };
 
+/**
+ * Multiplies `SKY_SHADE` for a scene whose sky is not the one those numbers
+ * were tuned against.
+ *
+ * `SKY_SHADE` is alpha, so a band comes out that fraction of the way from the
+ * sky colour to its own. That makes the right value depend on the sky — and
+ * these two games are at different times of day. Downhill Racer descends into
+ * dusk, luminance 25 to 156; Pizza Run runs at night, 12 to 40. At the 0.22
+ * tuned for dusk, a building over Pizza Run's sky lands between luminance 19
+ * and 54 against a sky of 20: a ghost. Its skyline was very nearly invisible
+ * and the one thing you could see up there was the dusk hills asset, which is
+ * why it read as a pink bar with nothing around it.
+ *
+ * Night wants more of the building and less of the air, because at night a
+ * distant city is genuinely brighter than the sky behind it — lit windows are
+ * the whole reason you can see a skyline at all.
+ */
 export function drawSkyline(
     ctx: CanvasRenderingContext2D,
     scroll: number,
     screenW: number,
     salt = 0,
+    shade = 1,
 ): boolean {
     let drew = false;
     for (const { band, placements } of layoutSkyline(scroll, screenW, salt)) {
@@ -420,7 +438,7 @@ export function drawSkyline(
             if (!sheet) continue;
             drew = true;
             ctx.save();
-            ctx.globalAlpha = SKY_SHADE[band];
+            ctx.globalAlpha = Math.min(1, SKY_SHADE[band] * shade);
             ctx.imageSmoothingEnabled = false;
             if (p.flip) {
                 ctx.translate(p.x + p.w / 2, 0);

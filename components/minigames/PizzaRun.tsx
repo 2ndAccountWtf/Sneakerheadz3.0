@@ -33,7 +33,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner, art, anim, addBurst, stepBursts,
+    shakeOffset, banner, art, anim, addBurst, stepBursts, ditherRamp, glow,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -1385,6 +1385,16 @@ function stepPops(s: RunState, dt: number) {
 // Rendering. Nothing below mutates the simulation.
 // ---------------------------------------------------------------------------
 const SKY = ['#070c18', '#0c1426', '#131e35', '#1b2942'];
+
+/**
+ * How much more of itself a distant building keeps here than in Downhill Racer.
+ *
+ * See the note at the `drawSkyline` call. 2.6 takes the tower band from 0.22 to
+ * 0.57 and the lowrise band from 0.30 to 0.78, which against this sky puts a
+ * building between luminance 25 and 110 — visible, still clearly behind the
+ * near row, and contrasty in the way a lit city at night actually is.
+ */
+const NIGHT_SHADE = 2.6;
 /**
  * Delivered facade kinds, indexed by a house's `hue`.
  *
@@ -1682,14 +1692,23 @@ export function drawRun(ctx: Ctx, s: RunState) {
     const [shx, shy] = shakeOffset(s.shake);
 
     // --- sky --------------------------------------------------------------
+    // Four flat bars at y = i*13 is what this was, and it looked it. The stops
+    // are the same colours; they are now a dithered ramp across the height the
+    // sky actually occupies, dark overhead and lifting toward the horizon where
+    // the city glow is. See `ditherRamp` in `engine/draw.ts` for why it is
+    // dithered rather than a smooth gradient.
     clear(ctx, W, H, SKY[0]);
-    for (let i = 0; i < SKY.length; i++) rect(ctx, 0, i * 13, W, 14, SKY[i]);
+    ditherRamp(ctx, 0, 0, W, FAR_WALL, SKY, 10);
     // Stars from a fixed hash so they do not shimmer between frames.
     for (let i = 0; i < 26; i++) {
         const hx = (i * 71) % W;
         const hy = (i * 37) % 42;
         rect(ctx, hx, hy, 1, 1, i % 4 ? '#33415c' : '#7d8ba6');
     }
+    // The moon, with light actually coming off it. It was two flat circles —
+    // a disc and a bite out of it — so the eye read the disc's edge and not the
+    // light. The halo goes down first so the moon sits in it rather than under.
+    glow(ctx, 292, 20, 22, '#cfd8e8', 0.30);
     circle(ctx, 292, 20, 9, '#e8e2c8');
     circle(ctx, 288, 17, 7, SKY[1]);
 
@@ -1697,15 +1716,30 @@ export function drawRun(ctx: Ctx, s: RunState) {
     ctx.translate(shx, shy);
 
     // --- parallax: far towers, then the skyline, then the street ----------
-    // Delivered skyline kit first; the coded towers below are the fallback.
-    // Furthest back: the low sun and the hills behind the city. Barely moving,
-    // because they are supposed to be miles away.
-    art.sprite2(ctx, 'sun-low', 292, 34, 26);
-    art.tile(ctx, 'sky-hills', 0, 40, W, 24, s.x * 0.03);
+    //
+    // Two things used to be drawn here that belong to the other game.
+    //
+    // `sun-low` is a setting sun, and this is a night shift with a moon already
+    // in the sky twelve pixels above where it was being drawn. Two light
+    // sources, one of them the wrong one.
+    //
+    // `sky-hills` is a dusk ridge: luminance 35 to 149, laid straight across a
+    // sky that sits at 12 to 40. It was the brightest thing up there by a wide
+    // margin and the only part of the horizon you could actually make out,
+    // which is exactly why it read as a pink bar floating in the skyline. Both
+    // still belong to Downhill Racer, where the palette is warm and the sun is
+    // the point; neither belongs here.
+    //
     // The delivered skyline kit assembles a horizon that does not repeat: it
     // deals thirty-nine separate buildings into slots and mirrors twins. See
     // `skyline.ts` for why that beats a strip.
-    const kit = art.drawSkyline(ctx, s.x, W);
+    //
+    // `NIGHT_SHADE` because `SKY_SHADE` is alpha tuned against Downhill Racer's
+    // dusk sky. Applied unchanged here it put a building between luminance 19
+    // and 54 over a sky of 20 — a ghost. At night a distant city is genuinely
+    // brighter than the sky behind it; the lit windows are the only reason you
+    // can see a skyline at all.
+    const kit = art.drawSkyline(ctx, s.x, W, 0, NIGHT_SHADE);
     if (!kit) {
         // No kit yet. Fall back to the flat horizon strips that were delivered
         // before it, and only then to the coded towers. Deliberately not drawn
