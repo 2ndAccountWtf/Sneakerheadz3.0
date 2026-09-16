@@ -29,6 +29,32 @@ match by `MAX_STORE_SCALE` in `GameCanvas.tsx`. The full reasoning is in
    only thing the loader reads — a manifest is ignored.
 5. **Same id, same folder.** Overwrite in place; the wiring is keyed on the id.
 
+## What actually went wrong, in one line
+
+**The files were drawn at the logical size and enlarged 3× to meet the old
+"deliver at 3×" instruction, instead of being rendered at 3×.** `car-taxi.png`
+was 102 × 57 containing about a 21 × 11 drawing. 102 of the 124 street files are
+like this; the median pixel covers a 2.8 × 2.8 block. Every check this repo had
+passed them, because the dimensions really were 3×.
+
+The replacement taxi is the proof: same nominal 102 × 57, detail native to the
+file, and in the game it is a different asset. So the size table below matters,
+but **detail native to the delivered size matters more.** A correct 102px export
+beats an enlarged 360px one.
+
+Flight 404's 156 files are unaffected — mean run 1.17, all native. Nothing in
+`assets/art/flight404` needs re-exporting for this reason.
+
+## Check it yourself before sending
+
+```
+node scripts/check-art.mjs assets/art/street
+```
+
+It reports, per file, how much real drawing is inside it. `detail is native to
+the file (runs of 1.0)` is the target. Anything reporting `contains only about
+NxM of real drawing` went through an enlargement.
+
 ## How to check one before doing all 156
 
 Open the exported file at 100% zoom. It should be roughly the size it will appear
