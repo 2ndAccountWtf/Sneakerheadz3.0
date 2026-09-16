@@ -74,6 +74,9 @@ const TEMPLATED: Record<string, string> = {
     'house-twostorey-near': "HOUSE_ART + '-near'",
     'house-apartment-far': "HOOD_ART + '-far'",
     'house-apartment-near': "HOUSE_ART + '-near'",
+    'throw-chancla': "throwState() with 'skateboard-throw-' stripped",
+    'throw-slushie': "throwState() with 'skateboard-throw-' stripped",
+    'throw-heavy': "throwState() with 'skateboard-throw-' stripped",
 };
 
 /**
@@ -107,6 +110,14 @@ t('the templated ids really are built by the expressions claimed', () => {
     // A guard on the exemption itself: if `HOOD_ART` were renamed, the six house
     // facades would drop out of the game and this file would still pass.
     for (const [id, how] of Object.entries(TEMPLATED)) {
+        // The thrown items are the rider's throw id with its prefix stripped,
+        // so what has to exist in the source is the rider's version.
+        if (id.startsWith('throw-')) {
+            const rider = `skateboard-${id}`;
+            assert.ok(SOURCE.includes(`'${rider}'`),
+                `${id} is exempted as "${how}" but "${rider}" appears nowhere`);
+            continue;
+        }
         const stem = id.replace(/-(far|near)$/, '');
         assert.ok(RAW.includes(`'${stem}'`),
             `${id} is exempted as "${how}" but "${stem}" appears nowhere`);

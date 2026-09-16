@@ -57,6 +57,15 @@ export const RATE: Record<string, number> = {
     'skateboard-hit-skater': 13,
     'skateboard-oil-wobble': 9,     // fighting the slick, a loop
     'skateboard-soaked': 8,         // shaking it off, a loop
+    // Throwing. The rider's wind-up and release, per weapon class.
+    'skateboard-throw-chancla': 16,
+    'skateboard-throw-slushie': 15,
+    'skateboard-throw-heavy': 13,
+    // The item in flight, tumbling.
+    'throw-chancla': 16,
+    'throw-slushie': 14,
+    'throw-heavy': 12,
+
     'bike-hit-chancla': 14,
     'bike-hit-slushie': 12,
     'bike-hit-heavy': 13,
@@ -134,6 +143,11 @@ export const ONCE: ReadonlySet<string> = new Set([
     'bike-hit-slushie',
     'bike-hit-heavy',
     'pizza-bag-spill',
+    // A throw is a wind-up and a release; it ends with the arm down, back in
+    // the ride cycle's own pose, so it plays once.
+    'skateboard-throw-chancla',
+    'skateboard-throw-slushie',
+    'skateboard-throw-heavy',
     'car-door-open',
     'window-open',
     'door-front',

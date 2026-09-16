@@ -92,6 +92,8 @@ const THIEF_BASE = 30;
  * rather than two numbers that drift apart.
  */
 const INV_TIME = 0.75;
+/** How long the throw animation runs. Shorter than any weapon's cooldown. */
+const THROW_TIME = 0.42;
 /** How long the fall itself takes at the end of a wipeout, before the slide. */
 const WIPE_FALL = 0.9;
 /**
@@ -346,6 +348,19 @@ const RIDER_H = 30;
  * delivered falls back through `art.sprite` to the coded figure, so a partial
  * delivery is a game with one drawn rider and one blocky one.
  */
+/**
+ * Which throw the rider is playing, from what is in his hand.
+ *
+ * A sandal goes overhand, a cup of frozen slush goes carefully, and anything
+ * with mass is a two-handed heave. Same grouping the thief's reactions use, so
+ * a weapon looks the same being thrown as it does landing.
+ */
+function throwState(id: string): string {
+    if (id.includes('chancla') || id.includes('sandal')) return 'skateboard-throw-chancla';
+    if (id.includes('slush') || id.includes('drink') || id.includes('soda')) return 'skateboard-throw-slushie';
+    return 'skateboard-throw-heavy';
+}
+
 export function boardState(s: RaceState): string {
     // A wipeout falls first and then slides: the fall sheet ends on the tarmac
     // and the roll keeps going for as long as the ending cinematic runs, rather
@@ -382,6 +397,10 @@ export function boardState(s: RaceState): string {
     // Real air off a ramp gets a kickflip; a hop over a bin does not. This is
     // the only place the game shows off, and it should be the place you earned.
     if (s.airT > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
+    // Mid-throw. `cool` is the weapon's cooldown and the first part of it is
+    // the wind-up and release, so the arm is drawn doing what the simulation
+    // says it is doing rather than the rig guessing from a flag.
+    if (s.throwT > 0) return throwState(s.lastThrown);
     // On the slick. Oil does no damage and takes your steering for 1.1s, and
     // until now nothing on screen said so — the rider kept his normal pose
     // while the controls stopped working, which reads as a bug rather than as
@@ -518,6 +537,7 @@ function boardFrame(s: RaceState): number {
         // down. Fitted so the last frame lands as control returns.
         : id === 'skateboard-hit-stumble' || id === 'skateboard-ped-collide'
             ? anim.fitRate(n, INV_TIME)
+        : id.startsWith('skateboard-throw-') ? anim.fitRate(n, THROW_TIME)
         : undefined;
     return anim.frameFor(s.animYou, id, clockOf(s), n, rate);
 }
@@ -709,6 +729,15 @@ export interface RaceState {
     hitLight: boolean;
     /** Which AM/PM item last connected with the thief, for his reaction. */
     thiefHitBy: string;
+    /**
+     * The wind-up and release, and what is being thrown.
+     *
+     * Separate from `cool`, which is the weapon's whole cooldown and is far
+     * longer than the arm movement — driving the animation off it would leave
+     * the rider frozen mid-throw for most of a second after the item has gone.
+     */
+    throwT: number;
+    lastThrown: string;
 
     obstacles: Obs[];
     nextZ: number;
@@ -807,6 +836,7 @@ export function createRaceState(opts: {
         talkT: 3.4,
         animYou: anim.makeClock(), animThief: anim.makeClock(),
         bursts: [], hitKind: 'trip', hitBy: '', hitLight: false, thiefHitBy: '',
+        throwT: 0, lastThrown: '',
         obstacles: [], nextZ: 40, obsId: 0, shots: [], shotId: 0,
         weapons, ammo, cool: 0,
         shake: 0, sparks: [], introT: 2.6, flash: '', flashT: 0,
@@ -1058,6 +1088,8 @@ function fire(s: RaceState, id: string) {
     }
     if (left !== undefined) s.ammo[w.id] = left - 1;
     s.cool = w.cooldown;
+    s.throwT = THROW_TIME;
+    s.lastThrown = w.id;
     s.thrown++;
 
     // Non-piercing throws get eaten by whatever is parked between you and him.
@@ -1212,6 +1244,7 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
     s.t += dt;
     s.introT = Math.max(0, s.introT - dt);
     s.cool = Math.max(0, s.cool - dt);
+    s.throwT = Math.max(0, s.throwT - dt);
     s.invT = Math.max(0, s.invT - dt);
     s.oilT = Math.max(0, s.oilT - dt);
     s.flashT = Math.max(0, s.flashT - dt);
@@ -2157,7 +2190,16 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         if (!w) continue;
         const x = PLAYER_X + sh.travel * GAP_PX;
         const arc = Math.sin(clamp(sh.travel / Math.max(1, s.gap), 0, 1) * Math.PI) * 12;
-        drawItemSprite(ctx, w, x, laneY(sh.lane) - 10 - arc, 13, s.t, sh.spin * (sh.back ? -1 : 1));
+        // The delivered tumble sheet for this class of item, if there is one;
+        // the coded sprite otherwise. Both spin — this one has real frames.
+        const flyId = throwState(w.id).replace('skateboard-throw-', 'throw-');
+        const flyN = art.frames(flyId);
+        const fy = laneY(sh.lane) - 10 - arc;
+        if (!art.sprite2(ctx, flyId, x, fy + 6, 13, {
+            frame: anim.frameOf(flyId, sh.travel * 0.18, flyN),
+        })) {
+            drawItemSprite(ctx, w, x, fy, 13, s.t, sh.spin * (sh.back ? -1 : 1));
+        }
     }
 
     // Drawn one-shot effects — dust off a landing, a star of impact. These sit
