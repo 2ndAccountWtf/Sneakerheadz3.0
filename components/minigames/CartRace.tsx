@@ -26,9 +26,9 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
-    shakeOffset, banner, actor, art,
+    shakeOffset, banner, actor, art, anim, addBurst, stepBursts,
 } from './engine';
-import type { Ctx } from './engine';
+import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
 import { useGame } from '../../hooks/useGame';
 import { armsFor, hasWeapon } from '../../systems/weapons';
@@ -85,6 +85,14 @@ const TUCK_GAIN = 1.34;
 
 /** His pace at the drop-in, before the band starts reacting to you. */
 const THIEF_BASE = 30;
+/**
+ * Invulnerability granted by a crash. Also how long the rider spends stumbling,
+ * so the trip animation and the window you cannot be hit in are the same thing
+ * rather than two numbers that drift apart.
+ */
+const INV_TIME = 0.75;
+/** How long the fall itself takes at the end of a wipeout, before the slide. */
+const WIPE_FALL = 0.9;
 /**
  * The rubber band. He paces *you* rather than holding an absolute speed —
  * a chase where he just drives off at a fixed speed isn't a game, it's a
@@ -301,9 +309,27 @@ const RIDER_H = 30;
  * delivery is a game with one drawn rider and one blocky one.
  */
 function boardState(s: RaceState): string {
-    if (s.outcome === 'wipeout') return 'skateboard-balance-fall';
-    if (s.crashT > 0) return 'skateboard-obstacle-trip-forward';
-    if (s.airT > 0) return 'skateboard-ollie';
+    // A wipeout falls first and then slides: the fall sheet ends on the tarmac
+    // and the roll keeps going for as long as the ending cinematic runs, rather
+    // than the fall looping and standing you up to knock you down again.
+    if (s.outcome === 'wipeout') {
+        return s.wipe > WIPE_FALL ? 'skateboard-ground-roll' : 'skateboard-balance-fall';
+    }
+    // `crashT` is the *thief's* crash timer, not yours — reading it here put
+    // your rider on the floor every time he binned it. Your own hit window is
+    // the invulnerability the crash handler grants.
+    if (s.invT > 0) {
+        // Two ways to go down and two sheets for them: a wall puts you over the
+        // nose backwards, street furniture catches a wheel and trips you
+        // forward. The last third of the window is getting back up.
+        if (s.invT < INV_TIME * 0.34) return 'skateboard-pushup-recover';
+        return s.hitKind === 'wall'
+            ? 'skateboard-front-collision-backward'
+            : 'skateboard-obstacle-trip-forward';
+    }
+    // Real air off a ramp gets a kickflip; a hop over a bin does not. This is
+    // the only place the game shows off, and it should be the place you earned.
+    if (s.airT > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
     if (s.tucking) return 'skateboard-manual';
     return 'skateboard-ride';
 }
@@ -314,8 +340,72 @@ function bikeState(s: RaceState): string {
     // He looks back when you are on his wheel — the drafting tell, and the
     // only moment in the race where he acknowledges you at all.
     if (s.draft > 0.04) return 'bike-look-back';
+    // Comfortably clear and cruising: he sucks his thumb at you. It is the most
+    // annoying thing in the game and it is only ever earned by falling behind.
+    if (s.gap > START_GAP * 1.15 && s.thiefSpeed < 34) return 'bike-thumb-suck';
     if (s.thiefSpeed > 34) return 'bike-wheelie-sparks';
     return 'bike-ride';
+}
+
+/**
+ * Metres of hill covered by one loop of a rider's rolling cycle.
+ *
+ * The ride sheets are body cycles — weight shifting over the deck, one turn of
+ * the cranks — not wheel rotations, so this is a cadence rather than a
+ * circumference. Tuned so a rig at its stated cruise speed reads at about
+ * fourteen frames a second: quick enough to look like work, slow enough that
+ * you can see the pose. Everything slower scales down from there, which is the
+ * whole point — a rider crawling off the line no longer pedals like a lunatic.
+ */
+const RIDE_CYCLE_M = 28;
+
+/**
+ * Drawn height of a parked vehicle at lane scale 1, in game pixels.
+ *
+ * Matches the coded placeholder it replaces — roof at y-13, tyres at y — so a
+ * delivered car occupies exactly the space the collision box already assumed.
+ */
+const CAR_H = 14;
+
+/**
+ * How long a rider's animation has been running, in a clock that does not stop.
+ *
+ * `stepRace` freezes `s.t` the moment the race ends and advances `s.wipe`
+ * instead, so a wipeout animation keyed to `s.t` alone would hold on frame one
+ * for the entire end-of-race cinematic. Only one of the two ever moves, so the
+ * sum is monotonic.
+ */
+const clockOf = (s: RaceState): number => s.t + s.wipe;
+
+/** Frame for the player's rider, restarting one-shots when the state changes. */
+function boardFrame(s: RaceState): number {
+    const id = boardState(s);
+    const n = art.frames(id);
+    const rate = id === 'skateboard-ride'
+        ? anim.cycleRate(n, s.speed, RIDE_CYCLE_M)
+        // The hang time of an ollie is decided by the rig and the ramp, so fit
+        // the sheet to it: the rider lands on the last frame rather than
+        // holding a tucked pose in mid-air or snapping straight at the apex.
+        : id === 'skateboard-ollie' ? anim.fitRate(n, s.airDur)
+        : id === 'skateboard-balance-fall' ? anim.fitRate(n, WIPE_FALL)
+        // The two hit sheets share the crash window with the recovery: the
+        // fall owns the first two thirds of it, getting up owns the last third.
+        // Fitting each to its own slice is what stops a twelve-frame trip
+        // playing halfway and cutting to a rider already back on his feet.
+        : id === 'skateboard-obstacle-trip-forward' || id === 'skateboard-front-collision-backward'
+            ? anim.fitRate(n, INV_TIME * 0.66)
+        : id === 'skateboard-pushup-recover' ? anim.fitRate(n, INV_TIME * 0.34)
+        : undefined;
+    return anim.frameFor(s.animYou, id, clockOf(s), n, rate);
+}
+
+/** Frame for the thief, same rules. */
+function bikeFrame(s: RaceState): number {
+    const id = bikeState(s);
+    const n = art.frames(id);
+    const rolling = id === 'bike-ride' || id === 'bike-wheelie-sparks';
+    const rate = rolling ? anim.cycleRate(n, s.thiefSpeed, RIDE_CYCLE_M) : undefined;
+    return anim.frameFor(s.animThief, id, clockOf(s), n, rate);
 }
 
 /** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
@@ -465,6 +555,24 @@ export interface RaceState {
     talk: string;
     talkT: number;
 
+    /**
+     * Playback clocks for the two riders. Held on state rather than in the
+     * draw function so a one-shot — a fall, an ollie — restarts when the state
+     * does instead of picking up wherever the modulo left the last one. See
+     * `engine/streetAnim.ts`.
+     */
+    animYou: anim.AnimClock;
+    animThief: anim.AnimClock;
+    /** One-shot effect sheets in flight — dust, impact stars, water. */
+    bursts: Burst[];
+    /**
+     * What last hit you: 'wall' for anything you went into head-on (a parked
+     * car, a ramp taken wrong), 'trip' for street furniture you caught a wheel
+     * on. The two have different fall animations and reading them off the
+     * obstacle is the only way the drawing can tell them apart.
+     */
+    hitKind: 'wall' | 'trip';
+
     obstacles: Obs[];
     nextZ: number;
     obsId: number;
@@ -560,6 +668,8 @@ export function createRaceState(opts: {
         thiefGuard: 0, crashT: 0, rattle: 0, crashIn: 3.2, throwIn: 6,
         talk: opts.hasBoard ? 'Nah, not the skateboard kid!' : 'You on a TROLLEY? Blood, please.',
         talkT: 3.4,
+        animYou: anim.makeClock(), animThief: anim.makeClock(),
+        bursts: [], hitKind: 'trip',
         obstacles: [], nextZ: 40, obsId: 0, shots: [], shotId: 0,
         weapons, ammo, cool: 0,
         shake: 0, sparks: [], introT: 2.6, flash: '', flashT: 0,
@@ -624,6 +734,15 @@ function addSpark(s: RaceState, x: number, y: number, ch: string) {
 }
 
 /**
+ * Start a drawn one-shot effect. Its length comes from the delivered sheet, so
+ * an effect whose art has not arrived expires immediately instead of leaving an
+ * invisible placeholder ticking away. See `engine/burst.ts`.
+ */
+function fx(s: RaceState, id: string, x: number, y: number, size: number) {
+    addBurst(s.bursts, id, x, y, size, art.frames(id), -s.speed * PX_PER_M * 0.2);
+}
+
+/**
  * A clean dodge is worth something. Passing an obstacle close enough that a
  * slightly worse read would have hit it, but with no contact, is what turns
  * "avoid the furniture" into "thread the furniture" — a small, real speed
@@ -644,7 +763,7 @@ function nearMiss(s: RaceState, o: Obs) {
 function crash(s: RaceState, o: Obs) {
     if (s.invT > 0) return;
     o.hit = true;
-    s.invT = 0.75;
+    s.invT = INV_TIME;
     s.hits++;
     // A hit ends any near-miss streak on the spot, and freezes the world for
     // a handful of frames — see the hitstop check at the top of stepRace.
@@ -666,12 +785,19 @@ function crash(s: RaceState, o: Obs) {
     s.flashT = 0.9;
     s.airT = 0;
     s.airH = 0;
+    // A wall you cannot clear throws you backwards over the nose; low street
+    // furniture trips you forwards. The drawing needs to know which.
+    s.hitKind = low ? 'trip' : 'wall';
+    fx(s, 'impact-star', s.px + 8, laneY(s.laneF) - 8, 12);
     addSpark(s, s.px + 8, laneY(s.laneF) - 8, '💢');
 }
 
 function land(s: RaceState) {
     s.airT = 0;
     s.airH = 0;
+    // Wheels back on tarmac: a puff of dust at the contact point. Bigger off a
+    // ramp, because a ramp landing is a bigger arrival.
+    fx(s, 'dust-plume', s.px - 4, laneY(s.laneF) + 1, s.airBig ? 13 : 8);
     const blocker = under(s);
     if (blocker && !blocker.done) {
         blocker.done = true;
@@ -884,6 +1010,7 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
         s.wipe += dt;
         s.shake = Math.max(0, s.shake - dt * 22);
         stepSparks(s, dt);
+        stepBursts(s.bursts, dt);
         return;
     }
 
@@ -895,6 +1022,7 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
         s.hitstop = Math.max(0, s.hitstop - dt);
         s.shake = Math.max(0, s.shake - dt * 26);
         stepSparks(s, dt);
+        stepBursts(s.bursts, dt);
         return;
     }
 
@@ -1068,6 +1196,7 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
     s.gap += (s.thiefSpeed - s.speed) * dt;
 
     stepSparks(s, dt);
+    stepBursts(s.bursts, dt);
     s.shake = Math.max(0, s.shake - dt * 26);
 
     // --- endings ----------------------------------------------------------
@@ -1199,11 +1328,17 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         ctx.ellipse(x, y - 1, 13 * sc, 4 * sc, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-        glyph(ctx, '🛢️', x + 10 * sc, y - 5 * sc, 8 * sc);
+        if (!art.sprite2(ctx, 'oil-slick', x, y, 7 * sc)) glyph(ctx, '🛢️', x + 10 * sc, y - 5 * sc, 8 * sc);
         return;
     }
     if (d.kind === 'car') {
         shadow(ctx, x, y, 13 * sc, 4 * sc, 0.4);
+        // Three parked vehicles dealt off the obstacle id, so a hill is lined
+        // with a saloon, a van and the odd write-off rather than one Camry
+        // cloned four hundred times. They all block identically; only the
+        // drawing differs, which is the right place for the variety.
+        const car = ['car-sedan', 'car-van', 'car-wreck'][o.id % 3];
+        if (art.sprite2(ctx, car, x, y, CAR_H * sc, { height: CAR_H * sc })) return;
         rect(ctx, x - 12 * sc, y - 9 * sc, 24 * sc, 7 * sc, '#7b2f3a');
         rect(ctx, x - 7 * sc, y - 13 * sc, 13 * sc, 4.5 * sc, '#9c4250');
         rect(ctx, x - 5 * sc, y - 12 * sc, 9 * sc, 3 * sc, '#22303f');
@@ -1220,10 +1355,20 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         ctx.rotate(-swing * 0.9);
         rect(ctx, 0, -9 * sc, 3 * sc, 9 * sc, '#d8dde3');
         ctx.restore();
-        glyph(ctx, '🚪', x + 2 * sc, y - 12 * sc, 7 * sc, 0, 0.9);
+        // A three-frame swing, driven by how far open the door actually is, so
+        // the art and the coded panel above it agree about the same moment.
+        const doorN = art.frames('car-door-open');
+        const doorF = Math.min(doorN - 1, Math.floor(swing * doorN));
+        if (!art.sprite2(ctx, 'car-door-open', x + 2 * sc, y, 16 * sc, { frame: doorF })) {
+            glyph(ctx, '🚪', x + 2 * sc, y - 12 * sc, 7 * sc, 0, 0.9);
+        }
         return;
     }
     if (d.kind === 'bay') {
+        if (art.sprite2(ctx, 'trolley-bay', x, y, 16 * sc)) {
+            text(ctx, 'AM/PM', x, y - 18 * sc, { size: 5, color: PAL.warn, align: 'center' });
+            return;
+        }
         outline(ctx, x - 14 * sc, y - 14 * sc, 28 * sc, 14 * sc, PAL.warn, 1);
         for (let i = 0; i < 3; i++) drawTrolley(ctx, x - 8 * sc + i * 7 * sc, y - 2 * sc, sc * 0.7, PAL.dim, 0);
         text(ctx, 'AM/PM', x, y - 18 * sc, { size: 5, color: PAL.warn, align: 'center' });
@@ -1234,8 +1379,15 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
     // Delivered art when it exists, the emoji when it does not — the fallback
     // is the whole reason art can arrive one file at a time. `ART_ID` maps this
     // game's obstacle kinds onto the shared street asset ids.
-    art.sprite(ctx, ART_ID[d.kind] ?? d.kind, d.glyph, x, y + bob, 13 * sc, {
-        frame: Math.floor(t * 10),
+    const id = ART_ID[d.kind] ?? d.kind;
+    const n = art.frames(id);
+    // Each sheet plays at its own rate — a stray dog does not trot at the same
+    // speed a beacon blinks — and each instance is offset by a hash of its id
+    // so a run of identical bins does not step in lockstep, which the eye picks
+    // up instantly and reads as a rendering fault.
+    const frame = anim.frameOf(id, t, n) + (anim.loops(id) ? anim.phaseOf(o.id, n) : 0);
+    art.sprite(ctx, id, d.glyph, x, y + bob, 13 * sc, {
+        frame,
         rotation: o.hit ? 1.2 : 0,
         height: (ART_H[d.kind] ?? 13) * sc,
     });
@@ -1261,7 +1413,9 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // has been a long way down, even though the terrain loop never changes.
     const sunY = 18 + hillT * 44;
     const sunCol = lerpHex('#ffb347', '#ff5b3a', hillT);
-    circle(ctx, 268, sunY, 12 + hillT * 6, sunCol);
+    if (!art.sprite2(ctx, 'sun-low', 268, sunY + 14 + hillT * 6, 28 + hillT * 12)) {
+        circle(ctx, 268, sunY, 12 + hillT * 6, sunCol);
+    }
     circle(ctx, 268, sunY, 18 + hillT * 10, `rgba(255,${Math.round(179 - 70 * hillT)},${Math.round(71 - 20 * hillT)},0.14)`);
 
     // Far ridge, then the skyline, then palms: three speeds of parallax,
@@ -1269,24 +1423,69 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // to the same lighting change instead of just the strip at the top.
     const ridgeCol = lerpHex('#243a55', '#4a2f3f', hillT);
     const ridgeCol2 = lerpHex('#1d3049', '#3a2233', hillT);
-    band(ctx, 74, 12, W, s.z * 0.9, 90, PAL.panel, (c, x, y) => {
-        rect(c, x, y, 60, 14, ridgeCol);
-        rect(c, x + 44, y - 6, 26, 20, ridgeCol2);
-    });
+    if (!art.tile(ctx, 'sky-hills', 0, 64, W, 24, s.z * 0.9)) {
+        band(ctx, 74, 12, W, s.z * 0.9, 90, PAL.panel, (c, x, y) => {
+            rect(c, x, y, 60, 14, ridgeCol);
+            rect(c, x + 44, y - 6, 26, 20, ridgeCol2);
+        });
+    }
+
     // The delivered skyline kit assembles a horizon that does not repeat; the
     // coded band below is the fallback for before it arrives. See `skyline.ts`
     // for why a kit beats a tiling strip.
     if (!art.drawSkyline(ctx, s.z * 26, W)) {
-        band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
-            rect(c, x, y + 6, 20, 36, '#16202e');
-            rect(c, x + 24, y - 4, 14, 46, '#101923');
-            rect(c, x + 41, y + 12, 11, 30, '#18222f');
-            for (let wy = 0; wy < 4; wy++) rect(c, x + 3, y + 10 + wy * 7, 3, 3, wy % 2 ? '#2a3a4d' : PAL.warn);
-        });
+        // No kit yet: the flat horizon strips delivered before it, and only
+        // then the coded band. Not drawn behind the kit as well — a strip
+        // repeats its whole contents every screen width, which is the thing the
+        // kit exists to avoid, and having both on screen is worse than either.
+        art.tile(ctx, 'sky-towers', 0, 34, W, 40, s.z * 1.8);
+        art.sprite2(ctx, 'sky-watertower', ((80 - s.z * 2.2) % 440 + 440) % 440 - 60, 74, 26);
+        art.sprite2(ctx, 'sky-billboard', ((300 - s.z * 2.4) % 540 + 540) % 540 - 70, 72, 20);
+        if (!art.tile(ctx, 'sky-lowrise', 0, 56, W, 26, s.z * 2.6)) {
+            band(ctx, 62, 40, W, s.z * 2.6, 54, PAL.panel, (c, x, y) => {
+                rect(c, x, y + 6, 20, 36, '#16202e');
+                rect(c, x + 24, y - 4, 14, 46, '#101923');
+                rect(c, x + 41, y + 12, 11, 30, '#18222f');
+                for (let wy = 0; wy < 4; wy++) rect(c, x + 3, y + 10 + wy * 7, 3, 3, wy % 2 ? '#2a3a4d' : PAL.warn);
+            });
+        }
     }
-    band(ctx, 60, 40, W, s.z * 4.4, 88, PAL.panel, (c, x, y) => {
-        rect(c, x + 6, y + 8, 2, 34, '#2a3a2a');
-        glyph(c, '🌴', x + 7, y + 6, 15);
+    // Palms. Three kinds dealt off the slot index so a run of them is not one
+    // tree repeated — the same reason the skyline deals from a kit. One slot in
+    // three gets the sway sheet, and its fronds are offset by the slot so the
+    // whole avenue does not breathe in unison.
+    const palmScroll = s.z * 4.4;
+    const swayN = art.frames('palm-sway');
+    band(ctx, 60, 40, W, palmScroll, 88, PAL.panel, (c, x, y) => {
+        const slot = Math.floor((x + palmScroll) / 88);
+        const kind = ((slot % 3) + 3) % 3;
+        const id = kind === 1 ? 'palm-short' : kind === 2 ? 'palm-sway' : 'palm-tall';
+        const h = kind === 1 ? 26 : 44;
+        const frame = kind === 2
+            ? anim.frameOf('palm-sway', s.t, swayN) + anim.phaseOf(slot, swayN)
+            : 0;
+        if (!art.sprite2(c, id, x + 7, y + 42, h, { frame })) {
+            rect(c, x + 6, y + 8, 2, 34, '#2a3a2a');
+            glyph(c, '🌴', x + 7, y + 6, 15);
+        }
+    });
+    // Wildlife on the far verge: a cat that bolts as you come past, a flock
+    // that goes up. Keyed to where the player actually is on screen, so it
+    // reads as a reaction rather than a loop that happens to be playing.
+    band(ctx, 92, 8, W, s.z * 6.2, 171, PAL.panel, (c, x, y) => {
+        const slot = Math.floor((x + s.z * 6.2) / 171);
+        const near = Math.abs(x - s.px) < 52;
+        const cat = ((slot % 2) + 2) % 2 === 0;
+        const id = cat ? (near ? 'cat-dart' : 'cat-street') : 'pigeon-flock';
+        const n = art.frames(id);
+        art.sprite2(c, id, x, y + 8, cat ? 8 : 7, {
+            frame: anim.frameOf(id, cat || near ? s.t : 0, n) + anim.phaseOf(slot, n),
+        });
+        if (!cat && near) {
+            art.sprite2(c, 'feather-puff', x + 6, y + 6, 6, {
+                frame: anim.frameOf('feather-puff', s.t, art.frames('feather-puff')),
+            });
+        }
     });
     // Weather: a thin scatter of dust/haze drifting across the mid-ground,
     // plus the odd gull riding the thermals. Purely decorative — derived from
@@ -1300,7 +1499,10 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     }
     ctx.restore();
     band(ctx, 44, 14, W, s.z * 1.3, 150, PAL.panel, (c, x, y) => {
-        glyph(c, '🕊️', x, y + Math.sin(s.t * 2.4) * 2, 6, Math.sin(s.t * 2.4) * 0.1, 0.55);
+        const gy = y + Math.sin(s.t * 2.4) * 2;
+        if (!art.sprite2(c, 'gull', x, gy, 6, { frame: anim.frameOf('gull', s.t, art.frames('gull')), alpha: 0.55 })) {
+            glyph(c, '🕊️', x, gy, 6, Math.sin(s.t * 2.4) * 0.1, 0.55);
+        }
     });
 
     // --- the hill -----------------------------------------------------------
@@ -1317,25 +1519,68 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     ctx.scale(zoom, zoom);
     ctx.translate(-W / 2, -ROAD_TOP);
 
+    // Verge: grass, then the pavement slabs, then the things standing on them.
     rect(ctx, -50, ROAD_TOP - 8, W + 100, 8, '#3b3f34');                  // verge
+    art.tile(ctx, 'grass-verge', -50, ROAD_TOP - 14, W + 100, 6, s.z * PX_PER_M);
+    art.tile(ctx, 'pavement', -50, ROAD_TOP - 8, W + 100, 8, s.z * PX_PER_M);
     band(ctx, ROAD_TOP - 8, 8, W + 60, s.z * PX_PER_M, 34, PAL.line, (c, x, y) => {
         rect(c, x - 30, y - 2, 3, 10, PAL.faint);
-        glyph(c, '🗑️', x - 12, y + 1, 8, 0, 0.85);
+        if (!art.sprite2(c, 'bin-wheelie', x - 12, y + 5, 12, { alpha: 0.85 })) {
+            glyph(c, '🗑️', x - 12, y + 1, 8, 0, 0.85);
+        }
     });
-    rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, '#20242b');      // asphalt
-    rect(ctx, -50, ROAD_TOP, W + 100, 2, '#2e343d');                      // kerb lip
+    // Roadside dressing at a wider pitch than the bins, dealt off the slot so
+    // a descent passes a sequence of things rather than one thing repeatedly.
+    band(ctx, ROAD_TOP - 8, 8, W + 60, s.z * PX_PER_M, 129, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + s.z * PX_PER_M) / 129);
+        const kind = ((slot % 5) + 5) % 5;
+        if (kind === 0) art.tile(c, 'fence-picket', x - 30, y - 10, 72, 10);
+        else if (kind === 1) art.tile(c, 'hedge-low', x - 30, y - 9, 72, 9);
+        else if (kind === 2) art.sprite2(c, 'tree-street', x, y + 8, 26);
+        else if (kind === 3) art.sprite2(c, 'streetlight', x + 10, y + 8, 32);
+        else {
+            // One hydrant in three has already been opened by somebody. It is
+            // that kind of street, and it is a use for the animated sheet.
+            const blown = ((slot / 5) | 0) % 3 === 1;
+            const hy = blown ? 'hydrant-blown' : 'hydrant';
+            const hn = art.frames(hy);
+            art.sprite2(c, hy, x + 6, y + 8, blown ? 11 : 8, {
+                frame: anim.frameOf(hy, s.t, hn) + anim.phaseOf(slot, hn),
+            });
+            art.sprite2(c, 'mailbox', x + 34, y + 8, 8);
+        }
+    });
+    if (!art.tile(ctx, 'road-asphalt', -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, s.z * PX_PER_M)) {
+        rect(ctx, -50, ROAD_TOP, W + 100, H + 50 - ROAD_TOP, '#20242b');  // asphalt
+    }
+    if (!art.tile(ctx, 'kerb', -50, ROAD_TOP - 1, W + 100, 5, s.z * PX_PER_M)) {
+        rect(ctx, -50, ROAD_TOP, W + 100, 2, '#2e343d');                  // kerb lip
+    }
+    // Wear in the tarmac. Sparse, scrolling with the road, behind everything
+    // that drives on it.
+    band(ctx, ROAD_TOP + 4, 6, W + 60, s.z * PX_PER_M, 163, PAL.faint, (c, x, y) => {
+        art.sprite2(c, 'road-crack', x - 30, y + 7, 7, { alpha: 0.7 });
+        art.sprite2(c, 'manhole', x + 52, y + 7, 5);
+        art.sprite2(c, 'drain-grate', x + 108, y + 7, 4);
+    });
+    band(ctx, H - 22, 6, W + 60, s.z * PX_PER_M, 197, PAL.faint, (c, x, y) => {
+        art.sprite2(c, 'skid-mark', x - 20, y + 7, 5, { alpha: 0.5 });
+    });
 
     // Lane markings. Scrolling these at the real speed is most of the
     // sensation of speed at low velocity.
     for (let l = 1; l < LANES; l++) {
         const y = laneY(l) - LANE_H / 2;
+        if (art.tile(ctx, 'road-centreline', -50, y - 1.5, W + 100, 3, s.z * PX_PER_M)) continue;
         band(ctx, y, 2, W + 60, s.z * PX_PER_M, 26, PAL.faint, (c, x, yy) => {
             rect(c, x - 30, yy, 12, 1.6, '#4a535e');
         });
     }
-    band(ctx, H - 4, 4, W + 60, s.z * PX_PER_M, 40, PAL.faint, (c, x, y) => {
-        rect(c, x - 30, y, 20, 3, '#39414b');
-    });
+    if (!art.tile(ctx, 'road-edgeline', -50, H - 4, W + 100, 2, s.z * PX_PER_M)) {
+        band(ctx, H - 4, 4, W + 60, s.z * PX_PER_M, 40, PAL.faint, (c, x, y) => {
+            rect(c, x - 30, y, 20, 3, '#39414b');
+        });
+    }
 
     // --- obstacles (far lanes first so nearer things overlap them) --------
     const sorted = s.obstacles.slice().sort((a, b) => a.lane - b.lane);
@@ -1368,7 +1613,7 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     }
     if (art.has(bikeState(s))) {
         art.sprite(ctx, bikeState(s), '', tx, ty + 2 * tsc, RIDER_H * tsc, {
-            frame: Math.floor(s.t * 14),
+            frame: bikeFrame(s),
             height: RIDER_H * tsc,
         });
     } else {
@@ -1408,7 +1653,7 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     const boardArt = s.hasBoard && art.has(boardState(s));
     if (boardArt) {
         art.sprite(ctx, boardState(s), '', s.px, ry + 2 * psc, RIDER_H * psc, {
-            frame: Math.floor(s.t * 14),
+            frame: boardFrame(s),
             height: RIDER_H * psc,
         });
     } else {
@@ -1445,6 +1690,13 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         drawItemSprite(ctx, w, x, laneY(sh.lane) - 10 - arc, 13, s.t, sh.spin * (sh.back ? -1 : 1));
     }
 
+    // Drawn one-shot effects — dust off a landing, a star of impact. These sit
+    // in front of the actors, because they are what just happened to them.
+    for (const b of s.bursts) {
+        art.sprite2(ctx, b.id, b.x, b.y, b.size, {
+            frame: anim.frameOf(b.id, b.t, art.frames(b.id)),
+        });
+    }
     for (const p of s.sparks) glyph(ctx, p.ch, p.x, p.y, 9, 0, clamp(p.life * 2, 0, 1));
     ctx.restore();
 

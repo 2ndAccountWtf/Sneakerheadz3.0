@@ -19,6 +19,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+    RATE, ONCE, DEFAULT_RATE, runRate,
+} from '../components/minigames/phaser/flight404/skin.ts';
+import {
     SCALPER_PHOTO, SCALPER_GRAB, HYPE_WIND, HYPE_CHARGE, HYPE_STUN,
     RESELLER_BAG, RESELLER_ESCAPE, SECURITY_RADIO, OWNER_TIDY,
     FALAFEL_SPILL, FALAFEL_RECOVER, STOCK, CAST,
@@ -138,6 +141,58 @@ t('every enemy in the cast has at least one sprite requested', () => {
 
 t('the bounce cap the artist is drawing to is the one the physics uses', () => {
     assert.ok(DOC.includes(`${MAX_BOUNCES} bounces`), `falafel bounce cap is ${MAX_BOUNCES} and the list does not say so`);
+});
+
+// ---------------------------------------------------------------------------
+// Playback rules
+// ---------------------------------------------------------------------------
+// The four animation bugs fixed in `skin.ts` — one flat rate for everything, a
+// run cycle on the wall clock, deaths that looped, a jump on a timer — were all
+// invisible in a diff and obvious on screen. These pin the table that fixed
+// them, so a sheet added without a rate or a fall added without a one-shot is a
+// failure here rather than something somebody notices in a playtest.
+
+t('not every state plays at the same rate', () => {
+    const distinct = new Set(Object.values(RATE));
+    assert.ok(distinct.size > 5, `only ${distinct.size} distinct rates in the table`);
+});
+
+t('a death is a one-shot and a walk is not', () => {
+    // Looping a death animation stands the body back up to kill it again.
+    assert.ok(ONCE.has('die'));
+    assert.ok(ONCE.has('hurt'));
+    assert.ok(!ONCE.has('idle'));
+    assert.ok(!ONCE.has('run'));
+});
+
+t('every one-shot state has a rate of its own', () => {
+    for (const state of ONCE) {
+        assert.ok(state in RATE, `${state} plays once with no rate set`);
+    }
+});
+
+t('a faster runner takes faster steps', () => {
+    // The skating-feet bug in one assertion: the rate has to come from how fast
+    // the body is actually moving, not from a constant.
+    assert.ok(runRate(6, 140, 26) > runRate(6, 40, 26), 'run rate ignores speed');
+});
+
+t('a taller character takes longer strides', () => {
+    // Same cycle, same speed, bigger body: fewer steps per second, because the
+    // legs cover more ground each time.
+    assert.ok(runRate(6, 88, 40) < runRate(6, 88, 20));
+});
+
+t('a standstill does not strobe and a sprint does not blur', () => {
+    assert.ok(runRate(6, 0, 26) >= 4);
+    assert.ok(runRate(6, 100000, 26) <= 30);
+});
+
+t('every rate is a usable frame rate', () => {
+    for (const [state, r] of Object.entries(RATE)) {
+        assert.ok(r > 0 && r <= 30, `${state} at ${r}fps`);
+    }
+    assert.ok(DEFAULT_RATE > 0 && DEFAULT_RATE <= 30);
 });
 
 console.log(`\n${pass} asset-list checks passed.\n`);

@@ -128,6 +128,19 @@ export interface Skin {
 
 const has = (scene: PhaserNS.Scene, id: string): boolean => scene.textures.exists(T(id));
 
+/**
+ * Should a request for the state already showing start the sheet again?
+ *
+ * Only for a one-shot that has finished. A shoot sheet holds on its last frame
+ * when it ends, and the state is still 'shoot' when the next trigger pull
+ * arrives — so guarding purely on "the state changed" swallows every shot after
+ * the first until the actor does something else. A loop is never restarted,
+ * because that would reset a run cycle to frame zero on every frame.
+ */
+function restartable(state: string, sprite: PhaserNS.GameObjects.Sprite): boolean {
+    return ONCE.has(state) && !sprite.anims.isPlaying;
+}
+
 /** Walk the fallback chain until something has been delivered. */
 function resolve(scene: PhaserNS.Scene, set: SkinSet, state: string): string | null {
     const seen = new Set<string>();
@@ -188,7 +201,7 @@ export function attachSkin(
                 const vy = motion.vy;
                 const idx = vy < -60 ? 0 : vy < 40 ? 1 : 2;
                 sprite.setFrame(Math.min(frames - 1, idx));
-            } else if (this.state !== state) {
+            } else if (this.state !== state || restartable(state, sprite)) {
                 this.state = state;
                 // An animation exists only for multi-frame sheets; a single
                 // frame is set directly rather than played, because asking

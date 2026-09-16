@@ -123,6 +123,20 @@ export const has = (id: string): boolean => LOADED.has(id);
 export const count = (): number => LOADED.size;
 export const delivered = (): number => ENTRIES.length;
 
+/** Frame count declared by the filename, known before the PNG has decoded. */
+const ENTRY_FRAMES = new Map(ENTRIES.map((e) => [e.id, e.frames]));
+
+/**
+ * How many frames `id` has, for `streetAnim` to index against.
+ *
+ * Reads the decoded sheet when there is one so a file whose width did not
+ * divide cleanly reports the 1 frame it was demoted to rather than the count
+ * its name claimed. Unknown ids report 1, which pins their frame at 0 — the
+ * right answer for something that is about to draw a fallback glyph anyway.
+ */
+export const frames = (id: string): number =>
+    LOADED.get(id)?.frames ?? ENTRY_FRAMES.get(id) ?? 1;
+
 /** Test/hot-reload hook. */
 export const reset = (): void => { LOADED.clear(); started = false; };
 
@@ -189,6 +203,120 @@ export function sprite(
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(sheet.img, f * sheet.fw, 0, sheet.fw, sheet.fh, -w / 2, -h, w, h);
     ctx.restore();
+}
+
+/**
+ * Like `sprite`, but returns whether it drew anything instead of falling back
+ * to an emoji.
+ *
+ * Some call sites have a fallback richer than one glyph — a palm has a coded
+ * trunk under it, roadworks are three cones in a row — and those cannot be
+ * expressed as a single character. This lets the caller keep its own.
+ */
+export function sprite2(
+    ctx: CanvasRenderingContext2D,
+    id: string,
+    x: number,
+    y: number,
+    size: number,
+    opts: SpriteOpts = {},
+): boolean {
+    if (!LOADED.has(id)) return false;
+    sprite(ctx, id, '', x, y, size, opts);
+    return true;
+}
+
+/**
+ * Draw a sheet stretched into an explicit rectangle, top-left anchored.
+ *
+ * `sprite` keeps the art's own aspect ratio, which is right for anything that
+ * stands on the ground and wrong for a house facade: the game decides how wide
+ * and how tall a given house is, and the drawing has to fill exactly that wall
+ * or the door and window the game draws on top of it will not line up.
+ *
+ * Returns false when the art has not arrived, so the caller can fall back to
+ * its coloured rectangle.
+ */
+export function panel(
+    ctx: CanvasRenderingContext2D,
+    id: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    opts: { frame?: number; flip?: boolean; alpha?: number } = {},
+): boolean {
+    const sheet = LOADED.get(id);
+    if (!sheet) return false;
+    const { frame = 0, flip = false, alpha = 1 } = opts;
+    const f = ((frame % sheet.frames) + sheet.frames) % sheet.frames;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = false;
+    if (flip) {
+        ctx.translate(x + w / 2, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-(x + w / 2), 0);
+    }
+    ctx.drawImage(sheet.img, f * sheet.fw, 0, sheet.fw, sheet.fh, x, y, w, h);
+    ctx.restore();
+    return true;
+}
+
+/**
+ * How much bigger delivered art is than the game's own pixels.
+ *
+ * `docs/ASSETS-STREET.md` asks for every file at 3×, so a wheelie bin twelve
+ * game pixels tall arrives as a 36px PNG. Anything drawn at its natural size
+ * has to divide by this or it comes out three times too big — which for a
+ * tileable surface means one flagstone filling half the road.
+ */
+export const ART_SCALE = 3;
+
+/**
+ * Tile a surface across a rectangle at its own pixel size.
+ *
+ * The difference from `strip` is what "one tile" means. `strip` scales the art
+ * to the height of the band, which is right for a horizon: the drawing is a
+ * picture of a thing and the band decides how tall that thing is. It is wrong
+ * for tarmac. Asphalt is a texture — a 64x18 patch meant to repeat — and
+ * stretching one patch over a 44px-deep road turns the grain into masonry.
+ *
+ * So this repeats in both axes at 1:1 with the art's own pixels, clipped to the
+ * rect, scrolled by `offset`. Returns false when the art has not arrived.
+ */
+export function tile(
+    ctx: CanvasRenderingContext2D,
+    id: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    offset = 0,
+    alpha = 1,
+): boolean {
+    const sheet = LOADED.get(id);
+    if (!sheet) return false;
+
+    const tw = sheet.fw / ART_SCALE;
+    const th = sheet.fh / ART_SCALE;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = false;
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    // Modulo twice so a negative scroll still lands in range; both games run
+    // their world backwards past the camera, so that is the normal case.
+    const sx0 = -(((offset % tw) + tw) % tw);
+    for (let ty = 0; ty < h; ty += th) {
+        for (let sx = sx0; sx < w; sx += tw) {
+            ctx.drawImage(sheet.img, 0, 0, sheet.fw, sheet.fh, x + sx, y + ty, tw, th);
+        }
+    }
+    ctx.restore();
+    return true;
 }
 
 /**

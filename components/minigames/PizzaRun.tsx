@@ -33,9 +33,9 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner, art,
+    shakeOffset, banner, art, anim, addBurst, stepBursts,
 } from './engine';
-import type { Ctx } from './engine';
+import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
 import { useGame } from '../../hooks/useGame';
 import { hasWeapon } from '../../systems/weapons';
@@ -141,6 +141,11 @@ const DRY_GRACE = 11;
  */
 const SPEED_START = 62;
 const SPEED_RAMP = 105;   // px/s of cruise added across the whole route
+/**
+ * How long you spend on the tarmac after a crash. Also the length of the fall
+ * animation, so the rider is back on his feet exactly when control returns.
+ */
+const WIPE_TIME = 0.85;
 
 const SCORE_DELIVER = 100;
 const SCORE_WINDOW = 250;
@@ -332,7 +337,11 @@ const OBS_TOTAL = OBS.reduce((n, o) => n + o.weight, 0);
  */
 const ART_ID: Record<string, string> = {
     car: 'car-sedan', taxi: 'car-taxi', door: 'car-door-open', bin: 'bin-wheelie',
-    skater: 'skateboarder', dog: 'dog-stray', works: 'roadworks',
+    // The slower skater ahead of you is another person on a board, so he rides
+    // the same sheet the player does — one drawing, two uses. He is dealt a
+    // frame offset and his own cycle rate off his speed, so he is visibly not
+    // your twin moving in lockstep.
+    skater: 'skateboard-ride', dog: 'dog-stray', works: 'roadworks',
     trolley: 'trolley-shopping', hydrant: 'hydrant', sprink: 'sprinkler',
     hedge: 'planter',
 };
@@ -350,8 +359,15 @@ const RIDER_H = 30;
  */
 function riderState(s: RunState): string {
     if (!s.hasBoard) return 'bmx';
-    if (s.wipeT > 0) return 'skateboard-balance-fall';
-    if (s.air > 0) return 'skateboard-ollie';
+    if (s.wipeT > 0) {
+        // Fall, slide, get up: three sheets across the one crash window rather
+        // than a ten-frame fall looping you back onto your feet and down again.
+        if (s.wipeT < WIPE_TIME * 0.3) return 'skateboard-burpee-to-stand';
+        if (s.wipe > WIPE_TIME * 0.4) return 'skateboard-ground-roll';
+        return 'skateboard-balance-fall';
+    }
+    // Real air gets a kickflip; a kerb hop does not.
+    if (s.air > 0) return s.airBig ? 'skateboard-kickflip' : 'skateboard-ollie';
     if (s.charging) return 'skateboard-manual';
     return 'skateboard-ride';
 }
@@ -359,7 +375,54 @@ function riderState(s: RunState): string {
 /** Drawn height in game pixels, from `docs/ASSETS-STREET.md`. */
 const ART_H: Record<string, number> = {
     bin: 12, dog: 9, works: 14, trolley: 16, hydrant: 8, sprink: 9, hedge: 9,
+    skater: RIDER_H - 2,   // a hair shorter than you, so he reads as further off
 };
+
+/**
+ * Pixels of road covered by one loop of a rolling cycle.
+ *
+ * Same idea as Downhill Racer's `RIDE_CYCLE_M`, in this game's units — `speed`
+ * here is screen pixels per second, not metres. Tuned so a rig near cruise
+ * reads at about fourteen frames a second, and everything slower scales down
+ * from there instead of pedalling at a fixed rate while barely moving.
+ */
+const RIDE_CYCLE_PX = 100;
+
+/**
+ * Drawn height of a car, in game pixels.
+ *
+ * `docs/ASSETS-STREET.md` puts a saloon at roughly three-quarters of a standing
+ * adult from this camera angle; the coded placeholder below measures 16 from
+ * roof to tyre, so the delivered art matches what was already on screen.
+ */
+const CAR_H = 16;
+
+/**
+ * How long the rider's animation has been running, on a clock that keeps going.
+ *
+ * `wipe` counts up through a wipeout while the rest of the run carries on, so
+ * unlike Downhill Racer this game's `t` never stops and can be used directly.
+ */
+const clockOf = (s: RunState): number => s.t;
+
+/** Frame for the rider, restarting one-shots when the state changes. */
+function riderFrame(s: RunState): number {
+    const id = riderState(s);
+    const n = art.frames(id);
+    const rate = id === 'skateboard-ride' || id === 'bmx'
+        ? anim.cycleRate(n, s.speed, RIDE_CYCLE_PX)
+        // The hop is as long as the rig says, so fit the sheet to it: the rider
+        // lands on the last frame instead of holding a pose in mid-air.
+        : id === 'skateboard-ollie' ? anim.fitRate(n, s.airDur)
+        // The fall owns the first 40% of the crash window and getting back up
+        // owns the last 30%; the slide in between just keeps rolling. Fitting
+        // each to its own slice is what stops a sheet playing halfway and
+        // cutting away mid-tumble.
+        : id === 'skateboard-balance-fall' ? anim.fitRate(n, WIPE_TIME * 0.4)
+        : id === 'skateboard-burpee-to-stand' ? anim.fitRate(n, WIPE_TIME * 0.3)
+        : undefined;
+    return anim.frameFor(s.anim, id, clockOf(s), n, rate);
+}
 
 // ---------------------------------------------------------------------------
 // State. One flat mutable object, mutated 60 times a second. Nothing in here is
@@ -468,6 +531,14 @@ export interface RunState {
 
     charge: number;
     charging: boolean;
+    /**
+     * Playback clock for the rider, so a one-shot — a hop, a wipeout — restarts
+     * when the state does rather than picking up wherever the last modulo left
+     * it. See `engine/streetAnim.ts`.
+     */
+    anim: anim.AnimClock;
+    /** One-shot effect sheets in flight — dust, impact stars, water. */
+    bursts: Burst[];
     prevHold: boolean;
     /** Set when a wind-up auto-fires, so one hold cannot machine-gun the rack. */
     throwLock: boolean;
@@ -723,6 +794,7 @@ export function createRunState(opts: {
         bestStreak: 0, dryT: 0,
 
         charge: 0, charging: false, prevHold: false, throwLock: false, armT: 0, facing: -1,
+        anim: anim.makeClock(), bursts: [],
 
         houses: [], nextHouseX: 210, sideFlip: -1, houseId: 0,
         obs: [], nextObsX: 300, obsId: 0,
@@ -757,6 +829,14 @@ function addPop(s: RunState, x: number, y: number, txt: string, color: string, s
 function addSpark(s: RunState, x: number, y: number, ch: string) {
     if (s.sparks.length > 24) return;
     s.sparks.push({ x, y, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 50, life: 0.5 + Math.random() * 0.35, ch });
+}
+
+/**
+ * Start a drawn one-shot effect, drifting with the road so it stays where it
+ * happened rather than where the camera was. See `engine/burst.ts`.
+ */
+function fx(s: RunState, id: string, x: number, y: number, size: number) {
+    addBurst(s.bursts, id, x, y, size, art.frames(id), -s.speed);
 }
 
 function say(s: RunState, h: House, txt: string, color: string) {
@@ -986,7 +1066,7 @@ function crash(s: RunState, o: Obs) {
     s.crashes++;
     s.lives--;
     s.invT = 1.4;
-    s.wipeT = 0.85;
+    s.wipeT = WIPE_TIME;
     s.wipe = 0;
     s.speed *= s.rig.keep;
     s.shake = 8;
@@ -997,6 +1077,15 @@ function crash(s: RunState, o: Obs) {
     if (s.ammo > 0) { s.ammo--; addSpark(s, RIDER_X + 10, laneY(s.laneF) - 6, '🍕'); }
     s.flash = o.def.label;
     s.flashT = 1.1;
+    fx(s, 'impact-star', RIDER_X, laneY(s.laneF) - 10, 12);
+    // A sprinkler or a hydrant soaks you; everything else just hurts.
+    if (o.def.kind === 'sprink' || o.def.kind === 'hydrant') {
+        fx(s, 'splash-water', RIDER_X + 4, laneY(s.laneF) + 2, 14);
+    }
+    // A dog you run into is a dog that barks about it, and a hedge you plough
+    // through is a cloud of dust.
+    if (o.def.kind === 'dog') fx(s, 'feather-puff', RIDER_X + 10, laneY(s.laneF) - 4, 9);
+    else fx(s, 'dust-plume', RIDER_X - 4, laneY(s.laneF) + 1, 10);
     addSpark(s, RIDER_X, laneY(s.laneF) - 10, '💢');
 }
 
@@ -1176,7 +1265,11 @@ export function stepRun(s: RunState, inp: RunInput, dt: number): void {
         s.air -= dt;
         const p = 1 - clamp(s.air / s.airDur, 0, 1);
         s.airZ = Math.sin(p * Math.PI) * s.rig.hopZ;
-        if (s.air <= 0) s.airZ = 0;
+        if (s.air <= 0) {
+            s.airZ = 0;
+            // Back on the tarmac: a puff of dust under the wheels.
+            fx(s, 'dust-plume', RIDER_X - 3, laneY(s.laneF) + 1, s.airBig ? 12 : 8);
+        }
     } else s.airZ = 0;
 
     // --- aim + throw ------------------------------------------------------
@@ -1242,6 +1335,7 @@ function stepPops(s: RunState, dt: number) {
         p.x -= s.speed * dt;
         if (p.life <= 0) s.pops.splice(i, 1);
     }
+    stepBursts(s.bursts, dt);
     for (let i = s.sparks.length - 1; i >= 0; i--) {
         const k = s.sparks[i];
         k.life -= dt;
@@ -1256,6 +1350,15 @@ function stepPops(s: RunState, dt: number) {
 // Rendering. Nothing below mutates the simulation.
 // ---------------------------------------------------------------------------
 const SKY = ['#070c18', '#0c1426', '#131e35', '#1b2942'];
+/**
+ * Delivered facade kinds, indexed by a house's `hue`.
+ *
+ * Three drawings rather than four because that is what was delivered; the hue
+ * wraps, and alternate houses are mirrored, so a street still does not read as
+ * one building repeated. Each has a `-far` and a `-near` variant: see the note
+ * in `drawHouse` about why the near one is drawn ground-line-up.
+ */
+const HOUSE_ART = ['house-bungalow', 'house-twostorey', 'house-apartment'];
 const HOUSE_BODY = ['#3a3346', '#2f3b4a', '#45362f', '#333f38'];
 const HOUSE_TRIM = ['#544a63', '#425264', '#5e4a3e', '#47584e'];
 const ROAD = '#1a1e25';
@@ -1320,24 +1423,48 @@ const drawHouse = (ctx: Ctx, s: RunState, h: House) => {
     const body = HOUSE_BODY[h.hue];
     const trim = HOUSE_TRIM[h.hue];
 
-    rect(ctx, x0, ty, h.w, h.hgt, body);
-    outline(ctx, x0, ty, h.w, h.hgt, '#0a0d12');
+    // Delivered facade, stretched to exactly the wall the game decided on, so
+    // the door and window drawn on top of it land where the simulation thinks
+    // they are. `panel` rather than `sprite` for that reason — see `streetArt`.
+    //
+    // The near row's art is authored upside down relative to the far row: its
+    // ground line is at the TOP of the image, because from this camera a house
+    // on the near verge rises down-screen toward you. Both are drawn into the
+    // same rect; the art already accounts for the flip.
+    const facade = `${HOUSE_ART[h.hue % HOUSE_ART.length]}-${dir < 0 ? 'far' : 'near'}`;
+    // Mirroring alternate houses doubles three drawings into six silhouettes,
+    // which is the cheapest thing that stops a street reading as a repeat.
+    const drew = art.panel(ctx, facade, x0, ty, h.w, h.hgt, { flip: h.id % 2 === 1 });
 
-    // Eaves: a roof line on the far row, an awning over the porch on the near.
-    if (dir < 0) {
-        rect(ctx, x0 - 3, ty - 3, h.w + 6, 4, trim);
-        rect(ctx, x0 + h.w - 14, ty - 9, 5, 7, trim);              // chimney
-    } else {
-        rect(ctx, x0 - 3, base, h.w + 6, 4, trim);
+    if (!drew) {
+        rect(ctx, x0, ty, h.w, h.hgt, body);
+        outline(ctx, x0, ty, h.w, h.hgt, '#0a0d12');
+
+        // Eaves: a roof line on the far row, an awning over the porch on the near.
+        if (dir < 0) {
+            rect(ctx, x0 - 3, ty - 3, h.w + 6, 4, trim);
+            rect(ctx, x0 + h.w - 14, ty - 9, 5, 7, trim);          // chimney
+        } else {
+            rect(ctx, x0 - 3, base, h.w + 6, 4, trim);
+        }
     }
 
-    // Ambient lit windows. It is late; most of the street is awake.
+    // Ambient lit windows. It is late; most of the street is awake. Drawn over
+    // the facade either way, because which windows are lit is the only thing
+    // making one house at this hour look different from the next.
     for (let i = 0; i < 2; i++) {
         const zz = 8 + i * 14;
         const wx = x0 + 6 + ((h.id * 13 + i * 23) % Math.max(6, h.w - 16));
         if (Math.abs(wx - (sx + h.winOff)) < 12) continue;
         const yy = base + dir * zz - (dir < 0 ? 6 : 0);
-        rect(ctx, wx, yy, 6, 6, (h.id + i) % 3 ? '#2a3242' : PAL.warn);
+        const lit = (h.id + i) % 3;
+        if (lit && art.sprite2(ctx, 'window-lit', wx + 3, yy + 6, 6)) continue;
+        rect(ctx, wx, yy, 6, 6, lit ? '#2a3242' : PAL.warn);
+    }
+    // A garage door on the near row, where a porch would otherwise be blank
+    // wall — only on houses wide enough to have one.
+    if (dir > 0 && h.w > 54 && h.id % 3 === 0) {
+        art.panel(ctx, 'garage-door', x0 + 4, base + h.hgt - 15, 24, 15);
     }
 
     // --- the target window ------------------------------------------------
@@ -1351,9 +1478,14 @@ const drawHouse = (ctx: Ctx, s: RunState, h: House) => {
     } else if (h.openWin) {
         // An open window is a hole with a warm room behind it, and a frame that
         // has been pushed up — the only visual tell for the trick shot.
-        rect(ctx, wx - WIN_HALF, wy, WIN_HALF * 2, wh, '#120d08');
-        rect(ctx, wx - WIN_HALF, wy, WIN_HALF * 2, 3, '#3a2d1c');
-        rect(ctx, wx - WIN_HALF + 1, wy + wh - 5, WIN_HALF * 2 - 2, 4, PAL.warn);
+        // Two frames: shut-but-unlatched, and pushed right up. Held open the
+        // whole time it is a target, so the frame is the state rather than a
+        // loop — the sash does not flap.
+        if (!art.panel(ctx, 'window-open', wx - WIN_HALF, wy, WIN_HALF * 2, wh, { frame: 1 })) {
+            rect(ctx, wx - WIN_HALF, wy, WIN_HALF * 2, wh, '#120d08');
+            rect(ctx, wx - WIN_HALF, wy, WIN_HALF * 2, 3, '#3a2d1c');
+            rect(ctx, wx - WIN_HALF + 1, wy + wh - 5, WIN_HALF * 2 - 2, 4, PAL.warn);
+        }
         outline(ctx, wx - WIN_HALF - 1, wy - 1, WIN_HALF * 2 + 2, wh + 2, PAL.legend);
         if (h.leanT > 0) {
             // Leaning out, holding the pizza, delighted.
@@ -1369,17 +1501,34 @@ const drawHouse = (ctx: Ctx, s: RunState, h: House) => {
     // --- door + doormat ---------------------------------------------------
     const dx = sx + h.doorOff;
     const dy = Math.min(base, base + dir * 16);
-    rect(ctx, dx - 5, dy, 10, 16, '#20262f');
-    rect(ctx, dx - 5, dy, 10, 1.5, trim);
-    circle(ctx, dx + 3, dy + 8, 0.9, PAL.legend);
+    // Two frames: shut, and open with a lit hallway behind it. It opens when
+    // somebody has come to collect, which is the only reason a door here moves.
+    if (!art.panel(ctx, 'door-front', dx - 5, dy, 10, 16, { frame: h.done && h.leanT > 0 ? 1 : 0 })) {
+        rect(ctx, dx - 5, dy, 10, 16, '#20262f');
+        rect(ctx, dx - 5, dy, 10, 1.5, trim);
+        circle(ctx, dx + 3, dy + 8, 0.9, PAL.legend);
+    }
     // Porch light, because you need to see the number at this hour.
     rect(ctx, dx + 7, dy + (dir < 0 ? 2 : 10), 2, 2, PAL.warn);
 
     const matY = base - dir * 6;
     const matC = !h.cust ? '#4a3a3a' : h.done ? '#2f5c3b' : PAL.ok;
-    rect(ctx, dx - 9, matY - 2.5, 18, 5, matC);
+    // The mat is a gameplay target — its colour says whether this house ordered
+    // and whether you have already delivered — so the delivered art goes down
+    // first and the state colour is washed over it rather than replaced by it.
+    if (art.sprite2(ctx, 'doormat', dx, matY + 2.5, 5)) {
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+        rect(ctx, dx - 9, matY - 2.5, 18, 5, matC);
+        ctx.restore();
+    } else {
+        rect(ctx, dx - 9, matY - 2.5, 18, 5, matC);
+    }
     outline(ctx, dx - 9, matY - 2.5, 18, 5, '#0a0d12');
-    if (h.done) drawBox(ctx, dx, matY, 0.2, 0.8);
+    // A landed box on the mat, drawn where it came to rest.
+    if (h.done && !art.sprite2(ctx, 'pizza-box-landed', dx, matY + 1, 5)) {
+        drawBox(ctx, dx, matY, 0.2, 0.8);
+    }
 
     // --- the marker -------------------------------------------------------
     // Green pizza pin = they ordered. Red = they did not, and they will say so.
@@ -1401,20 +1550,33 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
     const d = o.def;
 
     if (d.kind === 'car' || d.kind === 'taxi') {
-        const col = d.kind === 'taxi' ? '#c8a52d' : '#6d2f3a';
         shadow(ctx, x, y + 4, 15, 4, 0.4);
+        // Delivered vehicles are drawn nose-right; the oncoming taxi is the
+        // same art mirrored, which is also how you read which way it is coming.
+        const facing = (d.vx ?? 0) < 0;
+        const id = d.kind === 'taxi' ? 'car-taxi' : 'car-sedan';
+        if (art.sprite2(ctx, id, x, y + 4, CAR_H, { flip: facing, height: CAR_H })) return;
+
+        const col = d.kind === 'taxi' ? '#c8a52d' : '#6d2f3a';
         rect(ctx, x - 15, y - 7, 30, 11, col);
         rect(ctx, x - 9, y - 12, 17, 6, d.kind === 'taxi' ? '#e0bd48' : '#8b4150');
         rect(ctx, x - 7, y - 11, 13, 4, '#1b2430');
         circle(ctx, x - 9, y + 4, 2.6, PAL.black);
         circle(ctx, x + 9, y + 4, 2.6, PAL.black);
         // Headlights face the way it is going, which is how you read the taxi.
-        const nose = (d.vx ?? 0) < 0 ? -1 : 1;
-        rect(ctx, x + nose * 15 - 2, y - 4, 3, 3, (d.vx ?? 0) < 0 ? PAL.warn : PAL.bad);
+        const nose = facing ? -1 : 1;
+        rect(ctx, x + nose * 15 - 2, y - 4, 3, 3, facing ? PAL.warn : PAL.bad);
         if (d.kind === 'taxi') text(ctx, 'TAXI', x, y - 16, { size: 5, color: PAL.warn, align: 'center' });
         return;
     }
     if (d.kind === 'door') {
+        // Three frames of swing, indexed by how far open the door actually is,
+        // so the art and the simulation cannot disagree about the moment that
+        // is about to take you off the board.
+        const doorN = art.frames('car-door-open');
+        const doorF = Math.min(doorN - 1, Math.floor(o.open * doorN));
+        if (art.sprite2(ctx, 'car-door-open', x, y + 4, CAR_H, { frame: doorF, height: CAR_H })) return;
+
         rect(ctx, x - 11, y - 6, 22, 9, '#2d4a6b');
         rect(ctx, x - 6, y - 10, 11, 5, '#3d5c80');
         circle(ctx, x - 6, y + 3, 2.3, PAL.black);
@@ -1427,12 +1589,25 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
     }
     if (d.kind === 'works') {
         rect(ctx, x - 13, y - 2, 26, 4, '#3a2a12');
-        for (let i = -1; i <= 1; i++) glyph(ctx, '🚧', x + i * 9, y - 5, 11);
+        if (!art.sprite2(ctx, 'roadworks', x, y + 2, 14)) {
+            for (let i = -1; i <= 1; i++) glyph(ctx, '🚧', x + i * 9, y - 5, 11);
+        }
+        // The amber beacon on top blinks on its own slow clock, offset per
+        // instance so two sets of roadworks are not synchronised.
+        const lampN = art.frames('roadworks-lamp');
+        art.sprite2(ctx, 'roadworks-lamp', x + 9, y - 10, 6, {
+            frame: anim.frameOf('roadworks-lamp', s.t, lampN) + anim.phaseOf(o.id, lampN),
+        });
         return;
     }
     if (d.kind === 'sprink') {
         const on = o.open > 0.45;
-        glyph(ctx, '🚿', x, y + 2, 8, 1.2, 0.9);
+        const sprinkN = art.frames('sprinkler');
+        if (!art.sprite2(ctx, 'sprinkler', x, y + 4, 9, {
+            frame: anim.frameOf('sprinkler', s.t, sprinkN) + anim.phaseOf(o.id, sprinkN),
+        })) {
+            glyph(ctx, '🚿', x, y + 2, 8, 1.2, 0.9);
+        }
         if (on) {
             ctx.save();
             ctx.globalAlpha = 0.5 + o.open * 0.3;
@@ -1448,8 +1623,18 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
     const bob = d.drift ? Math.sin(s.t * 7 + o.phase) * 1.6 : 0;
     // Delivered art first, emoji second. See `ART_ID` for why this game's own
     // obstacle names are mapped onto shared street asset ids.
-    art.sprite(ctx, ART_ID[d.kind] ?? d.kind, d.glyph, x, y + 2 + bob, 13, {
-        frame: Math.floor(s.t * 10),
+    const id = ART_ID[d.kind] ?? d.kind;
+    const n = art.frames(id);
+    // Each sheet plays at its own rate, and anything that covers ground gets
+    // that rate from how fast it is actually going — the skater ahead pushes
+    // lazily because he is slower than you, which is the entire reason he is
+    // in your way. The per-instance offset stops a run of identical props
+    // stepping in unison, which reads as a rendering fault.
+    const rate = (d.vx ?? 0) !== 0 ? anim.cycleRate(n, d.vx ?? 0, RIDE_CYCLE_PX) : undefined;
+    const frame = anim.frameOf(id, s.t, n, rate)
+        + (anim.loops(id) ? anim.phaseOf(o.id, n) : 0);
+    art.sprite(ctx, id, d.glyph, x, y + 2 + bob, 13, {
+        frame,
         flip: (d.vx ?? 0) < 0,
         rotation: o.hit ? 1.3 : 0,
         height: ART_H[d.kind] ?? 13,
@@ -1476,34 +1661,119 @@ export function drawRun(ctx: Ctx, s: RunState) {
 
     // --- parallax: far towers, then the skyline, then the street ----------
     // Delivered skyline kit first; the coded towers below are the fallback.
+    // Furthest back: the low sun and the hills behind the city. Barely moving,
+    // because they are supposed to be miles away.
+    art.sprite2(ctx, 'sun-low', 292, 34, 26);
+    art.tile(ctx, 'sky-hills', 0, 40, W, 24, s.x * 0.03);
+    // The delivered skyline kit assembles a horizon that does not repeat: it
+    // deals thirty-nine separate buildings into slots and mirrors twins. See
+    // `skyline.ts` for why that beats a strip.
     const kit = art.drawSkyline(ctx, s.x, W);
-    if (!kit) band(ctx, 60, 30, W, s.x * 0.08, 96, PAL.panel, (c, x, y) => {
-        rect(c, x + 4, y - 26, 22, 30, '#111a28');
-        rect(c, x + 34, y - 16, 16, 20, '#0e1622');
-        rect(c, x + 58, y - 32, 26, 36, '#121b2a');
-        for (let i = 0; i < 5; i++) rect(c, x + 62 + (i % 3) * 7, y - 28 + Math.floor(i / 3) * 9, 3, 4, i % 2 ? '#26344a' : '#c9a23f');
+    if (!kit) {
+        // No kit yet. Fall back to the flat horizon strips that were delivered
+        // before it, and only then to the coded towers. Deliberately not drawn
+        // *behind* the kit as well: a strip repeats its whole contents every
+        // time it scrolls its own width, which is the exact repetition the kit
+        // exists to avoid, and two of them on screen at once is worse than one.
+        const flatTowers = art.tile(ctx, 'sky-towers', 0, 16, W, 40, s.x * 0.08);
+        if (!flatTowers) band(ctx, 60, 30, W, s.x * 0.08, 96, PAL.panel, (c, x, y) => {
+            rect(c, x + 4, y - 26, 22, 30, '#111a28');
+            rect(c, x + 34, y - 16, 16, 20, '#0e1622');
+            rect(c, x + 58, y - 32, 26, 36, '#121b2a');
+            for (let i = 0; i < 5; i++) rect(c, x + 62 + (i % 3) * 7, y - 28 + Math.floor(i / 3) * 9, 3, 4, i % 2 ? '#26344a' : '#c9a23f');
+        });
+        // A water tower and a billboard on the skyline, at the lowrise parallax
+        // so they read as sitting on those roofs rather than floating.
+        art.sprite2(ctx, 'sky-watertower', ((60 - s.x * 0.16) % 420 + 420) % 420 - 50, 64, 26);
+        art.sprite2(ctx, 'sky-billboard', ((250 - s.x * 0.18) % 520 + 520) % 520 - 60, 62, 20);
+        const flatLow = art.tile(ctx, 'sky-lowrise', 0, 38, W, 26, s.x * 0.22);
+        if (!flatLow) band(ctx, 64, 24, W, s.x * 0.22, 68, PAL.panel, (c, x, y) => {
+            rect(c, x, y - 18, 28, 22, '#16202f');
+            rect(c, x + 31, y - 26, 18, 30, '#101825');
+            rect(c, x + 52, y - 12, 12, 16, '#18222f');
+            for (let i = 0; i < 4; i++) rect(c, x + 4 + i * 6, y - 14, 3, 3, i % 2 ? '#243247' : PAL.warn);
+        });
+    }
+
+    // Far verge: pavement slabs and the grass strip behind them, then the
+    // houses that are actually part of the game. Tileable art first, the coded
+    // slab lines second — see `docs/ASSETS-STREET.md` on the full-bleed set.
+    rect(ctx, 0, FAR_WALL, W, ROAD_TOP - FAR_WALL, '#2b3038');
+    // A breeze-block wall runs behind the verge where there is no house, which
+    // is what the gaps between properties on this street actually look like.
+    art.tile(ctx, 'wall-breeze', 0, FAR_WALL - 12, W, 13, s.x);
+    art.tile(ctx, 'grass-verge', 0, FAR_WALL, W, 5, s.x);
+    if (!art.tile(ctx, 'pavement', 0, FAR_WALL + 5, W, ROAD_TOP - FAR_WALL - 5, s.x)) {
+        band(ctx, FAR_WALL, 12, W, s.x, 22, PAL.line, (c, x, y) => {
+            line(c, x, y, x, y + 12, '#232830');
+        });
+    }
+    // Things standing on the far verge, dealt off the scroll so they do not
+    // land in the same slot every time: a hedge, a picket fence, a kerbside
+    // tree, a mailbox at somebody's gate.
+    band(ctx, FAR_WALL, 10, W, s.x * 0.98, 118, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + s.x * 0.98) / 118);
+        const kind = ((slot % 4) + 4) % 4;
+        if (kind === 0) art.tile(c, 'hedge-low', x, y - 9, 72, 9);
+        else if (kind === 1) art.tile(c, 'fence-picket', x, y - 10, 72, 10);
+        else if (kind === 2) art.sprite2(c, 'tree-street', x + 20, y + 8, 30);
+        else art.sprite2(c, 'mailbox', x + 30, y + 7, 9);
     });
-    band(ctx, 64, 24, W, s.x * 0.22, 68, PAL.panel, (c, x, y) => {
-        rect(c, x, y - 18, 28, 22, '#16202f');
-        rect(c, x + 31, y - 26, 18, 30, '#101825');
-        rect(c, x + 52, y - 12, 12, 16, '#18222f');
-        for (let i = 0; i < 4; i++) rect(c, x + 4 + i * 6, y - 14, 3, 3, i % 2 ? '#243247' : PAL.warn);
+    // Wildlife on the far verge. Each animal switches sheet when you get close:
+    // the cat bolts, the pigeons go up, the dog barks. Driven off screen
+    // position rather than a timer, so it is a reaction to you and not a loop
+    // that happens to play while you pass.
+    band(ctx, FAR_WALL + 4, 6, W, s.x * 0.99, 157, PAL.faint, (c, x, y) => {
+        const slot = Math.floor((x + s.x * 0.99) / 157);
+        const near = Math.abs(x - RIDER_X) < 46;
+        const kind = ((slot % 3) + 3) % 3;
+        const id = kind === 0 ? (near ? 'cat-dart' : 'cat-street')
+            : kind === 1 ? 'pigeon-flock'
+            : 'dog-bark';
+        const n = art.frames(id);
+        // The pigeons only animate once you are on them; otherwise they sit.
+        const t = kind === 1 && !near ? 0 : s.t;
+        art.sprite2(c, id, x, y + 7, kind === 1 ? 7 : 9, {
+            frame: anim.frameOf(id, t, n) + anim.phaseOf(slot, n),
+        });
+        // Feathers where the flock just was.
+        if (kind === 1 && near) {
+            art.sprite2(c, 'feather-puff', x + 6, y + 5, 6, {
+                frame: anim.frameOf('feather-puff', s.t, art.frames('feather-puff')),
+            });
+        }
     });
 
-    // Far verge: slabs, then the houses that are actually part of the game.
-    rect(ctx, 0, FAR_WALL, W, ROAD_TOP - FAR_WALL, '#2b3038');
-    band(ctx, FAR_WALL, 12, W, s.x, 22, PAL.line, (c, x, y) => {
-        line(c, x, y, x, y + 12, '#232830');
-    });
     for (const h of s.houses) if (h.side === 'far') drawHouse(ctx, s, h);
 
     // --- the road ---------------------------------------------------------
-    rect(ctx, 0, ROAD_TOP, W, ROAD_BOT - ROAD_TOP, ROAD);
-    rect(ctx, 0, ROAD_TOP - 2, W, 2, '#454c57');                    // far kerb lip
-    rect(ctx, 0, ROAD_BOT, W, 2, '#454c57');                        // near kerb lip
+    if (!art.tile(ctx, 'road-asphalt', 0, ROAD_TOP, W, ROAD_BOT - ROAD_TOP, s.x)) {
+        rect(ctx, 0, ROAD_TOP, W, ROAD_BOT - ROAD_TOP, ROAD);
+    }
+    if (!art.tile(ctx, 'kerb', 0, ROAD_TOP - 5, W, 5, s.x)) {
+        rect(ctx, 0, ROAD_TOP - 2, W, 2, '#454c57');                // far kerb lip
+    }
+    if (!art.tile(ctx, 'kerb', 0, ROAD_BOT, W, 5, s.x)) {
+        rect(ctx, 0, ROAD_BOT, W, 2, '#454c57');                    // near kerb lip
+    }
+    // Wear on the tarmac: cracks and old skid marks, sparse and scrolling with
+    // the road so they sit in it rather than on it.
+    band(ctx, ROAD_TOP + 6, 6, W, s.x, 146, PAL.faint, (c, x, y) => {
+        art.sprite2(c, 'road-crack', x, y + 7, 7, { alpha: 0.7 });
+    });
+    band(ctx, ROAD_BOT - 10, 8, W, s.x, 173, PAL.faint, (c, x, y) => {
+        art.sprite2(c, 'skid-mark', x + 40, y + 9, 5, { alpha: 0.55 });
+        art.sprite2(c, 'manhole', x + 96, y + 9, 5);
+        art.sprite2(c, 'drain-grate', x + 140, y + 9, 4);
+    });
     for (let l = 1; l < LANES; l++) {
         const y = laneY(l) - LANE_H / 2;
         const col = l === 2 ? PAL.warn : '#4c545f';
+        // The centre lane divider gets the centreline art, the others the edge
+        // line; both are tileable strips, so they scroll rather than repeat in
+        // dashed chunks the eye can count.
+        const lineId = l === 2 ? 'road-centreline' : 'road-edgeline';
+        if (art.tile(ctx, lineId, 0, y - (l === 2 ? 1.5 : 1), W, l === 2 ? 3 : 2, s.x)) continue;
         band(ctx, y, 2, W, s.x, 30, PAL.faint, (c, x, yy) => {
             rect(c, x, yy - 0.8, l === 2 ? 30 : 14, 1.6, col);
         });
@@ -1511,9 +1781,11 @@ export function drawRun(ctx: Ctx, s: RunState) {
 
     // Near verge slabs (drawn before the actors standing on them).
     rect(ctx, 0, ROAD_BOT + 2, W, NEAR_WALL - ROAD_BOT - 2, '#2b3038');
-    band(ctx, ROAD_BOT + 2, 10, W, s.x, 22, PAL.line, (c, x, y) => {
-        line(c, x, y, x, y + 10, '#232830');
-    });
+    if (!art.tile(ctx, 'pavement', 0, ROAD_BOT + 2, W, NEAR_WALL - ROAD_BOT - 2, s.x)) {
+        band(ctx, ROAD_BOT + 2, 10, W, s.x, 22, PAL.line, (c, x, y) => {
+            line(c, x, y, x, y + 10, '#232830');
+        });
+    }
 
     // --- restock crates ---------------------------------------------------
     for (const c of s.crates) {
@@ -1523,10 +1795,16 @@ export function drawRun(ctx: Ctx, s: RunState) {
         const y = laneY(c.lane);
         const bob = Math.sin(s.t * 4 + c.bob) * 1.5;
         shadow(ctx, x, y + 3, 8, 3, 0.4);
-        rect(ctx, x - 8, y - 10 + bob, 16, 11, '#8a5a2b');
-        rect(ctx, x - 8, y - 10 + bob, 16, 3, '#b9793f');
-        outline(ctx, x - 8, y - 10 + bob, 16, 11, PAL.accent);
-        text(ctx, 'AM/PM', x, y - 6 + bob, { size: 4, color: PAL.accent, align: 'center' });
+        // The crate itself, with a stack of boxes on top of it so a restock
+        // reads as pizza rather than as generic loot.
+        if (art.sprite2(ctx, 'restock-crate', x, y + 1 + bob, 11)) {
+            art.sprite2(ctx, 'pizza-stack', x, y - 9 + bob, 7);
+        } else {
+            rect(ctx, x - 8, y - 10 + bob, 16, 11, '#8a5a2b');
+            rect(ctx, x - 8, y - 10 + bob, 16, 3, '#b9793f');
+            outline(ctx, x - 8, y - 10 + bob, 16, 11, PAL.accent);
+            text(ctx, 'AM/PM', x, y - 6 + bob, { size: 4, color: PAL.accent, align: 'center' });
+        }
     }
 
     // --- actors, far lanes first so nearer things overlap them ------------
@@ -1552,7 +1830,7 @@ export function drawRun(ctx: Ctx, s: RunState) {
         // person — which a fallback inside one call could not reproduce.
         if (art.has(riderState(s))) {
             art.sprite(ctx, riderState(s), '', RIDER_X, ry + 2, RIDER_H, {
-                frame: Math.floor(s.t * 14),
+                frame: riderFrame(s),
                 height: RIDER_H,
             });
         } else {
@@ -1584,30 +1862,58 @@ export function drawRun(ctx: Ctx, s: RunState) {
     }
     drawRider();
 
+    // Things on the near verge, dealt off the scroll like the far side: a cone
+    // left by the roadworks, a bin somebody knocked over and never stood back
+    // up, a planter. Decorative — nothing here is an obstacle.
+    band(ctx, NEAR_WALL - 2, 8, W, s.x * 1.02, 96, PAL.faint, (c, x, y) => {
+        const slot = Math.floor((x + s.x * 1.02) / 96);
+        const kind = ((slot % 3) + 3) % 3;
+        if (kind === 0) art.sprite2(c, 'cone', x + 14, y, 7);
+        else if (kind === 1) art.sprite2(c, 'bin-wheelie-down', x + 40, y, 7);
+        else art.sprite2(c, 'planter', x + 62, y, 8);
+    });
+
     // Near houses sit in front of everything on the street.
     for (const h of s.houses) if (h.side === 'near') drawHouse(ctx, s, h);
 
     // Streetlights on the near kerb, in front of the road, behind nothing.
     band(ctx, ROAD_BOT, 0, W, s.x, 132, PAL.faint, (c, x, y) => {
-        rect(c, x, y - 34, 2, 34, '#39414b');
-        rect(c, x - 1, y - 36, 12, 3, '#39414b');
-        circle(c, x + 10, y - 33, 2.2, PAL.warn);
-        ctx.save();
-        ctx.globalAlpha = 0.10;
-        c.beginPath();
-        c.moveTo(x + 10, y - 32);
-        c.lineTo(x - 12, y - 2);
-        c.lineTo(x + 32, y - 2);
-        c.closePath();
-        c.fillStyle = PAL.warn;
-        c.fill();
-        ctx.restore();
+        if (!art.sprite2(c, 'streetlight', x + 5, y, 36)) {
+            rect(c, x, y - 34, 2, 34, '#39414b');
+            rect(c, x - 1, y - 36, 12, 3, '#39414b');
+            circle(c, x + 10, y - 33, 2.2, PAL.warn);
+        }
+        // The pool of light under it, as a separate additive drawing so the
+        // lamp can be delivered without its glow and still look lit.
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        // Tight and faint: a wide soft one reads as a smudge over the lamp head
+        // rather than as light coming off it.
+        if (!art.sprite2(c, 'streetlight-glow', x + 6, y - 2, 20, { alpha: 0.16 })) {
+            c.globalCompositeOperation = 'source-over';
+            c.globalAlpha = 0.10;
+            c.beginPath();
+            c.moveTo(x + 10, y - 32);
+            c.lineTo(x - 12, y - 2);
+            c.lineTo(x + 32, y - 2);
+            c.closePath();
+            c.fillStyle = PAL.warn;
+            c.fill();
+        }
+        c.restore();
     });
 
     // --- boxes in flight --------------------------------------------------
+    const boxN = art.frames('pizza-box');
     for (const b of s.boxes) {
         shadow(ctx, b.sx, b.cy, 4, 1.6, 0.3);
-        drawBox(ctx, b.sx, b.cy - b.z, b.spin);
+        // A box in the air tumbles; the sheet's four frames are indexed by the
+        // spin the simulation already computes, so the drawing and the physics
+        // agree about which way up it is instead of running on separate clocks.
+        const f = Math.floor((b.spin / (Math.PI * 2)) * boxN);
+        if (!art.sprite2(ctx, 'pizza-box', b.sx, b.cy - b.z + 3, 6, { frame: f })) {
+            drawBox(ctx, b.sx, b.cy - b.z, b.spin);
+        }
     }
 
     // --- aim preview ------------------------------------------------------
@@ -1658,15 +1964,27 @@ export function drawRun(ctx: Ctx, s: RunState) {
     // --- speed lines ------------------------------------------------------
     if (s.speed > s.rig.top * 0.62) {
         const n = 4 + Math.round((s.speed / s.rig.top) * 6);
+        const lineN = art.frames('speed-lines');
         ctx.save();
         ctx.globalAlpha = 0.22;
         for (let i = 0; i < n; i++) {
             const y = ROAD_TOP + ((s.t * 500 + i * 97) % (ROAD_BOT - ROAD_TOP));
-            line(ctx, 0, y, 18 + ((i * 61) % 46), y, PAL.ink, 1);
+            // The delivered streak is a three-frame flicker; each line gets its
+            // own offset so they do not all flash together.
+            const lx = 18 + ((i * 61) % 46);
+            if (art.sprite2(ctx, 'speed-lines', lx / 2, y + 2, 4, {
+                frame: anim.frameOf('speed-lines', s.t, lineN) + anim.phaseOf(i, lineN),
+            })) continue;
+            line(ctx, 0, y, lx, y, PAL.ink, 1);
         }
         ctx.restore();
     }
 
+    for (const b of s.bursts) {
+        art.sprite2(ctx, b.id, b.x, b.y, b.size, {
+            frame: anim.frameOf(b.id, b.t, art.frames(b.id)),
+        });
+    }
     for (const k of s.sparks) glyph(ctx, k.ch, k.x, k.y, 9, 0, clamp(k.life * 2, 0, 1));
 
     // --- floating customer lines -----------------------------------------

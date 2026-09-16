@@ -147,8 +147,20 @@ file. **Author to the table above and the code will fit it.**
 ## 1.7 Tiling
 
 Anything marked **tileable** must be seamless **left-to-right**: the right edge
-continues into the left edge with no visible join. Nothing in this set tiles
-vertically.
+continues into the left edge with no visible join.
+
+**Three of them also tile top-to-bottom**, because the game lays them down as a
+surface rather than as a strip: `road-asphalt`, `pavement` and `grass-verge`.
+The road is deeper than one tile of asphalt, so the code repeats it downward as
+well — which means the bottom edge has to continue into the top edge too, or
+there will be a horizontal seam every 18px across the tarmac. Everything else
+marked tileable repeats horizontally only.
+
+These surfaces are drawn **at their own pixel size**, never stretched: a 64 × 18
+patch of asphalt is laid down as 64 × 18 game pixels however deep the road is.
+So author them at the sizes given and they will land exactly as drawn. (Objects
+— a hedge, a fence run, a horizon strip — are the same: authored size, repeated,
+not scaled to fit a band.)
 
 Keep the tiling pattern irregular. A strip that repeats an obvious feature every
 32px turns into a visible drumbeat once it scrolls.
@@ -506,7 +518,7 @@ A palm has no meaningful side view, so these are flat elevations too.
 - **What:** A dusty, over-pruned municipal street tree with a metal guard around the base.
 - **View:** B. **Ground:** Bottom edge.
 
-### `grass-verge` — 32 × 6, 1 frame, **tileable L↔R**
+### `grass-verge` — 32 × 6, 1 frame, **tileable L↔R and T↕B**
 - **What:** A strip of dry verge grass — patchy, more dust than lawn.
 - **View:** A — lying flat, seen at the road's high angle.
 - **Ground:** The whole asset is ground. **Tiling:** seamless.
@@ -517,7 +529,7 @@ A palm has no meaningful side view, so these are flat elevations too.
 
 All **VIEW A, lying flat**, and all **tileable left-to-right**.
 
-### `road-asphalt` — 64 × 18, 1 frame, **tileable L↔R**
+### `road-asphalt` — 64 × 18, 1 frame, **tileable L↔R and T↕B**
 - **What:** One lane's width of worn asphalt: patchy repairs, a tar seam, faint tyre polish down the wheel tracks.
 - **View:** A, flat. **Tiling:** seamless left to right.
 - **Critical:** **Dark and low-contrast.** Traffic and obstacles have to read against it, and a busy road surface makes every sprite harder to see.
@@ -537,7 +549,7 @@ All **VIEW A, lying flat**, and all **tileable left-to-right**.
 - **View:** A — the high angle is what makes both faces visible. **Tiling:** seamless.
 - **Critical:** The road is at the **bottom**, the pavement at the **top**. Getting this inverted turns the kerb into a step up out of the screen.
 
-### `pavement` — 32 × 8, 1 frame, **tileable L↔R**
+### `pavement` — 32 × 8, 1 frame, **tileable L↔R and T↕B**
 - **What:** Paving slabs with visible joints and one cracked slab. **View:** A, flat. **Tiling:** seamless — **keep the cracked slab away from both edges.**
 
 ### `drain-grate` — 10 × 4, 1 frame
