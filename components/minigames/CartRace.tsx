@@ -271,10 +271,35 @@ interface ObsDef {
      * "which lane" into a decision instead of a dice roll.
      */
     kerb?: boolean;
+    /**
+     * Metres per second along the hill. Positive is downhill, the way you are
+     * going; negative is traffic coming up at you. Absent means it is street
+     * furniture and does not move.
+     *
+     * Everything on this street used to be nailed down — the only car in the
+     * table was a parked one, so a four-lane road through a city had no traffic
+     * on it whatsoever, and a hill you are descending at 76mph was completely
+     * still apart from you and one man on a BMX.
+     */
+    vz?: number;
+    /**
+     * Which side of the road it belongs on. 'kerb' is the outside lanes,
+     * 'far' is the other carriageway (where oncoming traffic lives), 'inner'
+     * is the running lanes. Absent means anywhere.
+     */
+    side?: 'kerb' | 'far' | 'inner';
 }
 
 const OBS: ObsDef[] = [
-    { kind: 'car', glyph: '🚗', label: 'parked Camry', len: 3.2, wide: 0.6, clear: 'none', dmg: 14, keep: 0.55, weight: 18, kerb: true },
+    { kind: 'car', glyph: '🚗', label: 'parked Camry', len: 3.2, wide: 0.6, clear: 'none', dmg: 14, keep: 0.55, weight: 10, kerb: true, side: 'kerb' },
+    // Traffic. Slower than you, in the running lanes, so you overtake it —
+    // which is a different problem from a parked car: it is still there when
+    // you have committed to the lane beside it.
+    { kind: 'traffic', glyph: '🚙', label: 'a slow Corolla', len: 3.2, wide: 0.6, clear: 'none', dmg: 14, keep: 0.55, weight: 15, vz: 12, side: 'inner' },
+    // And traffic the other way, on the far carriageway. Closing at 44m/s
+    // against a parked car's 34 it gives you 1.27 seconds of warning instead of
+    // 1.65, which is the whole reason it is frightening.
+    { kind: 'oncoming', glyph: '🚕', label: 'an oncoming taxi', len: 3.0, wide: 0.6, clear: 'none', dmg: 15, keep: 0.5, weight: 12, vz: -10, side: 'far' },
     { kind: 'door', glyph: '🚪', label: 'car door', len: 1.8, wide: 0.55, clear: 'none', dmg: 12, keep: 0.5, weight: 9, kerb: true },
     { kind: 'bay', glyph: '🛒', label: 'AM/PM trolley bay', len: 3.6, wide: 1.05, clear: 'none', dmg: 13, keep: 0.5, weight: 6, kerb: true },
     { kind: 'ped', glyph: '🚶', label: 'pedestrian', len: 1.4, wide: 0.5, clear: 'none', dmg: 9, keep: 0.62, weight: 9, drift: 0.35 },
@@ -301,6 +326,7 @@ const ART_ID: Record<string, string> = {
     bin: 'bin-wheelie', dog: 'dog-stray', ped: 'pedestrian', works: 'roadworks',
     oil: 'oil-slick', ramp: 'skate-ramp', car: 'car-sedan', door: 'car-door-open',
     bay: 'trolley-bay', junk: 'trash-pile',
+    traffic: 'car-sedan', oncoming: 'car-taxi',
 };
 
 /**
@@ -740,10 +766,34 @@ function spawnObstacle(s: RaceState, def: ObsDef, z: number, lane: number) {
  * uniform roll across all four, which is what the whole table used to be.
  */
 function laneFor(s: RaceState, def: ObsDef): number {
+    // The far carriageway is the top two lanes, which is also where the
+    // oncoming headlights read best against the verge.
+    if (def.side === 'far') return rnd(s) < 0.5 ? 0 : 1;
+    // Running lanes only, so overtaking something never means squeezing between
+    // it and a parked car in the same instant.
+    if (def.side === 'inner') return 1 + Math.floor(rnd(s) * Math.max(1, LANES - 2));
     if (def.kerb) return rnd(s) < 0.5 ? 0 : LANES - 1;
     const lane = Math.floor(rnd(s) * LANES);
     return def.wide > 1 ? clamp(lane, 1, LANES - 2) : lane;
 }
+
+/**
+ * Where a thing is dropped into the world, in metres down the hill.
+ *
+ * Oncoming traffic is spawned far beyond the normal horizon and drives into
+ * view, because a car closing at 44m/s that appeared at the edge of the visible
+ * road would be on you in a second with no chance to read which lane it is in.
+ * Starting it off-screen means it arrives the way a real one would: as
+ * headlights, getting bigger.
+ */
+function spawnZ(s: RaceState, def: ObsDef): number {
+    if ((def.vz ?? 0) >= 0) return s.nextZ;
+    const closing = s.speed + Math.abs(def.vz ?? 0);
+    return s.nextZ + closing * ONCOMING_LEAD;
+}
+
+/** Seconds of approach an oncoming vehicle gets before it reaches the spawn line. */
+const ONCOMING_LEAD = 2.2;
 
 function fillStreet(s: RaceState) {
     while (s.nextZ < s.z + SPAWN_AHEAD) {
@@ -752,7 +802,7 @@ function fillStreet(s: RaceState) {
         for (const o of OBS) { roll -= o.weight; if (roll <= 0) { def = o; break; } }
 
         const lane = laneFor(s, def);
-        spawnObstacle(s, def, s.nextZ, lane);
+        spawnObstacle(s, def, spawnZ(s, def), lane);
 
         // A second obstacle two lanes away sometimes, so you have to actually
         // pick a line. Never enough to seal the street — one lane is always open.
@@ -766,7 +816,7 @@ function fillStreet(s: RaceState) {
             // put a Camry back in the middle of the road by the side door.
             if (def2.wide <= 1) {
                 const lane2 = def2.kerb ? laneFor(s, def2) : clamp(far, 0, LANES - 1);
-                spawnObstacle(s, def2, s.nextZ + (rnd(s) - 0.5) * 3, lane2);
+                spawnObstacle(s, def2, spawnZ(s, def2) + (rnd(s) - 0.5) * 3, lane2);
             }
         }
 
@@ -1196,7 +1246,15 @@ export function stepRace(s: RaceState, inp: RaceInput, dt: number): void {
 
     for (let i = s.obstacles.length - 1; i >= 0; i--) {
         const o = s.obstacles[i];
+        // Traffic moves down the hill; oncoming traffic moves up it. Applied
+        // before the culling test so a vehicle that has just gone past is
+        // dropped on the same frame it leaves, and before the collision test so
+        // the box you are checked against is the one that is drawn.
+        if (o.def.vz) o.z += o.def.vz * dt;
         if (o.z < s.z - 20) { s.obstacles.splice(i, 1); continue; }
+        // A vehicle that ran far enough ahead to be pointless is dropped too —
+        // only reachable if a crash leaves you slower than the traffic.
+        if (o.def.vz && o.z > s.z + SPAWN_AHEAD * 3) { s.obstacles.splice(i, 1); continue; }
         if (o.def.drift) {
             o.lane += o.dir * o.def.drift * dt;
             if (o.lane < 0 || o.lane > LANES - 1) { o.dir *= -1; o.lane = clamp(o.lane, 0, LANES - 1); }
@@ -1386,16 +1444,51 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
         if (!art.sprite2(ctx, 'oil-slick', x, y, 7 * sc)) glyph(ctx, '🛢️', x + 10 * sc, y - 5 * sc, 8 * sc);
         return;
     }
-    if (d.kind === 'car') {
+    if (d.kind === 'car' || d.kind === 'traffic' || d.kind === 'oncoming') {
         shadow(ctx, x, y, 13 * sc, 4 * sc, 0.4);
-        // Three parked vehicles dealt off the obstacle id, so a hill is lined
-        // with a saloon, a van and the odd write-off rather than one Camry
-        // cloned four hundred times. They all block identically; only the
-        // drawing differs, which is the right place for the variety.
-        const car = ['car-sedan', 'car-van', 'car-wreck'][o.id % 3];
-        if (art.sprite2(ctx, car, x, y, CAR_H * sc, { height: CAR_H * sc })) return;
-        rect(ctx, x - 12 * sc, y - 9 * sc, 24 * sc, 7 * sc, '#7b2f3a');
-        rect(ctx, x - 7 * sc, y - 13 * sc, 13 * sc, 4.5 * sc, '#9c4250');
+        // Three vehicles dealt off the obstacle id, so a hill is lined with a
+        // saloon, a van and the odd write-off rather than one Camry cloned four
+        // hundred times. A write-off is only ever parked, for obvious reasons.
+        const car = d.kind === 'car'
+            ? ['car-sedan', 'car-van', 'car-wreck'][o.id % 3]
+            : ['car-sedan', 'car-van'][o.id % 2];
+        // Art is drawn nose-right. Oncoming traffic is the same car mirrored,
+        // which is also the first thing that tells you it is coming at you.
+        const facing = (d.vz ?? 0) < 0;
+        const drew = art.sprite2(ctx, car, x, y, CAR_H * sc, { height: CAR_H * sc, flip: facing });
+
+        // Lamps, and they are the whole point of this branch.
+        //
+        // At a glance on a dark road every vehicle is the same rectangle, and
+        // the one thing you need to know before committing to a lane is which
+        // way it is going. Red on the left edge means you are looking at the
+        // back of something heading away; white on the left edge means
+        // headlights, and it is about to be in your lap. A parked car gets
+        // neither, so "unlit" reads as "not going anywhere".
+        if (d.vz) {
+            const lamp = facing ? '#fff3c4' : '#ff3b30';
+            const lx = x - (facing ? 8 : 9) * sc;
+            rect(ctx, lx, y - 7 * sc, 2.5 * sc, 2.5 * sc, lamp);
+            if (facing) {
+                // Headlight throw, down the road toward you.
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 0.16;
+                ctx.beginPath();
+                ctx.moveTo(lx, y - 6 * sc);
+                ctx.lineTo(lx - 34 * sc, y - 11 * sc);
+                ctx.lineTo(lx - 34 * sc, y + 4 * sc);
+                ctx.closePath();
+                ctx.fillStyle = lamp;
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        if (drew) return;
+        const body = d.kind === 'oncoming' ? '#c8a52d' : '#7b2f3a';
+        const roof = d.kind === 'oncoming' ? '#e0bd48' : '#9c4250';
+        rect(ctx, x - 12 * sc, y - 9 * sc, 24 * sc, 7 * sc, body);
+        rect(ctx, x - 7 * sc, y - 13 * sc, 13 * sc, 4.5 * sc, roof);
         rect(ctx, x - 5 * sc, y - 12 * sc, 9 * sc, 3 * sc, '#22303f');
         circle(ctx, x - 7 * sc, y - 1.5 * sc, 2.4 * sc, PAL.black);
         circle(ctx, x + 7 * sc, y - 1.5 * sc, 2.4 * sc, PAL.black);
