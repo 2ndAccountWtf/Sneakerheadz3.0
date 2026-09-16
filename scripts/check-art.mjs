@@ -23,6 +23,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { join } from 'node:path';
+import { decodePng } from './lib/png.mjs';
 
 const FOLDER = process.argv[2] ?? 'assets/art/flight404';
 
@@ -122,13 +123,24 @@ function alphaMap(png) {
  * the number it is checking goes stale the first time the canvas changes and
  * then confidently approves the wrong thing.
  */
-function artScale() {
+function artScale(folder) {
+    // The two games do not share a number and never did. Flight 404 renders its
+    // 352-unit world into a canvas ZOOM times wider, so its art scale is that
+    // ratio and moves when the constant does. The canvas games scale to the
+    // display instead, so theirs is the cap on that scaling -- MAX_STORE_SCALE,
+    // which is the most device pixels one logical pixel can ever be given.
+    // Reading both from source keeps this honest when either moves.
+    if (/street|characters|rooftop/.test(folder)) {
+        const src = readFileSync('components/minigames/engine/GameCanvas.tsx', 'utf8');
+        const m = /MAX_STORE_SCALE = (\d+)/.exec(src);
+        return m ? +m[1] : 8;
+    }
     const src = readFileSync('components/minigames/phaser/flight404/content.ts', 'utf8');
     const w = /RENDER_W = (\d+)/.exec(src);
     const v = /VIEW_W = (\d+)/.exec(src);
     return w && v ? +w[1] / +v[1] : 1;
 }
-const SCALE = artScale();
+const SCALE = artScale(FOLDER);
 
 // --- what the asset document asked for --------------------------------------
 
@@ -213,6 +225,61 @@ if (!existsSync(FOLDER)) {
  * than the game does is worse than none, because it says "all ready" about a
  * set it never looked at.
  */
+/**
+ * How much real drawing is inside this file?
+ *
+ * A file's dimensions say nothing about its detail. `car-taxi.png` shipped at
+ * 102x57 and contained roughly a 21x11 drawing: it had been reduced to a fifth
+ * of its delivered size somewhere in the export and enlarged back, so each
+ * pixel of the original covered a 5x5 block. Every size check above passed. It
+ * looked, in the game, like mush -- and the replacement, the same nominal
+ * 102x57, carried ~59x33 and looked like a different asset entirely.
+ *
+ * Enlarging repeats pixels exactly, so the giveaway is run length: count how
+ * often a pixel differs from the one before it, along both axes. A drawing
+ * authored at its delivered size changes almost every pixel (runs near 1); one
+ * enlarged 3x changes every third (runs near 3). Taking the smaller of the two
+ * axes is deliberate -- a run of 3 across and 1 down is a wide-pixel artefact,
+ * not a 3x enlargement.
+ *
+ * Flat regions inflate the number honestly (a clear sky really is one colour),
+ * so this only ever warns.
+ */
+function effectiveGrid(img) {
+    const { width: W, height: H, rgba } = img;
+    if (!rgba || W < 4 || H < 4) return null;
+    const same = (i, j) => rgba[i] === rgba[j] && rgba[i + 1] === rgba[j + 1]
+        && rgba[i + 2] === rgba[j + 2] && rgba[i + 3] === rgba[j + 3];
+    // Ignore fully transparent pixels: a big empty margin is not detail, and
+    // counting it as one long run would condemn every sprite with padding.
+    let hCells = 0, hRuns = 0, vCells = 0, vRuns = 0;
+    for (let y = 0; y < H; y++) for (let x = 1; x < W; x++) {
+        const i = (y * W + x) * 4, j = i - 4;
+        if (rgba[i + 3] < 8 && rgba[j + 3] < 8) continue;
+        hCells++; if (!same(i, j)) hRuns++;
+    }
+    for (let x = 0; x < W; x++) for (let y = 1; y < H; y++) {
+        const i = (y * W + x) * 4, j = i - W * 4;
+        if (rgba[i + 3] < 8 && rgba[j + 3] < 8) continue;
+        vCells++; if (!same(i, j)) vRuns++;
+    }
+    if (!hCells || !vCells) return null;
+
+    // Flat art is flat on purpose. A far-skyline silhouette is two colours by
+    // design, so its runs are enormous and mean nothing -- reporting it as lost
+    // detail is how a check like this stops being read. Count the palette and
+    // bow out when there is barely one.
+    const cols = new Set();
+    for (let i = 0; i < rgba.length && cols.size <= 24; i += 4)
+        if (rgba[i + 3] > 8) cols.add((rgba[i] << 16) | (rgba[i + 1] << 8) | rgba[i + 2]);
+    if (cols.size <= 24) return { flat: true, palette: cols.size };
+
+    const hRun = hCells / Math.max(1, hRuns);
+    const vRun = vCells / Math.max(1, vRuns);
+    const block = Math.min(hRun, vRun);
+    return { block, w: W / block, h: H / block };
+}
+
 const walk = (dir) => readdirSync(dir).flatMap((f) => {
     const full = join(dir, f);
     return statSync(full).isDirectory() ? walk(full) : (/\.png$/i.test(f) ? [full] : []);
@@ -224,7 +291,9 @@ if (!files.length) {
 }
 
 console.log(`\nChecking ${files.length} file(s) in ${FOLDER}`);
-console.log(`Canvas is ${Math.round(352 * SCALE)}px across a 352-unit world, so 1 world unit = ${SCALE.toFixed(3)} device pixels.\n`);
+console.log(/street|characters|rooftop/.test(FOLDER)
+    ? `A phone held sideways shows ${Math.round(320 * SCALE)}px across a 320-unit grid, so 1 unit = up to ${SCALE.toFixed(0)} device pixels.\n`
+    : `Canvas is ${Math.round(352 * SCALE)}px across a 352-unit world, so 1 world unit = ${SCALE.toFixed(3)} device pixels.\n`);
 let blockers = 0, warnings = 0;
 
 for (const file of files.sort()) {
@@ -285,6 +354,26 @@ for (const file of files.sort()) {
         if (want.frames !== frames) notes.push(`${frames} frames delivered, ${want.frames} asked for — fine, the @N in the filename wins`);
     } else {
         notes.push(`"${id}" is not in the asset list — it will still load, but nothing in the game draws that id yet`);
+    }
+
+    // 4. Real detail, which every other check above is blind to.
+    // `readPng` above only parses the header; this needs actual pixels.
+    let grid = null;
+    try { grid = effectiveGrid(decodePng(readFileSync(join(FOLDER, file)))); }
+    catch { /* an exotic PNG; the checks above already said what they could */ }
+    if (grid && grid.flat) {
+        notes.push(`flat art (${grid.palette} colours) — detail check skipped, which is right for a silhouette`);
+    } else if (grid && grid.block >= 2.2) {
+        const line = `contains only about ${Math.round(grid.w)}x${Math.round(grid.h)} of real drawing in a `
+            + `${png.width}x${png.height} file (pixels repeat in runs of ${grid.block.toFixed(1)}). `
+            + `That is a reduction to roughly 1/${Math.round(grid.block)} of this size, enlarged back. `
+            + `Re-export once from the master straight to ${png.width}x${png.height}.`;
+        // Always a note, never a blocker. The signal is strong but not proof --
+        // a deliberately simple drawing reads the same way -- and a check that
+        // fails the build on an inference is a check somebody turns off.
+        notes.push(line);
+    } else if (grid) {
+        notes.push(`detail is native to the file (runs of ${grid.block.toFixed(1)})`);
     }
 
     const ok = problems.length === 0;
