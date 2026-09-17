@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useGame } from '../hooks/useGame';
 import ScreenHeader from '../components/ScreenHeader';
 import { INITIAL_PLAYER_CASH, TOTAL_DAYS, getCredRank, CRED_RANKS } from '../constants';
-import { getBagValue } from '../systems/pricing';
+import { getBagValue, getNetWorth } from '../systems/pricing';
 import { getRunGrade, gradeColor } from '../data/ranks';
 import { recordScore, loadScores, type RunScore } from '../systems/persistence/save';
 
@@ -43,7 +43,7 @@ const GameOverScreen: React.FC = () => {
     const { player, day } = gameState;
 
     const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
-    const netWorth = player.cash + bagValue;
+    const netWorth = useMemo(() => getNetWorth(gameState), [gameState]);
     const netChange = netWorth - INITIAL_PLAYER_CASH;
     const grade = getRunGrade(netWorth, INITIAL_PLAYER_CASH);
     const accent = gradeColor(grade.tone);

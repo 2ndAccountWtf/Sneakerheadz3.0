@@ -111,6 +111,47 @@ export const getRunClock = (day: number, totalDays: number): RunClock => {
     return { daysLeft, label, color: 'var(--accent)', urgent: false };
 };
 
+/**
+ * How fast the run is going, and where that lands it on day 30.
+ *
+ * Both are `null` on day 1, and that is the point of this function existing.
+ *
+ * The Dossier used to compute the rate inline over `Math.max(1, day - 1)` days.
+ * On day 1 that divides by a day that has not happened: a morning's worth of
+ * unrealised paper movement became a *daily* rate, got multiplied by the 29 days
+ * still to come, and the panel announced a projected $26,000 and the rank of
+ * Drip Syndicate before the player had closed a single day of trading. The
+ * clamp was there to dodge a division by zero, and it did — by inventing the
+ * denominator instead of admitting there wasn't one.
+ *
+ * No elapsed time is not a rate of zero. It is the absence of a rate, and the
+ * only honest thing to report is nothing.
+ */
+export interface RunRate {
+    /** Net change per day *closed*, or null before the first day closes. */
+    perDay: number | null;
+    /** Net worth on the final day at that rate, or null when there is no rate. */
+    projected: number | null;
+    /** Days actually behind the player. Zero on day 1. */
+    daysTraded: number;
+}
+
+export const getRunRate = (
+    netWorth: number,
+    startingCash: number,
+    day: number,
+    daysLeft: number,
+): RunRate => {
+    const daysTraded = Math.max(0, day - 1);
+    if (daysTraded === 0) return { perDay: null, projected: null, daysTraded: 0 };
+    const perDay = (netWorth - startingCash) / daysTraded;
+    return {
+        perDay,
+        projected: Math.max(0, Math.round(netWorth + perDay * daysLeft)),
+        daysTraded,
+    };
+};
+
 /** Theme token for a grade, so the summary and the projection agree on colour. */
 export const gradeColor = (tone: RunGrade['tone']): string => ({
     bad: 'var(--bad)',

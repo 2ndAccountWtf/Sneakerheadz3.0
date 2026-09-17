@@ -158,3 +158,38 @@ export function getBagValue(state: GameState): number {
         return total + getSellPrice(market, item, state.player);
     }, 0);
 }
+
+/**
+ * What the player can actually lay hands on: pocket, bank, and the bag at what
+ * it would fetch today.
+ *
+ * This is the figure the hospital bills against, and it is deliberately *not*
+ * net worth. A debt does not reduce what an emergency room can reach — owing
+ * the card company money has never once stopped a hospital charging you — so
+ * `creditOwed` has no business in this number. Net worth is below.
+ */
+export function reachableAssets(state: GameState): number {
+    return state.player.cash + (state.player.bank ?? 0) + getBagValue(state);
+}
+
+/**
+ * What the run is actually worth: assets minus what is owed on them.
+ *
+ * There used to be no such function, and that was the bug. Every screen the
+ * player reads — the dashboard banner, the Dossier, the final score — computed
+ * `cash + bagValue` inline, which quietly said two false things:
+ *
+ *   - Banked money is not yours. Deposit $9,000 to keep it away from muggers,
+ *     exactly as the bank screen tells you to, and your net worth fell by
+ *     $9,000 and your grade with it. Finish the run with money in the bank and
+ *     the final score did not count it at all.
+ *   - Borrowed money is. The card opens a $2,500 line against a $2,000 stake,
+ *     and every dollar drawn on it landed in `cash` and counted as profit while
+ *     `creditOwed` sat in a field nothing scored.
+ *
+ * So banking your winnings looked like losing them and running up a debt looked
+ * like earning one. Both directions now go through here.
+ */
+export function getNetWorth(state: GameState): number {
+    return reachableAssets(state) - (state.player.wallet?.creditOwed ?? 0);
+}

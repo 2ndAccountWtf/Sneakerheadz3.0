@@ -46,7 +46,7 @@ import {
 import { isWeaponItem } from '../systems/ampm/stock';
 import { rollStreetRobbery } from '../systems/events/streetRobbery';
 import { pay, priceFor, type PaymentMethod } from '../systems/payment';
-import { shopCredGain, getBagValue } from '../systems/pricing';
+import { shopCredGain, getBagValue, reachableAssets } from '../systems/pricing';
 import { admit, stabilise, nightIn, settle, canStayAnother } from '../systems/hospital';
 import { reputationSpread } from '../systems/npc/reactions';
 import {
@@ -1347,12 +1347,10 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
         // A stop cannot continue while you are being loaded into an ambulance.
         activeBust: null,
         // What they can see and what they can reach: the pocket, the bank, and
-        // the bag, which is the part they price you on.
-        hospital: admit(
-            next.day,
-            causeOfCollapse(next, action),
-            next.player.cash + next.player.bank + getBagValue(next),
-        ),
+        // the bag, which is the part they price you on. Assets, not net worth —
+        // a debt does not reduce what a hospital can bill you for. See
+        // `reachableAssets`.
+        hospital: admit(next.day, causeOfCollapse(next, action), reachableAssets(next)),
     };
 };
 

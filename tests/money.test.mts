@@ -19,6 +19,10 @@ import type { Player } from '../types.ts';
 import { robberyExposure, muggingLoss, cardUsable, blockCard, accrueInterest, deposit } from '../systems/banking.ts';
 import { rollStreetRobbery } from '../systems/events/streetRobbery.ts';
 import { pay, priceFor, paymentBlocked } from '../systems/payment.ts';
+import { getNetWorth, reachableAssets } from '../systems/pricing.ts';
+import { getRunGrade, getRunRate } from '../data/ranks.ts';
+import { INITIAL_PLAYER_CASH } from '../constants.ts';
+import type { GameState } from '../types.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -262,6 +266,101 @@ t('paymentBlocked and pay never disagree', () => {
             }
         }
     }
+});
+
+/* ------------------------------------------------------------------------- *
+ * What the run is worth
+ *
+ * Every screen used to compute `cash + bagValue` inline, and the two things it
+ * left out both pointed the same way: toward telling the player something false
+ * about their own money. Banked cash stopped being theirs; borrowed cash became
+ * theirs. The bank screen actively tells you to deposit, so the game was
+ * punishing its own advice.
+ * ------------------------------------------------------------------------- */
+
+/** A game state thin enough for the worth functions, which only read the bag. */
+const S = (p: Partial<Player>): GameState => ({
+    player: P(p),
+    markets: {},
+    currentCityId: 'tokyo',
+    day: 1,
+    activeMarketSignals: [],
+} as unknown as GameState);
+
+t('moving cash into the bank does not change what the run is worth', () => {
+    // The headline bug. Deposit is a location change, not a loss.
+    const before = S({ cash: 10000, bank: 0 });
+    const after = S({ cash: 1000, bank: 9000 });
+    assert.equal(getNetWorth(before), 10000);
+    assert.equal(getNetWorth(after), 10000, 'banking your winnings made you poorer');
+    // And the grade follows the number, so it cannot drift back apart.
+    assert.equal(
+        getRunGrade(getNetWorth(after), INITIAL_PLAYER_CASH).title,
+        getRunGrade(getNetWorth(before), INITIAL_PLAYER_CASH).title,
+    );
+});
+
+t('a deposit through the real banking path is worth-neutral too', () => {
+    // Against the actual reducer rather than a hand-built pair of states, so a
+    // future change to `deposit` cannot slip past the check above.
+    const start = P({ cash: 10000, bank: 0 });
+    const moved = deposit(start, 9000);
+    assert.ok(moved.ok);
+    assert.equal(getNetWorth(S(start)), getNetWorth(S(moved.player)));
+});
+
+t('money drawn on the card is not profit', () => {
+    // $2,500 of credit against a $2,000 stake: bigger than the whole starting
+    // bankroll, and it used to count as winnings because nothing scored `owed`.
+    const maxed = S({ cash: 2000 + 2500, wallet: { hasCard: true, hasCredit: true, creditOwed: 2500, creditLimit: 2500 } });
+    assert.equal(getNetWorth(maxed), 2000, 'borrowing $2,500 counted as earning it');
+    assert.equal(getRunGrade(getNetWorth(maxed), INITIAL_PLAYER_CASH).title,
+        getRunGrade(INITIAL_PLAYER_CASH, INITIAL_PLAYER_CASH).title);
+});
+
+t('the hospital bills what it can reach, which is not net worth', () => {
+    // Deliberately different from `getNetWorth`. A debt does not reduce what an
+    // emergency room can charge you, so `reachableAssets` ignores `creditOwed`
+    // and the two functions are allowed to disagree by exactly that much.
+    const broke = S({ cash: 5000, bank: 1000, wallet: { hasCard: true, hasCredit: true, creditOwed: 3000, creditLimit: 3000 } });
+    assert.equal(reachableAssets(broke), 6000);
+    assert.equal(getNetWorth(broke), 3000);
+    assert.equal(reachableAssets(broke) - getNetWorth(broke), 3000, 'the gap must be exactly what is owed');
+});
+
+/* ------------------------------------------------------------------------- *
+ * The rate, and the day it does not exist
+ * ------------------------------------------------------------------------- */
+
+t('day one has no rate and makes no projection', () => {
+    // The screenshot bug: on day 1 the old code divided by `max(1, day - 1)`,
+    // turning one morning of paper movement into "+$800 per day" and a
+    // projected $26,000 before a single day had closed.
+    const r = getRunRate(2800, INITIAL_PLAYER_CASH, 1, 29);
+    assert.equal(r.daysTraded, 0);
+    assert.equal(r.perDay, null, 'day 1 reported a daily rate with no days behind it');
+    assert.equal(r.projected, null, 'day 1 projected a final total from nothing');
+});
+
+t('the rate appears on day two and is divided by real days', () => {
+    const d2 = getRunRate(2800, INITIAL_PLAYER_CASH, 2, 28);
+    assert.equal(d2.daysTraded, 1);
+    assert.equal(d2.perDay, 800);
+    assert.equal(d2.projected, 2800 + 800 * 28);
+    // Same net worth, later day: the same gain spread over more days is a
+    // smaller rate. The old clamp got this right from day 3 and wrong before it.
+    const d5 = getRunRate(2800, INITIAL_PLAYER_CASH, 5, 25);
+    assert.equal(d5.daysTraded, 4);
+    assert.equal(d5.perDay, 200);
+    assert.ok(d5.perDay < d2.perDay);
+});
+
+t('a projection is never negative, however badly it is going', () => {
+    // Losing $500 a day for 29 more days projects well past zero; the panel
+    // should say you end with nothing, not with minus eleven thousand dollars.
+    const r = getRunRate(1500, INITIAL_PLAYER_CASH, 2, 28);
+    assert.ok(r.perDay !== null && r.perDay < 0);
+    assert.equal(r.projected, 0);
 });
 
 console.log(`\n${pass} money checks passed.`);

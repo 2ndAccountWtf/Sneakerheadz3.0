@@ -4,7 +4,7 @@ import { Screen } from '../types';
 import { CITIES } from '../data/cities';
 import { STORES_BY_CITY } from '../data/stores';
 import { getCredRank, TOTAL_DAYS, INITIAL_PLAYER_CASH, TRAVEL_ENERGY_COST } from '../constants';
-import { getBagValue } from '../systems/pricing';
+import { getBagValue, getNetWorth } from '../systems/pricing';
 import { generateRumorsForCity } from '../systems/rumorEngine';
 import { venuesIn, isVenueOpen } from '../data/venues';
 import { collectorsIn } from '../systems/collectors';
@@ -53,7 +53,7 @@ const DashboardScreen: React.FC = () => {
     const storeCount = STORES_BY_CITY[currentCityId]?.length ?? 0;
     const rank = getCredRank(player.streetCred);
     const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
-    const netWorth = player.cash + bagValue;
+    const netWorth = useMemo(() => getNetWorth(gameState), [gameState]);
     const netChange = netWorth - INITIAL_PLAYER_CASH;
     const clock = getRunClock(day, TOTAL_DAYS);
 

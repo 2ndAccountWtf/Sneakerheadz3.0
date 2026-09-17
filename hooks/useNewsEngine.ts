@@ -85,7 +85,10 @@ export const useNewsEngine = () => {
                 const sneaker = SNEAKERS[Math.floor(Math.random() * SNEAKERS.length)];
                 const magnitude = 1 - (Math.random() * 0.3 + 0.1); // 10% to 40% price drop
                 const durationHrs = Math.floor(Math.random() * 24) + 12; // 12 to 36 hours
-                const units = ((Math.random() * 5 + 1) * 100000).toLocaleString();
+                // Rounded to the nearest thousand pairs, because a manufacturer
+                // does not announce 296,971.926 of anything. `toLocaleString` on
+                // the raw float put the fraction straight into the headline.
+                const units = (Math.round((Math.random() * 5 + 1) * 100) * 1000).toLocaleString();
 
                 const template = NEWS_TEMPLATES['production-surge'];
                 newsItem = {

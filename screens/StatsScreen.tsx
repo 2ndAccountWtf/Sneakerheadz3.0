@@ -3,9 +3,9 @@ import { useGame } from '../hooks/useGame';
 import { Screen } from '../types';
 import ScreenHeader from '../components/ScreenHeader';
 import { getCredRank, CRED_RANKS, TOTAL_DAYS, MAX_INVENTORY_SIZE, INITIAL_PLAYER_CASH } from '../constants';
-import { getBagValue } from '../systems/pricing';
+import { getBagValue, getNetWorth } from '../systems/pricing';
 import { GIFT_APPROVAL_THRESHOLD } from '../systems/events/bibiEvents';
-import { getRunClock, getRunGrade, gradeColor } from '../data/ranks';
+import { getRunClock, getRunGrade, getRunRate, gradeColor } from '../data/ranks';
 
 const Stat: React.FC<{
     label: string;
@@ -35,7 +35,7 @@ const StatsScreen: React.FC = () => {
     const { player, day, quests } = gameState;
 
     const bagValue = useMemo(() => getBagValue(gameState), [gameState]);
-    const netWorth = player.cash + bagValue;
+    const netWorth = useMemo(() => getNetWorth(gameState), [gameState]);
     const rank = getCredRank(player.streetCred);
     const nextRank = CRED_RANKS.find(r => r.min > player.streetCred);
     const toNext = nextRank ? nextRank.min - player.streetCred : 0;
@@ -43,15 +43,13 @@ const StatsScreen: React.FC = () => {
         ? ((player.streetCred - rank.min) / (nextRank.min - rank.min)) * 100
         : 100;
 
-    // Trajectory, not just position. The rate is measured over days *completed*
-    // so day 1 does not divide by zero and claim an infinite career.
+    // Trajectory, not just position — once there is a trajectory to measure.
+    // `getRunRate` returns nulls on day 1 rather than inventing a denominator;
+    // the panel renders an em dash and says why.
     const clock = getRunClock(day, TOTAL_DAYS);
-    const netChange = netWorth - INITIAL_PLAYER_CASH;
-    const daysTraded = Math.max(1, day - 1);
-    const perDay = netChange / daysTraded;
-    const projected = Math.max(0, Math.round(netWorth + perDay * clock.daysLeft));
+    const { perDay, projected } = getRunRate(netWorth, INITIAL_PLAYER_CASH, day, clock.daysLeft);
     const currentGrade = getRunGrade(netWorth, INITIAL_PLAYER_CASH);
-    const projectedGrade = getRunGrade(projected, INITIAL_PLAYER_CASH);
+    const projectedGrade = projected === null ? null : getRunGrade(projected, INITIAL_PLAYER_CASH);
 
     const badges = Object.entries(player.flags)
         .filter(([k, v]) => k.startsWith('badge-') && v)
@@ -107,15 +105,23 @@ const StatsScreen: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                         <div className="label">Per day</div>
-                        <div className="numeric text-base mt-0.5" style={{ color: perDay >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
-                            {perDay >= 0 ? '+' : '−'}${Math.abs(Math.round(perDay)).toLocaleString()}
-                        </div>
+                        {perDay === null ? (
+                            <div className="numeric text-base mt-0.5 text-[var(--ink-faint)]">—</div>
+                        ) : (
+                            <div className="numeric text-base mt-0.5" style={{ color: perDay >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                                {perDay >= 0 ? '+' : '−'}${Math.abs(Math.round(perDay)).toLocaleString()}
+                            </div>
+                        )}
                     </div>
                     <div className="min-w-0">
                         <div className="label">At this rate</div>
-                        <div className="numeric text-base mt-0.5" style={{ color: gradeColor(projectedGrade.tone) }}>
-                            ${projected.toLocaleString()}
-                        </div>
+                        {projected === null || projectedGrade === null ? (
+                            <div className="numeric text-base mt-0.5 text-[var(--ink-faint)]">—</div>
+                        ) : (
+                            <div className="numeric text-base mt-0.5" style={{ color: gradeColor(projectedGrade.tone) }}>
+                                ${projected.toLocaleString()}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -123,14 +129,16 @@ const StatsScreen: React.FC = () => {
                     <span className="chip" style={{ borderColor: gradeColor(currentGrade.tone), color: gradeColor(currentGrade.tone) }}>
                         Grade today · {currentGrade.title}
                     </span>
-                    {clock.daysLeft > 0 && (
+                    {clock.daysLeft > 0 && projectedGrade !== null && (
                         <span className="chip" style={{ borderColor: gradeColor(projectedGrade.tone), color: gradeColor(projectedGrade.tone) }}>
                             Day {TOTAL_DAYS} projection · {projectedGrade.title}
                         </span>
                     )}
                 </div>
                 <p className="text-[11px] text-[var(--ink-faint)] leading-snug mt-2">
-                    Unsold pairs are counted at market value when the books close, which is rarely what you paid.
+                    {perDay === null
+                        ? 'No day has closed yet, so there is no rate to run forward. Come back tomorrow.'
+                        : 'Unsold pairs are counted at market value when the books close, which is rarely what you paid. Banked cash counts; anything owed on the card comes back off.'}
                 </p>
             </section>
 
