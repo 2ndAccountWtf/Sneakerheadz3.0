@@ -960,9 +960,29 @@ const STREET_CAST: { id: string; h: number }[] = [
     { id: 'podcaster-eat-mushroom', h: 18 },
     { id: 'unhoused-neighbor-a', h: 17 },
     { id: 'unhoused-neighbor-b', h: 17 },
+    { id: 'cart-pusher-walk', h: 18 },
+    { id: 'elote-vendor-walk', h: 18 },
+    // The influencer is a pair, not a pose — see `NEAR_SWAP`.
+    { id: 'influencer-selfie-walk', h: 18 },
     // Still here, now one of several rather than all of them.
     { id: 'tiny-bicycle', h: 16 },
 ];
+
+/**
+ * Who does something different when you come past.
+ *
+ * The cat already works this way: it bolts when the player is close and
+ * otherwise sits. It is the cheapest thing in the game that makes the street
+ * feel aware of you, because the alternative — a loop that happens to be
+ * playing — reads as a loop however good the art is.
+ *
+ * The influencer is the one the delivery clearly intends it for: she walks,
+ * and when you are alongside she turns and poses. Two sheets, one behaviour,
+ * and it is funnier the second time you notice it.
+ */
+const NEAR_SWAP: Record<string, string> = {
+    'influencer-selfie-walk': 'influencer-selfie-turn-pose',
+};
 
 /**
  * Things somebody left on the pavement. Same band, different slots.
@@ -2149,7 +2169,12 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
         // One slot in four is somebody's belongings rather than somebody.
         const isStuff = h % 4 === 3;
         const list = isStuff ? STREET_STUFF : STREET_CAST;
-        const pickd = list[h % list.length];
+        const base = list[h % list.length];
+        // Close enough to be worth reacting to. The same 52px the wildlife band
+        // uses, so the street reacts to you at one consistent distance.
+        const near = Math.abs(x - s.px) < 52;
+        const id = (near && NEAR_SWAP[base.id]) || base.id;
+        const pickd = { id, h: base.h };
         const n = art.frames(pickd.id);
         // The cyclist pedals at the speed the ground is passing; everyone else
         // is doing their own thing at their own pace. See `engine/streetAnim.ts`.
