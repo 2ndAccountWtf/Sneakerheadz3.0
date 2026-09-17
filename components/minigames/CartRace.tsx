@@ -649,6 +649,7 @@ const TALK = [
     'Stop — that tickles!',
     'I could call Andre RIGHT NOW.',
     'Sooowoo!',
+    'LADY KILLERS AND BAD BOYS!',
     'I was in a coma for FIVE YEARS, blood.',
     'I got a verse about this hill already.',
     "That's a Compton left turn!",
@@ -2455,12 +2456,28 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
 
     // --- his mouth --------------------------------------------------------
     if (s.talkT > 0 && s.talk) {
+        // He is not always talking. Some of it is shouted, and it was all
+        // drawn at the same 6px whisper — which is why 'MY MIXTAPE!' mid-crash
+        // read the same as him musing about Palmdale.
+        //
+        // The tell is already in the content: the lines written as shouts are
+        // the ones written in capitals. So rather than tag each one, read it
+        // off the string — a line with no lowercase letters in it is a line
+        // being yelled.
+        const shout = !/[a-z]/.test(s.talk);
+        const size = shout ? 9 : 6;
+        const per = shout ? 6.2 : 4.4;
+        const h = shout ? 17 : 12;
         const bx = clamp(tx, 46, W - 46);
-        const by = ty - 38;
-        const tw = Math.min(150, s.talk.length * 4.4 + 8);
-        rect(ctx, bx - tw / 2, by - 6, tw, 12, 'rgba(4,6,10,0.85)');
-        outline(ctx, bx - tw / 2, by - 6, tw, 12, PAL.accent2);
-        text(ctx, s.talk, bx, by - 3, { size: 6, color: PAL.accent2, align: 'center' });
+        const by = ty - (shout ? 42 : 38);
+        // Capped against the view rather than against 320: on a widened screen
+        // there is more room, and a shout is exactly the line that wants it.
+        const tw = Math.min(W * 0.62, s.talk.length * per + 10);
+        rect(ctx, bx - tw / 2, by - h / 2, tw, h, 'rgba(4,6,10,0.85)');
+        outline(ctx, bx - tw / 2, by - h / 2, tw, h, shout ? PAL.accent : PAL.accent2);
+        text(ctx, s.talk, bx, by + (shout ? 3 : 3) - 6, {
+            size, color: shout ? PAL.accent : PAL.accent2, align: 'center',
+        });
     }
 
     // --- HUD --------------------------------------------------------------
