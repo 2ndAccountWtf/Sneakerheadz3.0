@@ -1,4 +1,4 @@
-export { GameCanvas } from './GameCanvas';
+export { GameCanvas, viewWidth } from './GameCanvas';
 export { ArcadeShell } from './ArcadeShell';
 export { TouchPad } from './TouchPad';
 export { useGameLoop } from './useGameLoop';

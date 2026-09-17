@@ -27,7 +27,7 @@ import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
     shakeOffset, banner, actor, art, anim, addBurst, stepBursts, lerpHex,
-    ditherRamp, glow, withAlpha,
+    ditherRamp, glow, withAlpha, viewWidth,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -41,7 +41,23 @@ import { spriteForItem } from '../../data/sprites/items';
 // ---------------------------------------------------------------------------
 // Geometry. 320x180 logical pixels, four lanes of asphalt, a 3/4 side view.
 // ---------------------------------------------------------------------------
-const W = 320;
+/**
+ * The world the game was designed against, and the world it is drawing now.
+ *
+ * `DESIGN_W` is the shape every constant below was tuned for. `W` is what the
+ * screen actually gave us this frame, and on a phone held sideways in
+ * fullscreen that is wider -- a fixed 16:9 picture in an 844x390 viewport
+ * spends eighteen per cent of the screen on black bars, and cropping to fill
+ * instead would take the HUD off the top.
+ *
+ * Widening is safe here precisely because **nothing in the simulation reads
+ * it**. Obstacles live in metres of hill, the gap is metres, the thief is
+ * metres; `W` appears only in draw code, so a wider screen shows more road and
+ * changes no outcome. That is load-bearing: the moment a spawn or a collision
+ * consults it, the same seed stops meaning the same race on two phones.
+ */
+const DESIGN_W = 320;
+let W: number = DESIGN_W;
 const H = 180;
 const LANES = 4;
 const ROAD_TOP = 100;
@@ -1696,9 +1712,13 @@ const backdrop = (ctx: Ctx, hillT: number, y0: number, y1: number) => {
     const paint = (c: Ctx, t: number) => { if (y0 === 0) paintSky(c, t); else paintHaze(c, t); };
     if (typeof document === 'undefined') { paint(ctx, hillT); return; }
     const key = Math.round(clamp(hillT, 0, 1) * BACKDROP_STEPS);
-    if (!bdCanvas) {
+    // Re-made when the view widens, not only when it is missing: the cache is
+    // as wide as the world was when it was built, and entering fullscreen makes
+    // the world wider. A stale one tiles a 320px sky across a 389px screen and
+    // leaves a bar of clear colour down the right-hand edge.
+    if (!bdCanvas || bdCanvas.width < Math.ceil(W)) {
         bdCanvas = document.createElement('canvas');
-        bdCanvas.width = W;
+        bdCanvas.width = Math.ceil(W);
         bdCanvas.height = HAZE_BOT + 1;
         bdCtx = bdCanvas.getContext('2d');
         bdKey = -1;
@@ -1908,6 +1928,8 @@ const drawObstacle = (ctx: Ctx, o: Obs, x: number, y: number, sc: number, t: num
 };
 
 export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
+    // What the canvas actually handed us. Fixed inline; wider in fullscreen.
+    W = viewWidth(ctx);
     const [sx, sy] = shakeOffset(s.shake);
 
     // How far down the 1900m hill you are, and how close to redline — both
@@ -2669,8 +2691,9 @@ const CartRace: React.FC<{
         <ArcadeShell
             title="Cart Race"
             subtitle={`${thief} · downhill · ${hasBoard ? '🛹 Venice Longboard' : '🛒 the other trolley'}`}
-            width={W}
+            width={DESIGN_W}
             height={H}
+            widen
             running={done === null}
             onFrame={onFrame}
             onInput={set}

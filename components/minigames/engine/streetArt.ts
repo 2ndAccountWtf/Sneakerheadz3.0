@@ -293,7 +293,9 @@ export function panel(
  * nearest-neighbour side, where rounding cannot smear it.
  */
 export function smoothFor(ctx: CanvasRenderingContext2D, srcW: number, destW: number): boolean {
-    const k = ctx.getTransform().a || 1;
+    // Same reason `viewWidth` guards it: the headless stub has the drawing
+    // calls and not the matrix.
+    const k = typeof ctx.getTransform === 'function' ? (ctx.getTransform().a || 1) : 1;
     return destW * k < srcW * 0.98;
 }
 

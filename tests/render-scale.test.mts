@@ -16,6 +16,7 @@
  * which is why both are tested here.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 let checks = 0;
 const ok = (cond: unknown, msg: string) => { assert.ok(cond, msg); checks++; };
@@ -202,6 +203,72 @@ const { smoothFor, ART_SCALE, tileSize } = await import('../components/minigames
     // throwing or returning something wild.
     const odd = fitScale(H * 3.2, H);
     ok(odd > 0 && odd <= 1, 'an off-grid delivery still returns a sane scale');
+}
+
+
+// ---------------------------------------------------------------------------
+// 5. Widening: fill the screen by showing more world, not by cropping or barring.
+// ---------------------------------------------------------------------------
+{
+    /** The rule out of `GameCanvas.resize`, isolated the same way as `storeFor`. */
+    const logicalFor = (designW: number, h: number, cssW: number, cssH: number, max: number) =>
+        Math.min(max, Math.max(designW, Math.round((cssW / cssH) * h)));
+
+    // iPhone 14/15 held sideways: 844x390. A fixed 16:9 picture is 693 wide,
+    // so 151px -- eighteen per cent of the screen -- went to black bars.
+    const barred = Math.round(390 * (16 / 9));
+    ok(844 - barred > 140, 'the old fixed ratio really did waste ~150px on that phone');
+
+    const w = logicalFor(320, 180, 844, 390, 512);
+    ok(w > 320, 'the world widens rather than letterboxing');
+    ok(Math.abs(w / 180 - 844 / 390) < 0.02, 'the widened world matches the screen aspect');
+    eq(w, 390, 'an 844x390 phone gets 390 logical px of road');
+
+    // A square-ish box must never make it *narrower* than the design, or every
+    // constant tuned against 320 starts falling off the right-hand edge.
+    eq(logicalFor(320, 180, 400, 400, 512), 320, 'a tall box never shrinks the world');
+    eq(logicalFor(320, 180, 300, 400, 512), 320, 'nor does a narrow one');
+
+    // And never sillier than the cap: past that the player sits in a corner.
+    eq(logicalFor(320, 180, 4000, 400, 512), 512, 'the widened world is capped');
+}
+{
+    // The invariant the whole feature rests on: a wider screen must not change
+    // the race. Obstacles live in metres, the gap is metres -- the moment a
+    // spawn or a collision consults the view width, the same seed stops meaning
+    // the same race on two phones.
+    const { createRaceState, stepRace, NO_INPUT } = await import('../components/minigames/CartRace.tsx');
+    const play = () => {
+        const s = createRaceState({ hasBoard: true, seed: 2024 });
+        for (let i = 0; i < 60 * 40 && !s.outcome; i++) {
+            stepRace(s, { ...NO_INPUT, right: true, ollie: i % 90 === 0 }, 1 / 60);
+        }
+        return `${s.gap.toFixed(4)}|${s.z.toFixed(4)}|${s.health}|${s.outcome}|${s.speed.toFixed(4)}`;
+    };
+    const a = play();
+    eq(play(), a, 'the same seed plays out identically, twice');
+    // Nothing in the sim can see a canvas, so this is really asserting that it
+    // stays that way: the check fails the moment someone reaches for `W`.
+    //
+    // Scoped by brace depth rather than by slicing to the next export, because
+    // the sky helpers happen to sit between `stepRace` and `drawRace` in the
+    // file, and they are draw code that reads `W` correctly.
+    const src = readFileSync('components/minigames/CartRace.tsx', 'utf8');
+    const body = (name: string) => {
+        const start = src.indexOf(`export function ${name}`);
+        ok(start >= 0, `${name} is where this test thinks it is`);
+        let depth = 0, i = src.indexOf('{', start);
+        for (let j = i; j < src.length; j++) {
+            if (src[j] === '{') depth++;
+            else if (src[j] === '}' && --depth === 0) return src.slice(i, j);
+        }
+        return '';
+    };
+    const sim = body('stepRace').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+    ok(!/\bW\b/.test(sim), 'the simulation half never reads the view width');
+    // ...and the check is worth something only if it can see the draw half,
+    // which reads `W` constantly.
+    ok(/\bW\b/.test(body('drawRace')), 'the same check does find it in the draw half');
 }
 
 console.log(`render-scale: ${checks} checks OK`);

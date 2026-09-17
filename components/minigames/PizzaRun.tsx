@@ -33,7 +33,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner, art, anim, addBurst, stepBursts, ditherRamp, glow,
+    shakeOffset, banner, art, anim, addBurst, stepBursts, ditherRamp, glow, viewWidth,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -57,7 +57,15 @@ import { hasWeapon } from '../../systems/weapons';
 // The two rows are mirrors of each other: a house owns a `dir` of -1 (far) or
 // +1 (near) and every vertical offset on it is `base + dir * heightOnWall`.
 // ---------------------------------------------------------------------------
-const W = 352;
+/**
+ * The design world, and the world this frame actually got.
+ *
+ * Same split as Downhill Racer, for the same reason and with the same
+ * precondition: `stepRun` never reads `W`, so a wider screen shows more street
+ * and changes no outcome. See the note on `DESIGN_W` in `CartRace.tsx`.
+ */
+const DESIGN_W = 352;
+let W: number = DESIGN_W;
 const H = 198;
 const LANES = 4;
 const LANE_H = 12;
@@ -1724,6 +1732,7 @@ const drawObstacle = (ctx: Ctx, s: RunState, o: Obs) => {
 };
 
 export function drawRun(ctx: Ctx, s: RunState) {
+    W = viewWidth(ctx);
     const [shx, shy] = shakeOffset(s.shake);
 
     // --- sky --------------------------------------------------------------
@@ -2314,7 +2323,8 @@ const PizzaRun: React.FC<{
         <ArcadeShell
             title="Pizza Run"
             subtitle={`Rent night · two-sided street · ${hasBoard ? '🛹 Venice Longboard' : '🚲 the shop BMX'}`}
-            width={W}
+            width={DESIGN_W}
+            widen
             height={H}
             running={done === null}
             onFrame={onFrame}

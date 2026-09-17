@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MiniGameShell } from '../MiniGameShell';
 import { GameCanvas } from './GameCanvas';
 import { TouchPad } from './TouchPad';
+import { TouchZones } from './TouchZones';
 import { useFullscreen } from './useFullscreen';
 import type { Btn } from './useInput';
 import type { Weapon } from '../../../systems/weapons';
@@ -36,7 +37,7 @@ interface ArcadeShellProps {
  */
 export const ArcadeShell: React.FC<ArcadeShellProps> = ({
     title, subtitle, width, height, running, onFrame, onInput,
-    actions = ['A', 'B'], vertical = true, onQuit, quitLabel,
+    actions = ['A', 'B'], vertical = true, widen = false, onQuit, quitLabel,
     loadout = [], selectedWeapon, onSelectWeapon, hud, overlay, help,
 }) => {
     const [showHelp, setShowHelp] = useState(false);
@@ -100,20 +101,23 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
                     running={running}
                     onFrame={onFrame}
                     fill={fs.active}
+                    widen={widen}
+                    // Past about three times the design width the road is more
+                    // sky than road and the player sits in the far corner.
+                    maxWidth={Math.round(width * 1.6)}
                 />
                 {/* Inline, the button lives in the footer row with the help
                     toggle; fullscreen there is no footer, so it sits over the
                     top-right corner of the picture. */}
                 {fs.active && fsButton}
-                {/* The controls ride over the picture in fullscreen: a phone
-                    held sideways has no spare rows to give them, and the
-                    bottom corners are where the thumbs already are. */}
+                {/* Fullscreen gets a different control scheme, not the same one
+                    made translucent. The inline d-pad has its own row and
+                    nothing behind it; over the picture it covers the player --
+                    on an 844px phone the rider sits at about x=134, inside a
+                    132px pad anchored bottom-left -- and asks a thumb to find a
+                    target under its own hand. See `TouchZones`. */}
                 {fs.active && !overlay && (
-                    <div className="absolute inset-x-0 bottom-0 z-10 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pointer-events-none">
-                        <div className="pointer-events-auto opacity-90">
-                            <TouchPad onDown={onInput} actions={actions} vertical={vertical} />
-                        </div>
-                    </div>
+                    <TouchZones onDown={onInput} actions={actions} vertical={vertical} />
                 )}
                 {overlay && (
                     <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/70 backdrop-blur-[2px]">
