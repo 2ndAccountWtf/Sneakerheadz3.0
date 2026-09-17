@@ -16,7 +16,7 @@ import type { Buff, BuffKind, OutcomeLogEntry, MiniGameRequest } from '../../typ
 import type { MarketSignal } from '../../types/news';
 import { SNEAKERS } from '../../data/sneakers';
 import { storageMock } from '../../data/storage.mock';
-import { MAX_HEALTH, MAX_ENERGY, MAX_HEAT, MAX_INVENTORY_SIZE } from '../../constants';
+import { MAX_HEALTH, MAX_ENERGY, MAX_HEAT, MAX_INVENTORY_SIZE, STREET_SALE_RATE } from '../../constants';
 
 export interface ApplyResult {
     player: Player;
@@ -136,7 +136,19 @@ function applyInventoryChange(
         const sneakerId = resolveSneakerId(String(a.value));
         if (sneakerId) {
             if (next.inventory.length >= MAX_INVENTORY_SIZE) {
-                log.push({ icon: '📦', text: `No room in your bag — the pair is left behind.`, tone: 'bad' });
+                // A full bag used to make the prize evaporate. Two of the
+                // Arcade games pay the winner in a pair and nothing else, so on
+                // a full bag you could beat the whole game and be told the pair
+                // was "left behind" — a win worth exactly zero. You cannot carry
+                // it, so you sell it where you stand instead.
+                const worth = SNEAKERS.find(s => s.id === sneakerId)?.basePrice ?? 0;
+                const paid = Math.round(worth * STREET_SALE_RATE) * qty;
+                next = { ...next, cash: next.cash + paid };
+                log.push({
+                    icon: '💵',
+                    text: `No room in your bag, so it goes on the spot for $${paid.toLocaleString()}.`,
+                    tone: 'good',
+                });
                 continue;
             }
             const sneaker = SNEAKERS.find(s => s.id === sneakerId)!;

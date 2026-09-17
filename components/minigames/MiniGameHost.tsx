@@ -101,10 +101,13 @@ const MiniGameHost: React.FC = () => {
         dispatch({ type: 'RESOLVE_MINIGAME', payload: { won, note } });
     };
 
-    // Bailing out counts as a loss, so running away from The Game still costs
-    // you whatever the writers said it should.
+    // Bailing out is not losing. It used to dispatch a full loss, which on the
+    // chase games meant a uniformly-picked pair out of your bag — up to $75,000
+    // for declining to play. `QUIT_MINIGAME` charges the walk-out forfeit and
+    // nothing else, except on a police stop, which you cannot leave by closing
+    // the window. See the reducer.
     // (see canUseWebGL below for why Flight 404 branches)
-    const quit = () => dispatch({ type: 'RESOLVE_MINIGAME', payload: { won: false, note: 'You backed out.' } });
+    const quit = () => dispatch({ type: 'QUIT_MINIGAME' });
     // Walking away from a shop-style game costs nothing — there was no wager.
     const walkAway = () => dispatch({ type: 'CLOSE_MINIGAME' });
 

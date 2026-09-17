@@ -57,7 +57,7 @@ import {
     deposit, withdraw, repayCredit, openCreditLine, accrueInterest,
     blockCard, cardUsable, rollCardLossEvent, type BankResult,
 } from '../systems/banking';
-import { MAX_SOFT_STAT } from '../constants';
+import { MAX_SOFT_STAT, MINIGAME_QUIT_FORFEIT } from '../constants';
 
 // Game Actions
 type Action =
@@ -83,6 +83,7 @@ type Action =
     | { type: 'CLEAR_OUTCOME_LOG' }
     | { type: 'LAUNCH_MINIGAME'; payload: MiniGameRequest }
     | { type: 'RESOLVE_MINIGAME'; payload: { won: boolean; score?: number; note?: string } }
+    | { type: 'QUIT_MINIGAME' }
     | { type: 'CLOSE_MINIGAME' }
     | { type: 'SHOW_CUTSCENE'; payload: Cutscene }
     | { type: 'HIDE_CUTSCENE' }
@@ -979,6 +980,43 @@ const rawReducer = (state: GameState, action: Action): GameState => {
                 day: state.day + out.daysLost,
                 activeBust: null,
                 outcomeLog: out.log,
+            };
+        }
+
+        /**
+         * Standing up and walking out, which is not the same as being beaten.
+         *
+         * This used to dispatch `RESOLVE_MINIGAME { won: false }`, so backing
+         * out applied the authored `onLose` payload in full. On the two chase
+         * games that payload removes a uniformly-picked pair from the bag, and
+         * the catalogue runs to $75,000, so declining to play a game could cost
+         * more than every purse in the Arcade put together.
+         *
+         * The one exception is a police stop. `resolveEscape` is the only path
+         * in the game that can cost you a day, and if Bail Out were a $5 exit
+         * from it then every bust in the game would be worth $5. You cannot
+         * walk away from an officer by closing the window, so a chase that
+         * started as a stop still resolves as one.
+         */
+        case 'QUIT_MINIGAME': {
+            const req = state.activeMiniGame;
+            if (!req) return state;
+            if (req.config?.bust) {
+                return rawReducer(state, { type: 'RESOLVE_MINIGAME', payload: { won: false, note: 'You stopped running.' } });
+            }
+            const forfeit = Math.min(state.player.cash, MINIGAME_QUIT_FORFEIT);
+            return {
+                ...state,
+                player: { ...state.player, cash: state.player.cash - forfeit },
+                activeMiniGame: null,
+                outcomeLog: [{
+                    icon: '🚪',
+                    text: forfeit > 0
+                        ? `You walked out. $${forfeit} for the trouble.`
+                        : 'You walked out. You had nothing on you anyway.',
+                    tone: 'neutral',
+                }],
+                notification: { message: 'You backed out.', type: 'info' },
             };
         }
 

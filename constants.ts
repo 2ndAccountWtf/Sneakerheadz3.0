@@ -42,6 +42,30 @@ export const ROBBERY_CASH_FLOOR = 800;      // below this, muggers lose interest
 export const BANK_WITHDRAW_FEE = 4;
 export const STARTING_CREDIT_LIMIT = 2500;
 
+/**
+ * What it costs to walk out of a mini-game you have not finished.
+ *
+ * Backing out used to resolve as a full loss, applying the same `onLose`
+ * payload as actually being beaten. For the two chase games that payload is
+ * "he takes a pair out of your bag", picked uniformly, so pressing Bail Out on
+ * a game you had not started could take a $75,000 Legendary off you — 44% of
+ * the catalogue is worth $1,000 or more, and the average pair is $7,595.
+ *
+ * Quitting is not losing. It is standing up and leaving, and the only thing it
+ * should cost is the face you lose doing it.
+ */
+export const MINIGAME_QUIT_FORFEIT = 5;
+
+/**
+ * What a pair fetches when you have to move it on the pavement, right now,
+ * because there is no room in your bag for it.
+ *
+ * Below market on purpose: it is a forced sale to whoever is standing there.
+ * The alternative it replaces was worse than any discount — the prize simply
+ * vanished with a line saying it had been left behind.
+ */
+export const STREET_SALE_RATE = 0.7;
+
 export const EMERGENCY_SECONDS: Record<1 | 2 | 3, number> = { 1: 180, 2: 120, 3: 90 };
 /** Energy burned by a single flight. Running out costs you health instead. */
 export const TRAVEL_ENERGY_COST = 15;

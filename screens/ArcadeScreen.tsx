@@ -25,7 +25,7 @@ const money = (n: number, text: string): ScenarioOutcome =>
 const energy = (n: number, text: string): ScenarioOutcome => ({ type: 'stat_change', payload: { stat: 'energy', value: n }, description: text });
 const health = (n: number, text: string): ScenarioOutcome => ({ type: 'stat_change', payload: { stat: 'health', value: n }, description: text });
 
-const ENTRIES: ArcadeEntry[] = [
+export const ENTRIES: ArcadeEntry[] = [
     {
         id: 'street-ball',
         name: 'Street Ball',
@@ -69,6 +69,7 @@ const ENTRIES: ArcadeEntry[] = [
             config: { thief: 'A Very Fast Teenager' },
             onWin: [
                 { type: 'inventoryChange', add: [{ kind: 'item', value: 'random-rare', qty: 1 }], description: 'You get the box back — and it was not even yours.' },
+                money(240, 'The owner catches up, out of breath, and makes you take something for it.'),
                 cred(8, 'People saw you run him down.'),
                 energy(-18, 'Lungs on fire.'),
             ],
@@ -91,6 +92,7 @@ const ENTRIES: ArcadeEntry[] = [
             config: { thief: 'The Game' },
             onWin: [
                 { type: 'inventoryChange', add: [{ kind: 'item', value: 'random-rare', qty: 1 }], description: 'You get it back, plus whatever else was in the cart.' },
+                money(300, 'There was a roll of notes in the cart. He is in no position to ask for it.'),
                 cred(11, 'The whole street watched you run down a shopping trolley.'),
                 energy(-16, 'That was all downhill and you are still wrecked.'),
             ],
@@ -214,6 +216,7 @@ const ENTRIES: ArcadeEntry[] = [
             onWin: [
                 { type: 'marketSignal', effect: 'surge', magnitude: 1.28, target: { kind: 'rarity', value: 'Rare' }, duration: '24h', description: 'His on-air plug moves Rare pairs.' },
                 { type: 'priceMarkup', multiplier: 0.9, duration: '24h', description: 'Alpha Discount: 10% off in every store.' },
+                money(260, 'They pay guests. Not well, but they pay them.'),
                 cred(9, 'You made the clip.'),
                 { type: 'statusEffect', effect: 'guidance', duration: '24h', label: 'Podcast Intel', description: 'You heard which model is next.' },
             ],
