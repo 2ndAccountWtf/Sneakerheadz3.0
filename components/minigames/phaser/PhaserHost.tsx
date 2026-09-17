@@ -135,6 +135,12 @@ export const PhaserHost: React.FC<PhaserHostProps> = ({
                 }
 
                 gameRef.current = game;
+                // A handle for the Playwright harness. Dev only: the bundler
+                // strips this branch from a production build, so it cannot
+                // become a way for a page to reach into the running game.
+                if (import.meta.env?.DEV) {
+                    (window as unknown as Record<string, unknown>).__PHASER_GAME__ = game;
+                }
                 setStatus('ready');
             } catch (err) {
                 console.error('Phaser failed to load', err);

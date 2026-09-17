@@ -24,6 +24,7 @@ import type * as PhaserNS from 'phaser';
 import { bakeTextures } from './textures';
 import { queueArt, installArt, buildAnims, artCount, type ArtEntry } from './artLoader';
 import { SKIN_IDS } from './skin';
+import { SEAT_SIDE_ROWS } from './content';
 import { makeGameScene, GAME_KEY } from './gameScene';
 import { makeUIScene, UI_KEY } from './uiScene';
 
@@ -60,7 +61,14 @@ export function createFlight404Scenes(P: typeof PhaserNS): PhaserNS.Types.Scenes
             // a broken one.
             bakeTextures(this);
             if (this.art.length) {
-                const report = installArt(this, this.art, SKIN_IDS);
+                // Ids drawn by code rather than by overwriting a baked
+                // placeholder. Without them the orphan check reports art that
+                // is on screen: it asks whether a texture of that name already
+                // exists, which is true for the 29 scenery keys and false for a
+                // coded rig or a new scenery module that had no placeholder to
+                // replace in the first place.
+                const drawnByCode = new Set<string>([...SKIN_IDS, ...SEAT_SIDE_ROWS]);
+                const report = installArt(this, this.art, drawnByCode);
                 buildAnims(this, this.art);
                 for (const s of report.skipped) console.warn(`[f404 art] skipped ${s.id}: ${s.why}`);
                 for (const o of report.orphans) {

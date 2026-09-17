@@ -194,6 +194,28 @@ export const BIN_FEET = 58;
 /** Distance between seat rows / windows / bin doors. One parallax tile. */
 export const SEAT_PITCH = 44;
 
+/**
+ * The delivered side-view seat modules, in no particular order.
+ *
+ * Six variants of the same object: upright, reclined, trays down, stuffed seat
+ * pockets, bags, floor junk. They are scenery and not platforms -- the row you
+ * stand on is a 28-unit cushion plus a 12-unit back at `TIER.seat` and
+ * `TIER.seatback`, and this is what the cabin looks like behind it.
+ *
+ * Listed here rather than globbed so that an id typo is a compile error instead
+ * of a silently missing seat. The ids have to match the filenames exactly; the
+ * same pair drifted once before and cost this game a whole texture (see the
+ * note on `seat-row` in `platforms.ts`).
+ */
+export const SEAT_SIDE_ROWS = [
+    'seat-side-row-upright',
+    'seat-side-row-reclined',
+    'seat-side-row-trays',
+    'seat-side-row-pockets',
+    'seat-side-row-bags',
+    'seat-side-row-floor-junk',
+] as const;
+
 export const GRAVITY = 620;
 export const JUMP_V = -218;
 export const RUN_SPEED = 88;

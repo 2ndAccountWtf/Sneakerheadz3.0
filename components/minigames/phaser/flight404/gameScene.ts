@@ -34,7 +34,7 @@ import {
     type PlatformSet,
 } from './platforms';
 import { TILE, has } from './terrain';
-import { ZOOM, ART_SCALE, fitScale, PLATE_SHRINK, CABIN_BASE } from './content';
+import { ZOOM, ART_SCALE, fitScale, PLATE_SHRINK, CABIN_BASE, SEAT_SIDE_ROWS } from './content';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import { attachSkin, type Skin } from './skin';
 import { openRoster, stepDirector, type Member, type World as CastWorld } from './castDirector';
@@ -725,6 +725,56 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 return ts;
             };
 
+
+            /**
+             * The foreground row of seats, from the delivered side-view modules.
+             *
+             * This slot has been an explicit `false` in the plate list below,
+             * with a note saying it was waiting for art cut for the job. The
+             * delivered near plate is a full row of seat backs half a screen
+             * tall, which at this framing stands between the camera and the
+             * aisle: the player fights behind a wall of upholstery and cannot
+             * see what they are shooting. These are that art — seats in
+             * aisle-side profile, 72 x 42 world units, a thin lip rather than a
+             * wall.
+             *
+             * Placed just *below* the aisle rather than across it. A foreground
+             * row only pays for itself if it never hides the thing you are
+             * aiming at, and in a platformer it especially must not hide the
+             * player's feet — where you are about to land is the one thing the
+             * picture owes you. So the top of the band sits a couple of units
+             * under `FLOOR_Y`, in the carpet strip that was otherwise empty,
+             * and the seats run off the bottom of the screen.
+             *
+             * `strip` could not do this: it is a TileSprite, which repeats one
+             * texture, and the point of six modules — upright, reclined, trays
+             * down, stuffed pockets, bags, floor junk — is that the cabin is
+             * not one row printed eleven times. So they go down as individual
+             * images, varied deterministically from each module's own index, so
+             * a section looks the same every time you walk into it.
+             *
+             * Returns false when none of the modules arrived, and the caller
+             * falls back as it does for every other plate.
+             */
+            const seatBand = (len: number, seed: number): boolean => {
+                const ids = SEAT_SIDE_ROWS.map(T).filter(k => this.textures.exists(k));
+                if (!ids.length) return false;
+                const src = this.textures.get(ids[0]).getSourceImage() as { width: number; height: number };
+                const modW = src.width / ART_SCALE;
+                const modH = src.height / ART_SCALE;
+                if (!(modW > 0) || !(modH > 0)) return false;
+                for (let i = 0, x = 0; x < len + modW; i++, x += modW) {
+                    // Knuth's multiplicative hash on the index, so neighbours
+                    // differ and the sequence is stable for a given section.
+                    const pick = ids[Math.abs(Math.imul(i + seed, 2654435761) >>> 8) % ids.length];
+                    this.add.image(x, FLOOR_Y + 2, pick)
+                        .setOrigin(0, 0)
+                        .setDisplaySize(modW, modH)
+                        .setDepth(50);
+                }
+                return true;
+            };
+
             /**
              * Delivered parallax, when it exists.
              *
@@ -802,14 +852,12 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             const drawn = [
                 plate('far', 0.18, -8, CABIN_BASE),
                 plate('mid', 0.42, -6, CABIN_BASE),
-                // The foreground row is deliberately NOT drawn. It is a full
-                // row of seat backs, and at this framing it stands between the
-                // camera and the aisle — the player fights behind a wall of
-                // upholstery and cannot see what they are shooting. A near
-                // layer only works when it is a thin lip along the bottom edge;
-                // this one is half a screen tall, so it waits for art cut for
-                // the job rather than being cropped into something it is not.
-                false,
+                // The delivered `bg-*-near` plate is still not drawn: it is a
+                // full row of seat backs half a screen tall, and at this
+                // framing it stands between the camera and the aisle. The
+                // side-view modules are the art that slot was waiting for, and
+                // `seatBand` places them as the lip they were cut to be.
+                seatBand(len, idx + 1),
             ];
             if (drawn.some(Boolean)) {
                 // Anything the delivered set is missing still comes from the
