@@ -140,6 +140,21 @@ export interface PlatformDef {
     w: number;
     /** What it does. Use a `SURFACE` preset or OR your own. */
     flags: TileFlags;
+    /**
+     * This rung is part of the object drawn by another one, so it holds the
+     * player up and draws nothing itself.
+     *
+     * A row of seats is one object with two standing surfaces: the cushion you
+     * scramble onto and the back you can then stand on. Drawing both of them
+     * put two seats in the aisle, one hanging twenty-six units above the other
+     * in mid-air, facing whichever way its sprite happened to face. That is the
+     * "seats floating in space" the cabin was full of. The seat back draws the
+     * whole seat, from its own line down to the floor; the cushion is a line
+     * inside that drawing and needs no sprite of its own.
+     */
+    partOf?: 'above';
+    /** Draw this one down to the cabin floor rather than at the art's own size. */
+    toFloor?: boolean;
 }
 
 export const has = (flags: TileFlags, bit: number): boolean => (flags & bit) !== 0;

@@ -174,8 +174,16 @@ export function buildPlatforms(
         } else {
             img.setDisplaySize(def.w, THICKNESS);
         }
+
         // A fence is a rule, not a thing. The player must never see one.
-        img.setVisible(!(has(def.flags, TILE.ENEMY_WALL) && !isFooting(def)));
+        // A fence is a rule, not a thing, and a rung that belongs to the object
+        // above it holds the player up while that object does the drawing. One
+        // expression, because two `setVisible` calls in a row means the second
+        // one silently wins — which it did.
+        img.setVisible(
+            !(has(def.flags, TILE.ENEMY_WALL) && !isFooting(def))
+            && def.partOf !== 'above',
+        );
         img.setDepth(11);
         img.setData('flags', def.flags);
 

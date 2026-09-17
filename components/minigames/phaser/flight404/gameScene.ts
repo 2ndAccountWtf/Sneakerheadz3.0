@@ -706,6 +706,29 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
          * once, but this runs per section build and the margins are solid
          * blocks of clear, so a stride finds them.
          */
+        /**
+         * Is this hostile close enough to the camera to be allowed to attack?
+         *
+         * The thrower fired at anything within 215 world units. The camera shows
+         * 352 and keeps the player near the middle, so its visible half-width is
+         * about 176 — which means for forty units either side he was throwing
+         * from off the edge of the screen. Food arrived from nowhere, there was
+         * nothing to dodge because there was nothing to see, and the answer was
+         * to walk backwards until it stopped. That is not difficulty, it is a
+         * tax on not knowing.
+         *
+         * So the rule is: **nothing may hit you that you were never shown.** He
+         * has to be inside the camera's own view, and by a margin rather than
+         * on the edge of it, so there is time to read him winding up before the
+         * throw lands. Vertically too — a thrower two decks up the screen is as
+         * invisible as one behind you.
+         */
+        private onCamera(x: number, y: number, margin = 18): boolean {
+            const v = this.cameras.main.worldView;
+            return x > v.x + margin && x < v.right - margin
+                && y > v.y - 8 && y < v.bottom + 8;
+        }
+
         private inkBox(key: string): { left: number; top: number; w: number } {
             const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
             if (!src?.width || !src.height) return { left: 0, top: 0, w: 0 };
@@ -1335,6 +1358,16 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             x: number, y: number, vx: number, vy: number, dmg: number,
             kind: string, tex: string, gravity = 0, w = 8, h = 8,
         ) {
+            // Nothing may hit you that you were never shown.
+            //
+            // Enforced here rather than at each of the five places that fire,
+            // because the one that gets forgotten is the one the player
+            // notices. It is also the rule that cannot be expressed in a range
+            // check: the thrower's 215 units read as reasonable next to a
+            // 352-unit world and is forty units past the edge of a camera that
+            // keeps the player near the middle, which is precisely how food
+            // ended up arriving from nowhere.
+            if (!this.onCamera(x, y, 0)) return;
             const s = this.hostiles.get(x, y, tex) as Shot;
             if (!s) return;
             s.setActive(true).setVisible(true).setAlpha(1).setDepth(18);
@@ -1809,13 +1842,24 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                         case 'rest':
                             b.setVelocityX(0);
                             md.facing = dx > 0 ? 1 : -1;
-                            if (adx < 215 && md.t > 1.1) {
+                            // `adx` alone let him throw from off the edge of
+                            // the screen; see `onCamera`. He also has to be
+                            // visible himself — being hit by something you
+                            // cannot see the source of is the same problem
+                            // wearing the other hat.
+                            if (adx < 215 && md.t > 1.1
+                                && this.onCamera(m.x, m.y) && this.onCamera(this.player.x, this.player.y)) {
                                 go('aim');
                                 this.say(m.md, THROWER_AIM, 1100, PAL.warn, md.id);
                             }
                             break;
                         case 'aim':
                             b.setVelocityX(0);
+                            // Walked out of shot mid-wind-up: drop it. The
+                            // telegraph is the whole contract, and a throw whose
+                            // telegraph happened off screen is an unfair one
+                            // that merely started fairly.
+                            if (!this.onCamera(m.x, m.y)) { go('rest'); break; }
                             if (md.t > 0.7) {
                                 if (this.rng.frac() < 0.14) {
                                     // Straight up. It comes straight back down.
