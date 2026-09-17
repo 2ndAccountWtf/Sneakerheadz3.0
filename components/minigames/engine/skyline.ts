@@ -192,6 +192,7 @@ const landmarks: Piece[] = [
     { id: 'landmark-capitol-records', w: 30, h: 48 },
     { id: 'landmark-griffith-observatory', w: 72, h: 32 },
     { id: 'landmark-hellaweird-sign', w: 96, h: 28 },
+    { id: 'landmark-kicks-chinese-theatre', w: 72, h: 40 },
 ];
 
 export const BANDS: Record<BandName, BandDef> = {

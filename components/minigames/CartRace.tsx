@@ -374,6 +374,13 @@ const RIDER_H = 30;
 function throwState(id: string): string {
     if (id.includes('chancla') || id.includes('sandal')) return 'skateboard-throw-chancla';
     if (id.includes('slush') || id.includes('drink') || id.includes('soda')) return 'skateboard-throw-slushie';
+    // The AM/PM food has its own throws now. A bureka is held and released
+    // differently from a frozen drink, and differently again depending on which
+    // bureka — the potato one is heavier and he winds up for it.
+    if (id.includes('gvinah') || id.includes('cheese')) return 'skateboard-throw-bureka-gvinah';
+    if (id.includes('bureka') || id.includes('potato')) return 'skateboard-throw-bureka-potato';
+    if (id.includes('falafel')) return 'skateboard-throw-falafel';
+    if (id.includes('hummus')) return 'skateboard-throw-hummus';
     return 'skateboard-throw-heavy';
 }
 
@@ -925,6 +932,51 @@ const rnd = (s: RaceState) => {
     s.seed = (s.seed * 1664525 + 1013904223) >>> 0;
     return s.seed / 4294967296;
 };
+/**
+ * The neighbourhood, on the far pavement.
+ *
+ * This band used to be `tiny-bicycle` and nothing else: one sprite every 213
+ * units for the length of the hill. Reading it as "the same guy on a bike over
+ * and over" is not a misreading, it is a description.
+ *
+ * So it deals from a cast, the way the palms and the skyline do. They are
+ * scenery and behind the kerb, so none of them can ever be something you hit —
+ * which is what lets them be this close to the racing line and this varied.
+ *
+ * `h` is the drawn height in game pixels, not the frame's. The sheets are
+ * padded differently — a kettlebell swing needs room for the arc, a podcast
+ * needs room for the mic — so normalising on the frame would make the ones with
+ * the most air the smallest people. A standing adult is 23 game pixels close up
+ * and these are across the street, so they sit around 17.
+ */
+const STREET_CAST: { id: string; h: number }[] = [
+    { id: 'granny-walk', h: 18 },
+    { id: 'granny-sit', h: 16 },
+    { id: 'granny-purse-smack', h: 18 },
+    { id: 'granny-basketball', h: 19 },
+    { id: 'granny-duck', h: 15 },
+    { id: 'podcaster-podcast', h: 19 },
+    { id: 'podcaster-kettlebell', h: 19 },
+    { id: 'podcaster-eat-mushroom', h: 18 },
+    { id: 'unhoused-neighbor-a', h: 17 },
+    { id: 'unhoused-neighbor-b', h: 17 },
+    // Still here, now one of several rather than all of them.
+    { id: 'tiny-bicycle', h: 16 },
+];
+
+/**
+ * Things somebody left on the pavement. Same band, different slots.
+ *
+ * An encampment is a fact of the street this game is set on, drawn as what it
+ * is — somebody's belongings, kept together — rather than as a joke or as
+ * rubble. It sits on the verge with the rest of the neighbourhood.
+ */
+const STREET_STUFF: { id: string; h: number }[] = [
+    { id: 'encampment-a', h: 16 },
+    { id: 'encampment-b', h: 17 },
+    { id: 'shopping-cart-belongings', h: 14 },
+];
+
 const pick = <T,>(s: RaceState, arr: readonly T[]) => arr[Math.floor(rnd(s) * arr.length) % arr.length];
 
 /**
@@ -2087,16 +2139,29 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // something you hit, which is the only reason it is allowed to be this
     // close to the racing line.
     const bikeScroll = WORLD * 0.93;
-    const bikeN = art.frames('tiny-bicycle');
-    band(ctx, ROAD_TOP - 9, 0, W + 60, bikeScroll, 213, PAL.line, (c, x, y) => {
-        const slot = Math.floor((x + bikeScroll) / 213);
-        // Pedalling rate from how fast the band is passing, so the legs match
-        // the ground the way the riders' do. See `engine/streetAnim.ts`.
-        const rate = anim.cycleRate(bikeN, s.speed * 0.93, 26);
-        art.sprite2(c, 'tiny-bicycle', x, y, 16, {
-            frame: anim.frameOf('tiny-bicycle', s.t, bikeN, rate) + anim.phaseOf(slot, bikeN),
+    // Pitch halved, because a neighbourhood that only has somebody in it every
+    // 213 pixels is not a neighbourhood.
+    band(ctx, ROAD_TOP - 9, 0, W + 60, bikeScroll, 104, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + bikeScroll) / 104);
+        // Knuth's hash on the slot, so neighbours differ and the street is the
+        // same street every time you ride down it.
+        const h = Math.abs(Math.imul(slot, 2654435761) >>> 8);
+        // One slot in four is somebody's belongings rather than somebody.
+        const isStuff = h % 4 === 3;
+        const list = isStuff ? STREET_STUFF : STREET_CAST;
+        const pickd = list[h % list.length];
+        const n = art.frames(pickd.id);
+        // The cyclist pedals at the speed the ground is passing; everyone else
+        // is doing their own thing at their own pace. See `engine/streetAnim.ts`.
+        const rate = pickd.id === 'tiny-bicycle'
+            ? anim.cycleRate(n, s.speed * 0.93, 26)
+            : undefined;
+        if (!art.sprite2(c, pickd.id, x, y, pickd.h, {
+            frame: anim.frameOf(pickd.id, s.t, n, rate) + anim.phaseOf(slot, n),
             alpha: 0.9,
-        });
+        })) {
+            glyph(c, isStuff ? '🛒' : '🚶', x, y - pickd.h, pickd.h);
+        }
     });
 
     // Palms. Three kinds dealt off the slot index so a run of them is not one

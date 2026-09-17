@@ -89,7 +89,20 @@ const TEMPLATED: Record<string, string> = {
  * which is a drawing file, so the plain search finds them. If the set is ever
  * renamed and the code is not, this is what says so.
  */
-const STANDBY: Record<string, string> = {};
+const STANDBY: Record<string, string> = {
+    // The thief off his bike. These are not race animations — he cannot record
+    // a podcast while being chased — so they have no slot in any band and no
+    // state in `bikeState`. They belong to the moment after the race ends, one
+    // pose per outcome: caught and he is under a parked car, gone and he is
+    // already doing a segment about it. That is a scene the game does not have
+    // yet, so they are held rather than hidden somewhere they would look wrong.
+    'gayme-crouch-behind': 'post-race tableau: caught',
+    'gayme-hide-under': 'post-race tableau: caught',
+    'gayme-podcast': 'post-race tableau: he got away',
+    'gayme-kettlebell': 'post-race tableau: he got away',
+    'gayme-eat-burger': 'post-race tableau: he got away',
+    'gayme-eat-mushroom': 'post-race tableau: you wiped out',
+};
 
 console.log('\nnothing that was drawn goes unused');
 
