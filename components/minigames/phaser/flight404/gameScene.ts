@@ -35,6 +35,7 @@ import {
 } from './platforms';
 import { TILE, has } from './terrain';
 import { ZOOM, ART_SCALE, fitScale, PLATE_SHRINK, CABIN_BASE, SEAT_SIDE_ROWS } from './content';
+import { cabinPlan } from './cabinPlan';
 import { openBackdrop, stepBackdrop, shockwave, type Backdrop } from './backdrop';
 import { attachSkin, type Skin } from './skin';
 import { openRoster, stepDirector, type Member, type World as CastWorld } from './castDirector';
@@ -691,6 +692,46 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
             return { top, h: Math.max(0.05, bottom - top) };
         }
 
+        /**
+         * The drawing inside a texture, in world units, ignoring clear margin.
+         *
+         * `contentBand` answers this for rows of a full-screen plate. This
+         * answers it for a small sprite in both axes, because a module placed
+         * by its file's corner is placed by its padding: the delivered seat
+         * rows carry four to twelve pixels each side and about twenty-two
+         * above, which is a visible break between every bank and a row sitting
+         * seven units low.
+         *
+         * Sampled rather than exhaustive — a full scan of six textures is fine
+         * once, but this runs per section build and the margins are solid
+         * blocks of clear, so a stride finds them.
+         */
+        private inkBox(key: string): { left: number; top: number; w: number } {
+            const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
+            if (!src?.width || !src.height) return { left: 0, top: 0, w: 0 };
+            const has = (x: number, y: number) => {
+                const px = this.textures.getPixel(x, y, key);
+                return !!px && px.alpha > 24;
+            };
+            const STEP = 2;
+            let left = -1, right = -1, top = -1;
+            for (let x = 0; x < src.width && left < 0; x += STEP) {
+                for (let y = 0; y < src.height; y += STEP) if (has(x, y)) { left = x; break; }
+            }
+            for (let x = src.width - 1; x >= 0 && right < 0; x -= STEP) {
+                for (let y = 0; y < src.height; y += STEP) if (has(x, y)) { right = x; break; }
+            }
+            for (let y = 0; y < src.height && top < 0; y += STEP) {
+                for (let x = 0; x < src.width; x += STEP) if (has(x, y)) { top = y; break; }
+            }
+            if (left < 0 || right < left) return { left: 0, top: 0, w: src.width / ART_SCALE };
+            return {
+                left: left / ART_SCALE,
+                top: Math.max(0, top) / ART_SCALE,
+                w: (right - left + 1) / ART_SCALE,
+            };
+        }
+
         private wallTone(key: string): number {
             let r = 0, g = 0, b = 0, n = 0;
             const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
@@ -763,11 +804,28 @@ export function makeGameScene(P: typeof PhaserNS, bus: PhaserNS.Events.EventEmit
                 const modW = src.width / ART_SCALE;
                 const modH = src.height / ART_SCALE;
                 if (!(modW > 0) || !(modH > 0)) return false;
-                for (let i = 0, x = 0; x < len + modW; i++, x += modW) {
-                    // Knuth's multiplicative hash on the index, so neighbours
-                    // differ and the sequence is stable for a given section.
-                    const pick = ids[Math.abs(Math.imul(i + seed, 2654435761) >>> 8) % ids.length];
-                    this.add.image(x, FLOOR_Y + 2, pick)
+
+                // Where the drawing actually is inside each file. The delivered
+                // set carries four to twelve pixels of clear margin each side
+                // and about twenty-two above, so placing by the file's corner
+                // puts a gap between every bank and drops the whole row seven
+                // units below where it was asked to sit.
+                const ink = ids.map(k => this.inkBox(k));
+                const pickFor = (i: number) =>
+                    Math.abs(Math.imul(i + seed, 2654435761) >>> 8) % ids.length;
+                // Not an unbroken strip front to back: a cabin is even seat
+                // pitch interrupted at the overwing exits and the front
+                // bulkhead, and both of those are the absence of a seat. See
+                // `cabinPlan`.
+                // The plan lays out ink, so it advances by each module's drawn
+                // width rather than by the file's.
+                const plan = cabinPlan(len, modW, i => ink[pickFor(i)].w);
+                for (const slot of plan) {
+                    const box = ink[pickFor(slot.i)];
+                    // `slot.x` is where the drawing goes; the image is offset
+                    // back by its own margin so the seats, not the canvases,
+                    // butt up against each other.
+                    this.add.image(slot.x - box.left, FLOOR_Y + 2 - box.top, ids[pickFor(slot.i)])
                         .setOrigin(0, 0)
                         .setDisplaySize(modW, modH)
                         .setDepth(50);
