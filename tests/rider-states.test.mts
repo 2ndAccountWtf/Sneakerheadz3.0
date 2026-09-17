@@ -151,9 +151,65 @@ t('every delivered board sheet is reachable from some state', () => {
 
 t('the thief has a state for each of his sheets too', () => {
     assert.equal(bikeState(race()), 'bike-ride');
-    assert.equal(bikeState(race({ crashT: 0.4 })), 'bike-fall-off');
     assert.equal(bikeState(race({ draft: 0.2 })), 'bike-look-back');
     assert.equal(bikeState(race({ thiefSpeed: 40 })), 'bike-wheelie-sparks');
+});
+
+/**
+ * A crash is a sequence, not a pose.
+ *
+ * He used to hit a bin, once, forever: one sheet, one line, one duration, which
+ * is a metronome rather than a character and left four delivered sheets unused.
+ * Each kind now plays its own run of sheets, and the order is the joke -- a
+ * wheelie that opens on the fall reads as unprovoked, and a banana slip that
+ * never reaches the tail never drops the pacifier.
+ */
+t('each way he goes down plays its own sequence, in order', () => {
+    // `crashT` counts down from the kind's duration, so a high value is early.
+    const at = (kind: 'bin' | 'wheelie' | 'banana', phase: number, total: number) =>
+        bikeState(race({ crashT: total * (1 - phase), crashKind: kind }));
+
+    // Wheelie: showing off, then paying for it, then sliding.
+    assert.equal(at('wheelie', 0.1, 1.5), 'bike-wheelie-sparks');
+    assert.equal(at('wheelie', 0.5, 1.5), 'bike-fall-off');
+    assert.equal(at('wheelie', 0.9, 1.5), 'bike-ground-roll');
+
+    // Banana: the slip sets it up, the tail is the punchline and gets the
+    // longer half, because a five-frame sheet flashed over 0.3s is a flicker.
+    assert.equal(at('banana', 0.2, 1.6), 'bike-banana-slip');
+    assert.equal(at('banana', 0.8, 1.6), 'bike-banana-slip-pacifier-tail');
+
+    // A bin is still a bin.
+    assert.equal(at('bin', 0.2, 1.0), 'bike-fall-off');
+    assert.equal(at('bin', 0.9, 1.0), 'bike-ground-roll');
+});
+
+t('a crash never opens on the wrong sheet', () => {
+    // The first frame of each kind decides whether the gag reads at all.
+    const first = (kind: 'bin' | 'wheelie' | 'banana', total: number) =>
+        bikeState(race({ crashT: total, crashKind: kind }));
+    assert.equal(first('wheelie', 1.5), 'bike-wheelie-sparks');
+    assert.equal(first('banana', 1.6), 'bike-banana-slip');
+    assert.equal(first('bin', 1.0), 'bike-fall-off');
+});
+
+t('every sheet the thief owns is reachable from some state', () => {
+    const seen = new Set<string>();
+    for (const kind of ['bin', 'wheelie', 'banana'] as const) {
+        const total = { bin: 1.0, wheelie: 1.5, banana: 1.6 }[kind];
+        for (let p = 0; p <= 1.0001; p += 0.02) {
+            seen.add(bikeState(race({ crashT: Math.max(1e-6, total * (1 - p)), crashKind: kind })));
+        }
+    }
+    seen.add(bikeState(race()));
+    seen.add(bikeState(race({ draft: 0.2 })));
+    seen.add(bikeState(race({ thiefSpeed: 40 })));
+    seen.add(bikeState(race({ gap: 200, thiefSpeed: 20 })));
+    for (const id of ['bike-ride', 'bike-look-back', 'bike-wheelie-sparks', 'bike-thumb-suck',
+                      'bike-fall-off', 'bike-ground-roll',
+                      'bike-banana-slip', 'bike-banana-slip-pacifier-tail']) {
+        assert.ok(seen.has(id), `${id} is never reached`);
+    }
 });
 
 t('what he was hit with decides how he reacts to it', () => {

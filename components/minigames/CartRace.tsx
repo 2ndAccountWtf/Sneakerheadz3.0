@@ -427,8 +427,49 @@ function weaponHit(id: string): string {
     return 'bike-hit-heavy';
 }
 
+/**
+ * The three ways he takes himself out, and how long each takes.
+ *
+ * He used to hit a bin, once, forever: one sheet, one line, one duration. That
+ * is a metronome, not a character -- and it wasted the four sheets the
+ * illustrator drew for the other two.
+ *
+ * `wheelie` is him showing off and paying for it, so it has to *start* as the
+ * wheelie or the fall reads as unprovoked. `banana` is the one where he loses
+ * the pacifier, so it has to hold long enough after the slip for the tail sheet
+ * to land -- the joke is the object hitting the tarmac, and a 5-frame sheet
+ * played over 0.3s is a flicker.
+ */
+const CRASH_KINDS = ['bin', 'wheelie', 'banana'] as const;
+export type CrashKind = (typeof CRASH_KINDS)[number];
+
+const CRASH_TIME: Record<CrashKind, number> = { bin: 1.0, wheelie: 1.5, banana: 1.6 };
+
+/**
+ * How far through a crash he is: 0 the instant it starts, 1 as it ends.
+ *
+ * `crashT` counts down, which reads backwards at every call site that wants to
+ * know what to draw.
+ */
+export const crashPhase = (s: RaceState): number =>
+    s.crashT <= 0 ? 1 : 1 - s.crashT / CRASH_TIME[s.crashKind];
+
 export function bikeState(s: RaceState): string {
-    if (s.crashT > 0) return 'bike-fall-off';
+    if (s.crashT > 0) {
+        const p = crashPhase(s);
+        if (s.crashKind === 'wheelie') {
+            // Up, over, along. The sparks are him succeeding for half a second.
+            if (p < 0.34) return 'bike-wheelie-sparks';
+            if (p < 0.68) return 'bike-fall-off';
+            return 'bike-ground-roll';
+        }
+        if (s.crashKind === 'banana') {
+            // The slip, then the pacifier. The second half is the punchline and
+            // gets the longer half.
+            return p < 0.45 ? 'bike-banana-slip' : 'bike-banana-slip-pacifier-tail';
+        }
+        return p < 0.6 ? 'bike-fall-off' : 'bike-ground-roll';
+    }
     if (s.thiefStun > 0) return weaponHit(s.thiefHitBy);
     // He looks back when you are on his wheel — the drafting tell, and the
     // only moment in the race where he acknowledges you at all.
@@ -586,6 +627,26 @@ const TALK = [
     'Premium Unleaded — out now!',
     'Ayo, the wheels is square!',
     'Stay dangerous!',
+    'I used to think Eminem was better than me.',
+    'I was in a coma.',
+    "So what if I'm from Palmdale?",
+    'Stop — that tickles!',
+    'I could call Andre RIGHT NOW.',
+    'Sooowoo!',
+    'I was in a coma for FIVE YEARS, blood.',
+    'I got a verse about this hill already.',
+    "That's a Compton left turn!",
+    "I don't even LIKE shoes. I like ART.",
+    'Ayo somebody film this!',
+    'My knees is fine. My knees is FINE.',
+    "I invented this. The whole hill. Look it up.",
+    'I been humble since Tuesday!',
+    'This is cardio, blood!',
+    "Wait — is this Palmdale? This look like Palmdale.",
+    'I could stop. I choose not to.',
+    'Andre gonna hear about this.',
+    'Documentary crew is BEHIND me right now!',
+    "I'm not even out of breath.",
 ];
 const TALK_CRASH = [
     'MY MIXTAPE!',
@@ -600,6 +661,49 @@ const TALK_HIT = [
     "That's a AM/PM item! I know the clerk!",
     'You wastin good food!',
     'I felt that in my SOUL!',
+];
+/**
+ * Throwing his own rubbish at you.
+ *
+ * This was one hardcoded string, and it was the only thing left in his mouth
+ * that repeated inside four lines once everything else was dealt from a bag --
+ * which is the whole complaint in miniature: one line said often enough is what
+ * a player remembers, not the twenty-nine said once.
+ */
+const TALK_THROW = [
+    'CATCH, blood!',
+    'You want it? HAVE IT!',
+    "That's a gift! From me!",
+    'I was gonna eat that!',
+    'RECYCLE, homie!',
+    'Incoming, and I\'m sorry!',
+    'This is litterin and I DON\'T CARE!',
+];
+
+/** He tried a wheelie. The wheelie won. */
+const TALK_WHEELIE = [
+    'WATCH THIS— ',
+    'I do this in the VIDEO!',
+    'That was the wind, blood.',
+    'Ayo the front wheel is DEFECTIVE.',
+    'I meant to do a wheelie, not a WHOLE FLIP.',
+    'I was in a coma, I get one free flip!',
+];
+/** A banana. An actual banana. In this economy. */
+const TALK_BANANA = [
+    'WHO LEAVES A BANANA—',
+    'That was placed there. By enemies.',
+    'Nah that was a BANANA, that don\'t count!',
+    'Somebody is MAD at me!',
+    'I slipped on FRUIT. Put that in the documentary.',
+];
+/** The pacifier hits the tarmac. He has nothing to say. He says it anyway. */
+const TALK_PACIFIER = [
+    "That ain't mine.",
+    'My NEPHEW left that!',
+    "Don't pick that up.",
+    "That's for the baby. I have a baby.",
+    'You saw NOTHING.',
 ];
 const TALK_WIN = ['Aight. Aight. Take it. Respect the grind.', "Blood, I was gonna give it back."];
 
@@ -692,11 +796,19 @@ export interface RaceState {
     thiefGuard: number;
     /** His own crashes — a deeper scrub than anything you can throw. */
     crashT: number;
+    /** Which way he went down, which decides the sheets and the line. */
+    crashKind: CrashKind;
+    /** Set once per banana crash, when the pacifier actually leaves him. */
+    dummyOut: boolean;
     rattle: number;
     crashIn: number;
     throwIn: number;
     talk: string;
     talkT: number;
+    /** Shuffled indices left in each line pool — see `deal`. */
+    bags: Record<string, number[]>;
+    /** The last line spoken, so a bag refill cannot immediately repeat it. */
+    lastLine: string;
 
     /**
      * Playback clocks for the two riders. Held on state rather than in the
@@ -798,6 +910,43 @@ const rnd = (s: RaceState) => {
 };
 const pick = <T,>(s: RaceState, arr: readonly T[]) => arr[Math.floor(rnd(s) * arr.length) % arr.length];
 
+/**
+ * Pick from a list without repeating until the list is used up.
+ *
+ * `pick` is uniform, which is the right answer for a lane or a spawn and the
+ * wrong one for a voice. Thirty lines drawn uniformly across a race still
+ * collide constantly -- the chance of no repeat in seventeen draws from thirty
+ * is under one per cent -- and a repeat inside ten seconds is what makes a
+ * character sound like four lines on a loop however many he actually has.
+ * Adding more lines does not fix that; it barely moves it.
+ *
+ * So: deal from a shuffled bag and refill when it is empty. Every line is heard
+ * once before any is heard twice, and the only thing that can repeat across the
+ * seam is the last line of one bag followed by the first of the next.
+ *
+ * Keyed by pool so his crash lines and his chatter do not share a bag, and
+ * fed by the same seeded rng as everything else, so a replay is still a replay.
+ */
+function deal<T>(s: RaceState, key: string, arr: readonly T[]): T {
+    if (!arr.length) return undefined as unknown as T;
+    let bag = s.bags[key];
+    if (!bag || bag.length === 0) {
+        bag = arr.map((_, i) => i);
+        // Fisher-Yates, backwards, on the seeded stream.
+        for (let i = bag.length - 1; i > 0; i--) {
+            const j = Math.floor(rnd(s) * (i + 1));
+            [bag[i], bag[j]] = [bag[j], bag[i]];
+        }
+        // Avoid the one repeat a bag cannot rule out: if the refill would open
+        // with the line that just closed the previous bag, swap it back one.
+        if (bag.length > 1 && arr[bag[0]] === s.lastLine) [bag[0], bag[1]] = [bag[1], bag[0]];
+        s.bags[key] = bag;
+    }
+    const line = arr[bag.pop()!];
+    s.lastLine = line as unknown as string;
+    return line;
+}
+
 export function createRaceState(opts: {
     hasBoard: boolean;
     energy?: number;
@@ -831,9 +980,9 @@ export function createRaceState(opts: {
         airT: 0, airDur: 0.5, airH: 0, airBig: false, airFromRamp: false,
         invT: 0, oilT: 0,
         thiefLane: 1.5, thiefSpeed: THIEF_BASE, pace: THIEF_BASE, thiefStun: 0, thiefSlow: 0,
-        thiefGuard: 0, crashT: 0, rattle: 0, crashIn: 3.2, throwIn: 6,
+        thiefGuard: 0, crashT: 0, crashKind: 'bin', dummyOut: false, rattle: 0, crashIn: 3.2, throwIn: 6,
         talk: opts.hasBoard ? 'Nah, not the skateboard kid!' : 'You on a TROLLEY? Blood, please.',
-        talkT: 3.4,
+        talkT: 3.4, bags: {}, lastLine: '',
         animYou: anim.makeClock(), animThief: anim.makeClock(),
         bursts: [], hitKind: 'trip', hitBy: '', hitLight: false, thiefHitBy: '',
         throwT: 0, lastThrown: '',
@@ -1177,14 +1326,34 @@ function stepThief(s: RaceState, dt: number) {
     s.crashT = Math.max(0, s.crashT - dt);
 
     // He hits things. Constantly. It is the only reason he is catchable.
+    //
+    // Which thing, though, is dealt from a bag rather than rolled: a uniform
+    // roll across three kinds will show you the same one three times running
+    // often enough to undo the point of having three.
     s.crashIn -= dt;
-    if (s.crashIn <= 0) {
-        s.crashT = Math.max(s.crashT, 0.65 + rnd(s) * 0.35);
-        s.talk = pick(s, TALK_CRASH);
+    if (s.crashIn <= 0 && s.crashT <= 0) {
+        const kind = deal(s, 'crash', CRASH_KINDS);
+        s.crashKind = kind;
+        s.crashT = CRASH_TIME[kind];
+        s.dummyOut = false;
+        s.talk = kind === 'wheelie' ? deal(s, 'wheelie', TALK_WHEELIE)
+            : kind === 'banana' ? deal(s, 'banana', TALK_BANANA)
+            : deal(s, 'crash-talk', TALK_CRASH);
         s.talkT = 1.5;
         const tx = clamp(s.px + s.gap * GAP_PX, s.px + 14, 302);
-        addSpark(s, tx, laneY(s.thiefLane) - 6, '🗑️');
+        addSpark(s, tx, laneY(s.thiefLane) - 6,
+            kind === 'banana' ? '🍌' : kind === 'wheelie' ? '💥' : '🗑️');
         s.crashIn = (3.6 + rnd(s) * 3.6) * (1 - s.rattle / 400);
+    }
+
+    // The pacifier leaves him at the moment the tail sheet starts, not when the
+    // crash does — it is the second beat of the gag and lands on its own.
+    if (s.crashT > 0 && s.crashKind === 'banana' && !s.dummyOut && crashPhase(s) >= 0.45) {
+        s.dummyOut = true;
+        const tx = clamp(s.px + s.gap * GAP_PX, s.px + 14, 302);
+        addSpark(s, tx - 4, laneY(s.thiefLane) - 4, '🍼');
+        s.talk = deal(s, 'pacifier', TALK_PACIFIER);
+        s.talkT = 1.8;
     }
 
     // And he throws his own garbage back at you, which becomes your problem.
@@ -1195,14 +1364,14 @@ function stepThief(s: RaceState, dt: number) {
     s.throwIn -= dt * panic;
     if (s.throwIn <= 0) {
         spawnObstacle(s, JUNK, s.z + 48 + rnd(s) * 14, Math.round(s.thiefLane));
-        s.talk = 'CATCH, blood!';
+        s.talk = deal(s, 'throw', TALK_THROW);
         s.talkT = 1.2;
         s.throwIn = 5 + rnd(s) * 4.5;
     }
 
     s.talkT -= dt;
     if (s.talkT <= 0) {
-        s.talk = pick(s, TALK);
+        s.talk = deal(s, 'talk', TALK);
         s.talkT = 2.2 + rnd(s) * 2.4;
     }
 }

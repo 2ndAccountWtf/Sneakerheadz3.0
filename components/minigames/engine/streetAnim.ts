@@ -81,6 +81,12 @@ export const RATE: Record<string, number> = {
     'skateboard-pushup-recover': 8,
     'bike-fall-off': 11,
     'bike-banana-slip': 13,
+    // The pacifier leaving him is the punchline, so it is slower than the slip
+    // that sets it up — five frames at nine is just over half a second, which
+    // is long enough to read the object and short enough not to stall the race.
+    'bike-banana-slip-pacifier-tail': 9,
+    // Tumbling along the tarmac, same as the player's. Keeps rolling.
+    'bike-ground-roll': 13,
 
     // --- animals -----------------------------------------------------------
     'dog-stray': 8,
@@ -120,8 +126,8 @@ export const DEFAULT_RATE = 8;
  * makes it a cycle. Looping the first kind is the bug described at the top of
  * this file — the rider getting up so he can be knocked down again.
  *
- * `skateboard-ground-roll` is deliberately not here: it is a tumble that is
- * meant to keep tumbling for as long as the slide lasts.
+ * `skateboard-ground-roll` and `bike-ground-roll` are deliberately not here:
+ * they are tumbles, meant to keep tumbling for as long as the slide lasts.
  */
 export const ONCE: ReadonlySet<string> = new Set([
     'skateboard-ollie',
@@ -133,6 +139,10 @@ export const ONCE: ReadonlySet<string> = new Set([
     'skateboard-pushup-recover',
     'bike-fall-off',
     'bike-banana-slip',
+    // The tail ends with the pacifier on the ground and him looking at it.
+    // Looping that is him losing it over and over, which is a different joke
+    // and not a better one.
+    'bike-banana-slip-pacifier-tail',
     // Getting hit is a one-shot: you are clipped, you wobble, you ride on. It
     // ends back in the ride cycle's own first pose, so it must not loop --
     // looping a stumble is a rider tripping over the same bin forever.
