@@ -27,7 +27,7 @@ import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, band,
     shakeOffset, banner, actor, art, anim, addBurst, stepBursts, lerpHex,
-    ditherRamp, glow, withAlpha, viewWidth,
+    ditherRamp, glow, withAlpha, viewWidth, castAt,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -932,71 +932,6 @@ const rnd = (s: RaceState) => {
     s.seed = (s.seed * 1664525 + 1013904223) >>> 0;
     return s.seed / 4294967296;
 };
-/**
- * The neighbourhood, on the far pavement.
- *
- * This band used to be `tiny-bicycle` and nothing else: one sprite every 213
- * units for the length of the hill. Reading it as "the same guy on a bike over
- * and over" is not a misreading, it is a description.
- *
- * So it deals from a cast, the way the palms and the skyline do. They are
- * scenery and behind the kerb, so none of them can ever be something you hit —
- * which is what lets them be this close to the racing line and this varied.
- *
- * `h` is the drawn height in game pixels, not the frame's. The sheets are
- * padded differently — a kettlebell swing needs room for the arc, a podcast
- * needs room for the mic — so normalising on the frame would make the ones with
- * the most air the smallest people. A standing adult is 23 game pixels close up
- * and these are across the street, so they sit around 17.
- */
-const STREET_CAST: { id: string; h: number }[] = [
-    { id: 'granny-walk', h: 18 },
-    { id: 'granny-sit', h: 16 },
-    { id: 'granny-purse-smack', h: 18 },
-    { id: 'granny-basketball', h: 19 },
-    { id: 'granny-duck', h: 15 },
-    { id: 'podcaster-podcast', h: 19 },
-    { id: 'podcaster-kettlebell', h: 19 },
-    { id: 'podcaster-eat-mushroom', h: 18 },
-    { id: 'unhoused-neighbor-a', h: 17 },
-    { id: 'unhoused-neighbor-b', h: 17 },
-    { id: 'cart-pusher-walk', h: 18 },
-    { id: 'elote-vendor-walk', h: 18 },
-    // The influencer is a pair, not a pose — see `NEAR_SWAP`.
-    { id: 'influencer-selfie-walk', h: 18 },
-    // Still here, now one of several rather than all of them.
-    { id: 'tiny-bicycle', h: 16 },
-];
-
-/**
- * Who does something different when you come past.
- *
- * The cat already works this way: it bolts when the player is close and
- * otherwise sits. It is the cheapest thing in the game that makes the street
- * feel aware of you, because the alternative — a loop that happens to be
- * playing — reads as a loop however good the art is.
- *
- * The influencer is the one the delivery clearly intends it for: she walks,
- * and when you are alongside she turns and poses. Two sheets, one behaviour,
- * and it is funnier the second time you notice it.
- */
-const NEAR_SWAP: Record<string, string> = {
-    'influencer-selfie-walk': 'influencer-selfie-turn-pose',
-};
-
-/**
- * Things somebody left on the pavement. Same band, different slots.
- *
- * An encampment is a fact of the street this game is set on, drawn as what it
- * is — somebody's belongings, kept together — rather than as a joke or as
- * rubble. It sits on the verge with the rest of the neighbourhood.
- */
-const STREET_STUFF: { id: string; h: number }[] = [
-    { id: 'encampment-a', h: 16 },
-    { id: 'encampment-b', h: 17 },
-    { id: 'shopping-cart-belongings', h: 14 },
-];
-
 const pick = <T,>(s: RaceState, arr: readonly T[]) => arr[Math.floor(rnd(s) * arr.length) % arr.length];
 
 /**
@@ -2151,41 +2086,29 @@ export function drawRace(ctx: Ctx, s: RaceState, thiefName: string) {
     // between a Los Angeles street and the yards behind it.
     art.tile(ctx, 'wall-breeze', -50, ROAD_TOP - 20, W + 100, 12, WORLD * 0.8);
 
-    // Somebody on a bike, on the pavement, going about their evening.
+    // The neighbourhood, on the far pavement, going about its evening.
     //
-    // `tiny-bicycle` is 19x16 — too small to sit on the road next to a 19px-tall
-    // car without the scale reading wrong, and exactly right up on the verge at
-    // a distance. It is scenery: it is behind the kerb, so it can never be
-    // something you hit, which is the only reason it is allowed to be this
-    // close to the racing line.
+    // This band used to be `tiny-bicycle` and nothing else, one sprite every
+    // 213 units for the length of the hill; reading that as "the same guy on a
+    // bike over and over" was not a misreading, it was a description. So the
+    // pitch is halved and it deals from the shared cast instead.
     const bikeScroll = WORLD * 0.93;
-    // Pitch halved, because a neighbourhood that only has somebody in it every
-    // 213 pixels is not a neighbourhood.
     band(ctx, ROAD_TOP - 9, 0, W + 60, bikeScroll, 104, PAL.line, (c, x, y) => {
         const slot = Math.floor((x + bikeScroll) / 104);
-        // Knuth's hash on the slot, so neighbours differ and the street is the
-        // same street every time you ride down it.
-        const h = Math.abs(Math.imul(slot, 2654435761) >>> 8);
-        // One slot in four is somebody's belongings rather than somebody.
-        const isStuff = h % 4 === 3;
-        const list = isStuff ? STREET_STUFF : STREET_CAST;
-        const base = list[h % list.length];
-        // Close enough to be worth reacting to. The same 52px the wildlife band
-        // uses, so the street reacts to you at one consistent distance.
-        const near = Math.abs(x - s.px) < 52;
-        const id = (near && NEAR_SWAP[base.id]) || base.id;
-        const pickd = { id, h: base.h };
-        const n = art.frames(pickd.id);
+        // Who lives in this slot, and whether they react to you being alongside.
+        // Shared with Pizza Run — see `engine/streetCast.ts`.
+        const who = castAt(slot, s.px, x);
+        const n = art.frames(who.id);
         // The cyclist pedals at the speed the ground is passing; everyone else
         // is doing their own thing at their own pace. See `engine/streetAnim.ts`.
-        const rate = pickd.id === 'tiny-bicycle'
+        const rate = who.id === 'tiny-bicycle'
             ? anim.cycleRate(n, s.speed * 0.93, 26)
             : undefined;
-        if (!art.sprite2(c, pickd.id, x, y, pickd.h, {
-            frame: anim.frameOf(pickd.id, s.t, n, rate) + anim.phaseOf(slot, n),
+        if (!art.sprite2(c, who.id, x, y, who.h, {
+            frame: anim.frameOf(who.id, s.t, n, rate) + anim.phaseOf(slot, n),
             alpha: 0.9,
         })) {
-            glyph(c, isStuff ? '🛒' : '🚶', x, y - pickd.h, pickd.h);
+            glyph(c, who.glyph, x, y - who.h, who.h);
         }
     });
 

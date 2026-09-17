@@ -1,4 +1,5 @@
 export { GameCanvas, viewWidth } from './GameCanvas';
+export { STREET_CAST, STREET_STUFF, NEAR_SWAP, NEAR_PX, castAt } from './streetCast';
 export { ArcadeShell } from './ArcadeShell';
 export { TouchPad } from './TouchPad';
 export { useGameLoop } from './useGameLoop';

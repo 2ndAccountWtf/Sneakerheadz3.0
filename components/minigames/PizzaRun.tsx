@@ -33,7 +33,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ArcadeShell, useInput, PAL, KIT,
     clear, rect, outline, circle, line, text, glyph, shadow, bar, figure, band,
-    shakeOffset, banner, art, anim, addBurst, stepBursts, ditherRamp, glow, viewWidth,
+    shakeOffset, banner, art, anim, addBurst, stepBursts, ditherRamp, glow, viewWidth, castAt,
 } from './engine';
 import type { Ctx, Burst } from './engine';
 import { MiniGameResult } from './MiniGameShell';
@@ -1873,6 +1873,37 @@ export function drawRun(ctx: Ctx, s: RunState) {
     });
 
     for (const h of s.houses) if (h.side === 'far') drawHouse(ctx, s, h);
+
+    // The neighbourhood, on the pavement. Same people as Downhill Racer, because
+    // it is the same street seen from the same angle — see
+    // `engine/streetCast.ts` and `docs/ASSETS-STREET.md` §1.1.
+    //
+    // Feet at ROAD_TOP - 3 puts them on the slabs, and this band runs after the
+    // far houses rather than with the rest of the verge because of where that
+    // puts their heads: a 20px adult standing at 101 reaches y=81, and a far
+    // house occupies everything from its roof down to FAR_WALL=92. Drawn with
+    // the hedges it would be painted over from the shoulders up by the house it
+    // is standing in front of.
+    //
+    // They are still behind the kerb, so none of them can ever be something you
+    // hit — the only reason they are allowed to be this close to the racing
+    // line and this varied.
+    band(ctx, ROAD_TOP - 3, 10, W, s.x * 0.98, 104, PAL.line, (c, x, y) => {
+        const slot = Math.floor((x + s.x * 0.98) / 104);
+        const who = castAt(slot, RIDER_X, x);
+        const n = art.frames(who.id);
+        // The cyclist pedals at the speed the ground is passing; everyone else
+        // is doing their own thing at their own pace.
+        const rate = who.id === 'tiny-bicycle'
+            ? anim.cycleRate(n, s.speed * 0.98, 26)
+            : undefined;
+        if (!art.sprite2(c, who.id, x, y, who.h, {
+            frame: anim.frameOf(who.id, s.t, n, rate) + anim.phaseOf(slot, n),
+            alpha: 0.9,
+        })) {
+            glyph(c, who.glyph, x, y - who.h, who.h);
+        }
+    });
 
     // --- the road ---------------------------------------------------------
     if (!art.tile(ctx, 'road-asphalt', 0, ROAD_TOP, W, ROAD_BOT - ROAD_TOP, s.x)) {
