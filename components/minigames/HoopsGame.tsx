@@ -185,6 +185,13 @@ const LOB_CAMP_R = 15;
 const GOALTEND_R = 30;
 const GOALTEND_MIN_T = 0.52;
 
+/**
+ * How long after releasing a shot before the buttons answer again.
+ *
+ * Named because `giveBall` now clamps to it: catching the ball is allowed to
+ * shorten a cooldown but never to lengthen one.
+ */
+const SHOT_COOL = 0.35;
 export const SHOT_CHARGE_TIME = 0.62;  // seconds for the release meter to fill
 export const SHOT_SWEET = 0.84;        // sweet spot near the top of the meter
 export const SHOT_WINDOW = 0.30;       // half-width of the window that still scores
@@ -930,6 +937,21 @@ const giveBall = (w: World, id: number) => {
     w.possession = id;
     w.players[id].touchT = 0;
     w.players[id].passChargeT = -1;
+    // Two meters that outlive the possession they belong to.
+    //
+    // `charge` is only advanced inside the `hasBall` branch, so losing the ball
+    // mid-gather froze it at whatever it had reached. `speedOf` halves you
+    // while `charge >= 0`, so the victim ran at 34px/s instead of 76 with no
+    // meter and no way to clear it — and the moment the ball came back,
+    // `humanControl` saw `!cmd.a` against a live charge and fired a shot
+    // nobody asked for. (`attemptShove` already cleared it; the asymmetry was
+    // the tell.)
+    //
+    // `cool` is set to 1.1s on *any* defensive press, before the game knows
+    // whether the steal landed. Land one and you caught the ball with both
+    // buttons dead for 66 frames and nothing on screen saying why.
+    w.players[id].charge = -1;
+    w.players[id].cool = Math.min(w.players[id].cool, SHOT_COOL);
     w.ball.mode = 'held';
     w.ball.pickCool = 0.25;
     w.ball.brick = false;         // caught clean — whatever it was, it isn't one anymore
@@ -1055,7 +1077,7 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
 
     w.stats.shots++;
     p.charge = -1;
-    p.cool = 0.35;
+    p.cool = SHOT_COOL;
     p.facing = h.x > p.x ? 1 : -1;
 
     // A defender already in the air inside the block radius can eat it. NOT a
@@ -1498,8 +1520,17 @@ const applyMove = (p: Player, dx: number, dz: number, speed: number, dt: number,
 };
 
 const clampToCourt = (p: Player) => {
-    p.x = clamp(p.x, COURT_L, COURT_R);
-    p.z = clamp(p.z, Z_MIN, Z_MAX);
+    // Clamping the position without the velocity leaves you standing on the
+    // wall still holding the speed you arrived with, and peeling off has to
+    // spend the whole reversal ramp bleeding it off first: 9 frames (150ms) of
+    // completely dead input walking, 13 (217ms) off a turbo run. Both rims sit
+    // against these bounds, so that was the entire scoring area.
+    const cx = clamp(p.x, COURT_L, COURT_R);
+    const cz = clamp(p.z, Z_MIN, Z_MAX);
+    if (cx !== p.x) p.vx = 0;
+    if (cz !== p.z) p.vz = 0;
+    p.x = cx;
+    p.z = cz;
 };
 
 /**
@@ -1835,7 +1866,15 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
 
     const dx = (cmd.right ? 1 : 0) - (cmd.left ? 1 : 0);
     const dz = (cmd.down ? 1 : 0) - (cmd.up ? 1 : 0);
-    applyMove(p, dx, dz * 0.35, speedOf(p, wantTurbo) * laneBlockFactor(w, p, wantTurbo), dt, wantTurbo);
+    // `applyMove` wants dz in z-units and multiplies by Z_PX internally to put
+    // it on the same scale as x. Passing `dz * 0.35` put the depth term into
+    // the hypot as 0.35 x 70 = 24.5 against a sideways term of 1, so a
+    // diagonal came out at vx=3.10 against vz*70=75.94 — an 88-degree "
+    // diagonal" that crossed the court in 91.6s instead of 5.3s, and an nx of
+    // 0.041 that never cleared the 0.25 gate that flips `facing`. The CPU at
+    // :1789 always passed raw z-units and was unaffected, so the opponent
+    // could move diagonally and the player could not.
+    applyMove(p, dx, dz / Z_PX, speedOf(p, wantTurbo) * laneBlockFactor(w, p, wantTurbo), dt, wantTurbo);
 
     if (p.dunkT > 0) return;   // the dunk animation owns the body
 
@@ -2409,6 +2448,7 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     for (const p of w.players) {
         p.cool = Math.max(0, p.cool - dt);
         p.swapCool = Math.max(0, p.swapCool - dt);
+        if (p.charge >= 0 && w.possession !== p.id) p.charge = -1;
         p.alleyCall = Math.max(0, p.alleyCall - dt);
         p.cutT = Math.max(0, p.cutT - dt);
         p.touchT = w.possession === p.id ? p.touchT + dt : 0;

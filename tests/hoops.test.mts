@@ -625,4 +625,132 @@ t('turbo costs the CPU exactly what it costs the player', () => {
     assert.ok(AI_TURBO_REGEN < 1, 'the CPU should not refill its bar faster than you refill yours');
 });
 
+/* ------------------------------------------------------------------------- *
+ * How it feels to drive
+ *
+ * These three were all invisible to every other check in this file: the game
+ * compiled, played, finished and balanced with all of them present. They are
+ * about the half-second between pressing something and the body answering,
+ * which is the half-second the player actually experiences.
+ * ------------------------------------------------------------------------- */
+
+/** A live world with the other three parked, so only the human is measured. */
+function soloWorld() {
+    const w = createWorld(7, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    const p = w.players.find(q => q.human)!;
+    p.x = 150; p.z = 0.15; p.vx = 0; p.vz = 0; p.charge = -1; p.cool = 0;
+    return { w, p };
+}
+const park = (w: World, p: { id: number }) => {
+    for (const q of w.players) if (q.id !== p.id) { q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; }
+};
+/** Velocity after 15 frames of held input — past the accel ramp, before the
+ *  0.91-unit-deep court runs out and the sideline clamp zeroes vz. */
+function heldVelocity(cmd: Partial<Cmd>) {
+    const { w, p } = soloWorld();
+    for (let i = 0; i < 15; i++) { park(w, p); stepWorld(w, DT, { ...blankCmd(), ...cmd }); }
+    return { vx: p.vx, vz: p.vz, speed: Math.hypot(p.vx, p.vz * 70), facing: p.facing };
+}
+
+t('a diagonal is a diagonal, at the same speed as a straight line', () => {
+    // `applyMove` wants dz in z-units and scales by Z_PX itself. The human's
+    // call passed `dz * 0.35`, so the depth term entered the normalisation as
+    // 24.5 against a sideways term of 1: holding right+down gave vx=3.10
+    // against vz*70=75.94 — an 88-degree "diagonal" that crossed the court in
+    // 91.6 seconds instead of 5.3. The CPU passed raw z-units and was fine, so
+    // the opponent could move diagonally and the player could not.
+    const right = heldVelocity({ right: true });
+    const down = heldVelocity({ down: true });
+    const diag = heldVelocity({ right: true, down: true });
+
+    assert.ok(Math.abs(right.speed - down.speed) < 0.01, 'the pure axes disagree on top speed');
+    assert.ok(Math.abs(diag.speed - right.speed) < 0.01,
+        `a diagonal moves at ${diag.speed.toFixed(2)} against ${right.speed.toFixed(2)} straight`);
+    // 45 degrees: both components equal, neither of them a rounding error.
+    assert.ok(Math.abs(diag.vx - diag.vz * 70) < 0.01,
+        `diagonal is ${(Math.atan2(diag.vz * 70, diag.vx) * 180 / Math.PI).toFixed(0)} degrees, not 45`);
+    assert.ok(diag.vx > right.speed * 0.6, 'the sideways half of a diagonal has collapsed again');
+});
+
+t('holding a diagonal turns you around', () => {
+    // Second-order fallout of the same bug, and the reason it reached the
+    // sprite: `applyMove` only writes `facing` when |nx| > 0.25, and the old
+    // diagonal produced nx = 0.041. Facing drives the sprite, which side the
+    // ball is drawn on, and the steal-from-behind bonus.
+    assert.equal(heldVelocity({ left: true, down: true }).facing, -1, 'a left-down diagonal did not turn him left');
+    assert.equal(heldVelocity({ right: true, up: true }).facing, 1, 'a right-up diagonal did not turn him right');
+});
+
+t('a wall stops you without holding on to you', () => {
+    // `clampToCourt` clamped position and left velocity alone, so you stood on
+    // the sideline still carrying the speed you arrived with and peeling off
+    // had to bleed it off first. Both rims sit against these bounds, so this
+    // was the whole scoring area.
+    for (const turbo of [false, true]) {
+        const { w, p } = soloWorld();
+        for (let i = 0; i < 240; i++) { park(w, p); stepWorld(w, DT, { ...blankCmd(), right: true, c: turbo }); }
+        assert.ok(p.x >= COURT_R - 0.01, 'never reached the sideline');
+        assert.equal(p.vx, 0, 'the wall is still storing your velocity');
+
+        const x0 = p.x;
+        let frames = 1;
+        for (; frames <= 60; frames++) {
+            park(w, p);
+            stepWorld(w, DT, { ...blankCmd(), left: true });
+            if (p.x < x0 - 0.01) break;
+        }
+        assert.ok(frames <= 2, `${frames} frames (${Math.round(frames / 60 * 1000)}ms) of dead input peeling off the wall`);
+    }
+});
+
+t('a gather does not outlive the possession it started in', () => {
+    // `charge` is advanced and ended only inside the has-ball branch, so being
+    // stripped mid-wind-up left it frozen. Two consequences, both bad:
+    // `speedOf` halves you the entire time it is set, so a clean steal left
+    // the victim jogging at 34px/s with no meter and nothing to press; and the
+    // instant the ball came back, `humanControl` saw a live charge against
+    // `!cmd.a` and launched a shot nobody asked for.
+    //
+    // Constructed rather than played. I could not get a bot to produce this
+    // state naturally in 20 full games — the human almost always receives the
+    // ball from `inbound()`, which already clears everything — so this sets it
+    // up directly and checks the guard. That is an honest limit on how often
+    // it bites, not on whether the guard works.
+    const { w, p } = soloWorld();
+    const other = w.players.find(q => q.id !== p.id)!;
+    w.possession = other.id;
+    p.charge = 0.24;
+
+    const shotsBefore = w.stats.shots;
+    stepWorld(w, DT, blankCmd());
+
+    assert.ok(p.charge < 0, `a player with no ball is still gathering at ${p.charge.toFixed(2)}`);
+    assert.equal(w.stats.shots, shotsBefore, 'a stale charge fired a shot on a player with no ball');
+
+    // And the speed penalty is gone with it: full pace on the very next frames.
+    for (let i = 0; i < 15; i++) { stepWorld(w, DT, { ...blankCmd(), right: true }); }
+    assert.ok(Math.abs(p.vx) > BASE_SPEED * 0.9,
+        `still moving at ${Math.abs(p.vx).toFixed(1)}px/s against a base of ${BASE_SPEED}`);
+});
+
+t('no player ever holds a gather without the ball', () => {
+    // The invariant the guard exists to keep, swept over real games rather
+    // than asserted on one constructed frame.
+    let x = 99;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    const w = createWorld(5001, 'Test Guy');
+    let frames = 0;
+    const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+    while (w.phase !== 'over' && frames < cap) {
+        stepWorld(w, DT, bot(w, rng, 1));
+        frames++;
+        for (const q of w.players) {
+            assert.ok(!(q.charge >= 0 && w.possession !== q.id),
+                `frame ${frames}: ${q.name} is gathering at ${q.charge.toFixed(2)} without the ball`);
+        }
+    }
+    assert.ok(frames > 1000, 'the game ended too early for this sweep to mean anything');
+});
+
 console.log(`\n${pass} hoops checks passed.`);
