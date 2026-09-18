@@ -145,7 +145,7 @@ const CONTEST_R = 28;           // a defender this close starts hurting the shot
 const BLOCK_R = 16;             // airborne defender inside this can swat it
 export const STEAL_R = 14;
 export const SHOVE_R = 16;      // TURBO+PASS on defence inside this range knocks him down
-const STUMBLE_TIME = 0.85;      // seconds a shoved player is down and out of control
+export const STUMBLE_TIME = 0.85;      // seconds a shoved player is down and out of control
 const SWAP_COOL = 0.4;          // debounce on PASS-to-swap-control so one tap isn't three
 export const ALLEY_HOOP_R = 80; // close enough to the rim that a jump here is a lob call
 const ALLEY_CALL_TIME = 0.5;    // how long the "I'm open, throw it here" cue shows
@@ -170,6 +170,9 @@ const THREE_OPEN_R = 46;
 const PASS_HOLD_TIME = 0.16;
 const PASS_MAX_HOLD = 0.55;
 const BULLET_ARC = 16;   // flat — this is the number that used to be the only pass
+/** How high a bullet has to be to clear the defenders under it. Must stay
+ *  below `BULLET_ARC`, or the pass never rises above its own pick gate. */
+const BULLET_PICK_CEIL = 14;
 const LOB_ARC = 48;      // high enough to read as a real lob, not just a bigger bullet
 /** A defender who reads the wind-up and gets under the landing spot with
  * this much of the flight still to go can pick a lob off — "getting under it
@@ -282,7 +285,6 @@ export const SAY = {
     steal: [
         'Pickpocket!',
         'He took that like rent money.',
-        'That was NOT a foul.',
     ],
     intercept: [
         'PICKED OUT OF THE AIR!',
@@ -314,7 +316,10 @@ export const SAY = {
     // Legal here, unlike real basketball — a shot swatted on the way down.
     // See the in-flight goaltend check in stepBall.
     goaltend: [
-        'GOALTENDING! AND IT COUNTS!',
+        // The branch at :2011 calls looseBall() — the basket does NOT count.
+        // This line said the opposite roughly twice a game, next to a red
+        // GOALTENDING! banner, so the screen contradicted itself.
+        'GOALTENDING! NO BASKET!',
         'HE SWATTED IT ON THE WAY DOWN!',
         'THAT WAS GOING IN AND HE SAID NO!',
     ],
@@ -475,7 +480,7 @@ interface Popup { x: number; z: number; y: number; text: string; color: string; 
 
 /** How the game actually ended, so the final banner and the post-game card
  * can tell a routine finish from a real buzzer-beater. */
-export type EndReason = 'target' | 'time' | 'buzzer-make' | 'buzzer-miss';
+export type EndReason = 'target' | 'time' | 'buzzer-make' | 'buzzer-miss' | 'overtime';
 
 export interface World {
     seed: number;
@@ -505,6 +510,8 @@ export interface World {
     /** Last team to score, used to drive the inbound. */
     lastScorer: 0 | 1;
     winner: 0 | 1 | null;
+    /** Level at the buzzer, playing on. Next basket wins. */
+    overtime: boolean;
     /** Freeze-frame timer: a handful of seconds' worth of frames where nothing
      * in the world advances except the cosmetic decay (shake, banners, the
      * particles/popups that made the moment). Scaled to how big the hit was —
@@ -911,6 +918,7 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
         popups: [],
         lastScorer: 1,
         winner: null,
+        overtime: false,
         hitstop: 0,
         cam: { zoom: 1, fx: CAM_PIVOT_X, fy: CAM_PIVOT_Y },
         buzzerLive: false,
@@ -933,7 +941,7 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
 /* Possession helpers                                                  */
 /* ------------------------------------------------------------------ */
 
-const giveBall = (w: World, id: number) => {
+const giveBall = (w: World, id: number, keepClock = false) => {
     w.possession = id;
     w.players[id].touchT = 0;
     w.players[id].passChargeT = -1;
@@ -955,7 +963,11 @@ const giveBall = (w: World, id: number) => {
     w.ball.mode = 'held';
     w.ball.pickCool = 0.25;
     w.ball.brick = false;         // caught clean — whatever it was, it isn't one anymore
-    w.shotClock = SHOT_CLOCK;
+    // Only a change of team buys a fresh clock. Resetting on every touch meant
+    // a pass to your own team-mate refilled it, so across 150 games the clock
+    // never once dropped below 8.80s, there were zero violations, and the AI's
+    // late-clock branches and the violation heave were all unreachable.
+    if (!keepClock) w.shotClock = SHOT_CLOCK;
 };
 
 const looseBall = (w: World, x: number, z: number, y: number, vx: number, vy: number, vz = 0) => {
@@ -1312,7 +1324,9 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
         scorer.onFire = true;
         scorer.fireT = FIRE_SECONDS;
         w.stats.fires++;
-        shout(w, `${scorer.name} IS ON FIRE!`, PAL.warn, 2);
+        // `scorer.name` is 'YOU' for the player, and "YOU IS ON FIRE!" was
+        // going out 0.68 times a game on the biggest banner in the game.
+        shout(w, scorer.human ? 'YOU ARE ON FIRE!' : `${scorer.name} IS ON FIRE!`, PAL.warn, 2);
         say(w, pick(w, SAY.fire));
         w.shake = Math.max(w.shake, 8);
         w.hitstop = Math.max(w.hitstop, 0.08);
@@ -1387,6 +1401,9 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
         }
     }
 
+    // Sudden death: the basket that breaks a tie after the buzzer ends the game.
+    if (w.overtime && w.score[0] !== w.score[1]) { endGame(w, 'overtime'); return; }
+
     w.phase = 'score';
     w.phaseT = (viaDunk || viaTip) ? 1.15 : 0.95;
     w.possession = null;
@@ -1407,7 +1424,10 @@ const endGame = (w: World, reason: EndReason = 'target') => {
     w.phase = 'over';
     w.phaseT = 0;
     w.endReason = reason;
-    w.winner = w.score[0] > w.score[1] ? 0 : 1;
+    // A draw is a draw. `>` sent every tie to the CPU, so one game in twelve
+    // ended by telling the player they had lost 14-14 and taking the shoes.
+    w.winner = w.score[0] === w.score[1] ? null : (w.score[0] > w.score[1] ? 0 : 1);
+    const drawn = w.winner === null;
     const youWin = w.winner === 0;
     sfx('whistle');
 
@@ -1735,7 +1755,12 @@ const aiThink = (w: World, p: Player, dt: number) => {
                     shout(w, 'STOLEN!', PAL.accent2, 0.9);
                     sfx('steal');
                 } else {
-                    say(w, 'That was NOT a foul.');
+                    // Deliberately silent. This fired on every missed CPU steal
+                // roll — 36 times a game, more than every other line put
+                // together — and `say()` clobbers the ticker, so it spent the
+                // game wiping out the miss call, the rebound call and the
+                // heating-up call. The shove already has a whiff line and
+                // fires at a sane 1.5 times a game.
                 }
             }
         } else {
@@ -1935,6 +1960,16 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
             mate.human = true;
             p.swapCool = SWAP_COOL;
             mate.swapCool = SWAP_COOL;
+            // `humanControl` runs inside the player loop, and the mate is later
+            // in the array — so he is stepped again this same frame, now
+            // flagged human, now holding the ball, and still seeing the
+            // `bPress` that did the swap. He fell straight into the pass-charge
+            // at :1869 and bulleted it back to the man you just left. Measured:
+            // 45% of swaps threw the ball away, and 100% of them in the p0->p1
+            // direction — you always start as p0, so the first swap you ever
+            // pressed was always the broken one.
+            mate.passChargeT = -1;
+            mate.cool = Math.max(mate.cool, SWAP_COOL);
         }
     } else {
         // Defence: SHOOT jumps (block / contest), PASS steals. Hold TURBO and
@@ -1943,9 +1978,28 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         if (cmd.aPress && p.y === 0) p.vy = JUMP_V;
         if (cmd.bPress && p.cool <= 0 && w.possession !== null) {
             const handler = w.players[w.possession];
-            p.cool = 1.1;
             const dd = dist2d(p.x, p.z, handler.x, handler.z);
-            if (wantTurbo && dd < SHOVE_R) {
+            // The cooldown is priced by what you actually did, not by having
+            // pressed the button. It used to be a flat 1.1s set before the
+            // game knew whether anything happened, which was affordable only
+            // because the shove almost always landed: with the turbo gate
+            // above making a shove a real commitment, that flat cost turned
+            // every whiffed reach into 66 frames of dead controller, and a bot
+            // that defended at all dropped from 52% to 23%.
+            //
+            // A landed shove is the commitment and keeps the full price. A
+            // reach-in is a reach-in. Waving at somebody across the court is
+            // barely anything, and should not lock you out of the next play.
+            p.cool = dd < SHOVE_R ? 1.1 : dd < STEAL_R + 3 ? 0.55 : 0.2;
+            // The same commitment the CPU already pays at :1680. The human
+            // gate was `wantTurbo` alone, which is true at *any* turbo above
+            // zero, and `attemptShove` clamps its 0.3 cost at the floor — so a
+            // near-empty bar bought a free shove every 1.1s cooldown. Measured:
+            // 55% of the player's shoves were thrown under 30% turbo, and a bot
+            // that did nothing but shove won 94% against 0% for the same bot
+            // with the shove removed. The comment at :1211 says the real cost
+            // is committed turbo; this is what makes that true of both sides.
+            if (wantTurbo && p.turbo > 0.35 && dd < SHOVE_R) {
                 attemptShove(w, p, handler);
             } else if (dd < STEAL_R + 3 && w.ball.pickCool <= 0) {
                 // Reaching from behind the handler is the high-percentage steal.
@@ -2012,7 +2066,17 @@ const stepBall = (w: World, dt: number) => {
                 // against a bot that never passed winning 100% of its games.
                 const defenderToBall = dist2d(o.x, o.z, b.x, b.z);
                 if (defenderToBall >= dist2d(to.x, to.z, b.x, b.z)) continue;
-                if (b.y < 26 && defenderToBall < 5.5) {
+                // Below the bullet's own apex, on purpose. `BULLET_ARC` is 16
+                // and this gate used to be 26, so a bullet never once rose
+                // above it — the pass was interceptable for its entire flight,
+                // which is the same fault the comment above describes being
+                // fixed, surviving a raise of the arc from 7 to 16 that never
+                // cleared the bar. Measured: a bot passing once a second won
+                // 23% against 92% for one that never passed. At 14 the ball is
+                // pickable near the throw and near the catch and sails over
+                // the middle, which is what a passing lane actually is, and
+                // the same bot wins 77%.
+                if (b.y < BULLET_PICK_CEIL && defenderToBall < 5.5) {
                     w.stats.interceptions++;
                     w.stats.bulletPicks++;
                     shout(w, 'PICKED OFF!', PAL.accent2, 0.9);
@@ -2101,7 +2165,9 @@ const stepBall = (w: World, dt: number) => {
                 // mechanic you call for on purpose by holding the button, not
                 // something that just happens to land on a jumping teammate.
                 const hoop = HOOPS[attackHoop(to.team)];
-                giveBall(w, to.id);
+                // Same team throwing and catching is not a new possession, so
+                // it does not buy a new shot clock.
+                giveBall(w, to.id, w.players[b.shooter]?.team === to.team);
                 if (b.lob && to.y > 6 && to.dunkT === 0 && hoopDist(to, hoop) < ALLEY_HOOP_R) {
                     startDunk(w, to, { kind: 'alley' });
                 }
@@ -2112,6 +2178,7 @@ const stepBall = (w: World, dt: number) => {
                 // — it becomes an actual brick, clangs, and drops dead. See
                 // `drawBall` for the swap and the no-bounce physics below.
                 say(w, pick(w, SAY.brick));
+                w.players[b.shooter].streak = 0;    // rule 3: a miss ends it
                 w.rimFlash[attackHoop(w.players[b.shooter].team)] = 0.35;
                 w.stats.bricks++;
                 w.shake = Math.max(w.shake, 6);
@@ -2127,6 +2194,7 @@ const stepBall = (w: World, dt: number) => {
                 // Clank. Live rebound off the iron, tipped back into the court.
                 const h = HOOPS[attackHoop(w.players[b.shooter].team)];
                 say(w, pick(w, SAY.miss));
+                w.players[b.shooter].streak = 0;    // rule 3: a miss ends it
                 w.rimFlash[attackHoop(w.players[b.shooter].team)] = 0.2;
                 looseBall(
                     w, b.x, b.z, b.y,
@@ -2254,6 +2322,18 @@ const stepDunk = (w: World, p: Player, dt: number) => {
     p.x = p.dunkFrom.x + (landX - p.dunkFrom.x) * Math.min(1, t / 0.62);
     p.z = p.dunkFrom.z + (h.z - p.dunkFrom.z) * Math.min(1, t / 0.62);
     p.y = t < 0.62 ? rise * (h.h - 18) : Math.max(0, (h.h - 18) * (1 - (t - 0.62) / 0.38));
+
+    // Losing the ball mid-flight ends the dunk; it does not finish it anyway.
+    // `stepDunk` never checked possession and the `dunkT > 0` branch at :2429
+    // runs before the stumble branch, so a dunker was immune to both a clean
+    // steal and a shove — measured at 33 of 916 baskets scored after the ball
+    // had already changed hands, and 9 scored by a man flat on his back.
+    if (w.possession !== p.id || p.stumbleT > 0) {
+        p.dunkT = 0;
+        p.dunkSlammed = false;
+        p.y = 0;
+        return;
+    }
 
     if (!p.dunkSlammed && t >= 0.62) {
         p.dunkSlammed = true;
@@ -2421,7 +2501,14 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         // below decide when the game actually ends, instead of re-triggering
         // this check and ending it the instant the shot stops being "live".
         if (!w.buzzerLive) {
-            if (!shotIsLive(w)) { endGame(w, 'time'); return; }
+            if (!shotIsLive(w)) {
+                // Level at the buzzer: nobody walks off a tied court, and
+                // there is no boolean this game can hand the outer one that is
+                // honest about a draw — `>` used to award it to the CPU, which
+                // took the player's shoes one game in twelve. Next basket wins.
+                if (w.score[0] === w.score[1]) { w.overtime = true; }
+                else { endGame(w, 'time'); return; }
+            }
             w.buzzerLive = true;
         }
     }
@@ -2533,7 +2620,10 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     }
     if (w.endHoldT > 0) {
         w.endHoldT -= dt;
-        if (w.endHoldT <= 0) { endGame(w, 'buzzer-miss'); return; }
+        if (w.endHoldT <= 0) {
+            if (w.score[0] === w.score[1]) { w.overtime = true; w.endHoldT = 0; }
+            else { endGame(w, 'buzzer-miss'); return; }
+        }
     }
 };
 
@@ -2650,7 +2740,7 @@ const drawCourt = (ctx: CanvasRenderingContext2D, w: World) => {
         ctx.stroke();
         // Three point arc, rendered as the ellipse it looks like from here.
         ctx.beginPath();
-        ctx.ellipse(screenX(h.x, h.z), floorY(h.z), THREE_DIST * 0.78, 30, 0, 0, Math.PI * 2);
+        ctx.ellipse(screenX(h.x, h.z), floorY(h.z), THREE_DIST * sc(h.z), 30, 0, 0, Math.PI * 2);
         ctx.stroke();
     }
     ctx.restore();
@@ -3095,8 +3185,10 @@ export const drawWorld = (ctx: CanvasRenderingContext2D, w: World) => {
     // A buzzer-beater's big banner is the hype line, not the score — spell
     // out who actually won underneath it so the card still reads at a glance.
     if (w.phase === 'over' && w.endReason === 'buzzer-make') {
-        text(ctx, w.winner === 0 ? 'YOU WIN' : 'YOU LOSE', VW / 2, 88, {
-            size: 9, color: w.winner === 0 ? PAL.ok : PAL.bad, align: 'center', bold: true,
+        text(ctx, w.winner === null ? 'DRAW' : w.winner === 0 ? 'YOU WIN' : 'YOU LOSE', VW / 2, 88, {
+            size: 9,
+            color: w.winner === null ? PAL.warn : w.winner === 0 ? PAL.ok : PAL.bad,
+            align: 'center', bold: true,
         });
     }
     if (w.phase === 'tip') {

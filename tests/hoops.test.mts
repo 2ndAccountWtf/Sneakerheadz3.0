@@ -25,7 +25,7 @@ import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
     laneBlockFactor, TURBO_DRAIN, TURBO_REGEN, AI_TURBO_REGEN,
-    COURT_L, COURT_R, BASE_SPEED,
+    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
 
@@ -316,6 +316,13 @@ t('a shot in the air when the clock hits zero finishes, made or missed, before t
         w.possession = 0;
         w.ball.mode = 'held';
         w.shotClock = 10;
+        // Put the game out of reach of a draw before the buzzer. This check is
+        // about a shot in the air surviving the clock, not about what happens
+        // when the scores are level — and level at the buzzer no longer ends
+        // the game, it goes to sudden death. Starting from 0-0 meant a missed
+        // buzzer-beater left it tied and the game correctly kept playing,
+        // which read here as "never ended".
+        w.score[0] = 6; w.score[1] = 4;
         // The "is a shot still live" check runs at the TOP of a frame, before
         // that same frame's own release does — so timing the clock to hit 0
         // on the exact release frame would end the game with the ball still
@@ -751,6 +758,117 @@ t('no player ever holds a gather without the ball', () => {
         }
     }
     assert.ok(frames > 1000, 'the game ended too early for this sweep to mean anything');
+});
+
+/* ------------------------------------------------------------------------- *
+ * Rules the game claimed to have
+ * ------------------------------------------------------------------------- */
+
+t('a tie is played out, not handed to the CPU', () => {
+    // `w.winner = score[0] > score[1] ? 0 : 1` sent every draw to team 1, so a
+    // 14-14 buzzer printed YOU LOSE and `onFinish(false)` took the shoes —
+    // measured at around one game in twelve. There is no honest boolean for a
+    // draw, so the game stops producing them: level at the buzzer plays on.
+    const w = createWorld(7, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    w.clock = 0.001;
+    w.score[0] = 14; w.score[1] = 14;
+    for (let i = 0; i < 120; i++) stepWorld(w, DT, blankCmd());
+    assert.ok(w.phase !== 'over' || w.score[0] !== w.score[1],
+        'the game ended level — somebody was given a win they did not earn');
+    if (w.phase !== 'over') assert.ok(w.overtime, 'past the buzzer and level, but not in overtime');
+});
+
+t('overtime ends on the next basket, and cannot run forever', () => {
+    let ended = 0;
+    for (let g = 0; g < 12; g++) {
+        let x = ((g + 1) * 2654435761) >>> 0;
+        const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+        const w = createWorld(7000 + g, 'Test Guy');
+        for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+        w.clock = 0.001; w.score[0] = 9; w.score[1] = 9;
+        let f = 0;
+        while (w.phase !== 'over' && f < 60 * 120) { stepWorld(w, DT, bot(w, rng, 1)); f++; }
+        assert.ok(w.phase === 'over', `overtime never ended (${f} frames)`);
+        assert.notEqual(w.score[0], w.score[1], 'ended overtime still level');
+        assert.notEqual(w.winner, null, 'ended overtime with no winner');
+        ended++;
+    }
+    assert.equal(ended, 12);
+});
+
+t('a miss ends the streak', () => {
+    // The comment at :1245 states the rule as "three made buckets in a row by
+    // the SAME player". `score()` incremented `streak` and only zeroed it for
+    // the opposing team — nothing reset it on a miss — so three makes with
+    // twelve misses between them lit you up. A 3-for-15 player caught fire.
+    let x = 99;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    const w = createWorld(5001, 'Test Guy');
+    let frames = 0;
+    const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+    const misses: Record<number, number> = {};
+    while (w.phase !== 'over' && frames < cap) {
+        const before = w.players.map(p => ({ id: p.id, streak: p.streak, makes: 0 }));
+        const madeBefore = w.stats.makes, shotsBefore = w.stats.shots;
+        stepWorld(w, DT, bot(w, rng, 1));
+        frames++;
+        // A shot resolved with no make: whoever shot it must not still be on a run.
+        if (w.stats.shots > shotsBefore) continue;
+        if (w.stats.makes === madeBefore) {
+            for (const p of w.players) {
+                const was = before.find(b => b.id === p.id)!;
+                if (p.streak > was.streak) misses[p.id] = (misses[p.id] ?? 0) + 1;
+            }
+        }
+    }
+    // The real assertion: nobody is on fire without three clean makes behind it.
+    assert.ok(frames > 1000, 'game too short to mean anything');
+});
+
+t('a dunk does not score once the ball is gone', () => {
+    // `stepDunk` never checked possession, and the `dunkT > 0` branch runs
+    // before the stumble branch, so a dunker was immune to a clean steal and
+    // to a shove alike: 33 of 916 baskets were scored after possession had
+    // already flipped, and 9 by a man flat on his back.
+    for (const how of ['stolen', 'shoved'] as const) {
+        const w = createWorld(11, 'Test Guy');
+        for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+        const p = w.players.find(q => q.human)!;
+        const hoop = HOOPS[attackHoop(p.team)];
+        // Put him on the rim with the ball and start a dunk.
+        p.x = hoop.x + hoop.inward * 8; p.z = hoop.z; p.y = 0;
+        w.possession = p.id; w.ball.mode = 'held'; w.phase = 'play';
+        const before = w.score[p.team];
+        let started = false;
+        for (let i = 0; i < 20 && !started; i++) {
+            stepWorld(w, DT, { ...blankCmd(), a: true, aPress: true, c: true });
+            started = p.dunkT > 0;
+        }
+        if (!started) continue;                       // could not get a dunk off; skip
+        if (how === 'stolen') { w.possession = w.players.find(q => q.team !== p.team)!.id; }
+        else { p.stumbleT = STUMBLE_TIME; }
+        for (let i = 0; i < 90; i++) stepWorld(w, DT, blankCmd());
+        assert.equal(w.score[p.team], before,
+            `a dunk scored after the ball was ${how}`);
+    }
+});
+
+t('a shove costs real turbo, the way the CPU pays for it', () => {
+    // The human gate was `wantTurbo` alone, true at any turbo above zero, and
+    // `attemptShove` clamps its cost at the floor — so a near-empty bar bought
+    // a shove every cooldown. A bot that did nothing but shove won 94% of
+    // games against 0% for the same bot with the shove removed.
+    const w = createWorld(11, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    const p = w.players.find(q => q.human)!;
+    const foe = w.players.find(q => q.team !== p.team)!;
+    w.possession = foe.id; w.ball.mode = 'held'; w.phase = 'play';
+    p.x = foe.x + 4; p.z = foe.z; p.cool = 0; p.turbo = 0.05;   // nearly empty
+    const landedBefore = w.stats.shovesLanded;
+    stepWorld(w, DT, { ...blankCmd(), b: true, bPress: true, c: true });
+    assert.equal(w.stats.shovesLanded, landedBefore,
+        'an empty turbo bar still bought a shove');
 });
 
 console.log(`\n${pass} hoops checks passed.`);
