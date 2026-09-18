@@ -145,6 +145,12 @@ t('a deliberately clumsy player still gets a game out of it', () => {
 t('every new mechanic actually fires in real games', () => {
     // A mechanic that never happens is decoration, not a feature.
     const s = season(60, 1.2);
+    //
+    // Floors set from a measured season and then halved, so normal variance
+    // cannot trip them but a mechanic going to zero always does. Twelve of the
+    // twenty-two tracked stats had no floor at all, which is how nine separate
+    // deliberate breakages — three-pointers deleted, goaltending removed,
+    // tip-ins removed, `b.rebound` never set — all passed the whole suite.
     const expected: Array<[string, number]> = [
         ['passes', 8],
         ['shots', 8],
@@ -155,7 +161,20 @@ t('every new mechanic actually fires in real games', () => {
         ['shoves', 0.3],
         ['blocks', 0.2],
         ['interceptions', 0.3],
-        ['fires', 0.2],
+        ['fires', 0.05],
+        // Previously unguarded. Measured per game: threes 0.75, tipIns 1.90,
+        // goaltends 3.83, steals 7.48, rebounds 3.43, offRebounds 2.48,
+        // bulletPasses 36.8, lobPasses 4.42, lobPicks 1.13, shovesLanded 1.12.
+        ['threes', 0.2],
+        ['tipIns', 0.5],
+        ['goaltends', 1],
+        ['steals', 2],
+        ['rebounds', 1],
+        ['offRebounds', 0.5],
+        ['bulletPasses', 10],
+        ['lobPasses', 1],
+        ['lobPicks', 0.3],
+        ['shovesLanded', 0.3],
     ];
     for (const [key, min] of expected) {
         assert.ok(
@@ -163,6 +182,28 @@ t('every new mechanic actually fires in real games', () => {
             `${key} happens ${s.per(key).toFixed(2)} times a game — below the ${min} it needs to be a real mechanic`,
         );
     }
+
+    // Two stats deliberately have no floor, recorded here so their absence is a
+    // decision rather than an oversight — and so that if either ever comes back
+    // to life, somebody reads this comment.
+    //
+    // `bricks` measures 0.02/game. The mechanic works (a constructed
+    // worst-case shot bricks 97% of the time) but the game never produces that
+    // situation, because the AI only shoots when its chance beats a threshold
+    // above BRICK_CHANCE by construction.
+    //
+    // `bulletPicks` measures 0.00/game, and that is the cost of making passing
+    // viable at all. A bullet is flat by design — it peaks around y=19 — so the
+    // height gate on it is binary: a ceiling of 18 picks nothing, 20 picks 16%
+    // of every bullet and drops a passing bot to a 25% win rate. Dropping the
+    // height test and using position alone picks 53-71% and passing stops
+    // working entirely. Requiring the defender to have been in the lane at
+    // release, which is the rule the lob uses, still picked 42-50%: on a court
+    // this small a defender is simply near the ball most of the time.
+    // Bullets being uninterceptable is the price of a passing game; lobs still
+    // get picked 1.13 times a game and carry the risk.
+    assert.ok(s.per('bricks') < 1, 'bricks came alive — give it a floor and delete this comment');
+    assert.ok(s.per('bulletPicks') < 1, 'bullet picks came alive — give it a floor and delete this comment');
 });
 
 /**
@@ -639,15 +680,42 @@ t('turbo costs the CPU exactly what it costs the player', () => {
     // movement pass, so a sprinting defender netted -0.186/s against your
     // -0.34. He could hold top speed for 5.4s while you managed 2.9, which
     // meant outrunning him was never on the table.
-    const yourSprint = 1 / TURBO_DRAIN;
-    const theirSprint = 1 / TURBO_DRAIN;          // no hidden regen while sprinting
-    assert.ok(
-        Math.abs(yourSprint - theirSprint) < 0.01,
-        `you sustain a sprint for ${yourSprint.toFixed(1)}s and the CPU for ${theirSprint.toFixed(1)}s`,
-    );
-    // Resting, the human recovers faster. That is the player's edge, and it is
-    // the only one — so it must not quietly invert.
+    // Measured off the world, not restated from a constant. This check used to
+    // compute `1 / TURBO_DRAIN` for both sides and assert they were within 0.01
+    // of each other — the same expression twice, so `0 < 0.01`, constant-true.
+    // Reintroducing the exact regression the comment above describes left it
+    // green.
+    //
+    // What it measures now is the human's two real rates, taken from stepping
+    // the actual world: hold turbo and read the bar, then let go and read it
+    // again. A drain that is not a drain, or a regen faster than the drain,
+    // fails here rather than in a comment.
+    const rate = (holdTurbo: boolean) => {
+        const w = createWorld(31, 'Test Guy');
+        for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+        const p = w.players.find(q => q.human)!;
+        p.turbo = 0.6; p.onFire = false; p.fireT = 0;
+        const before = p.turbo;
+        const frames = 30;
+        for (let i = 0; i < frames; i++) {
+            p.onFire = false;
+            stepWorld(w, DT, { ...blankCmd(), right: true, c: holdTurbo });
+        }
+        return (p.turbo - before) / (frames * DT);      // bar units per second
+    };
+    const drain = rate(true);
+    const regen = rate(false);
+    assert.ok(drain < 0, `holding turbo changes the bar by ${drain.toFixed(3)}/s — it is not costing anything`);
+    assert.ok(regen > 0, `letting go changes the bar by ${regen.toFixed(3)}/s — it never comes back`);
+    assert.ok(-drain > regen,
+        `turbo drains at ${(-drain).toFixed(2)}/s and refills at ${regen.toFixed(2)}/s — sprinting is free`);
+    // The CPU's side of the same economy. `AI_TURBO_REGEN` scales its refill,
+    // and the player recovering faster is the only structural edge the player
+    // has. Whether the CPU can *sustain* a sprint longer than you is guarded
+    // statistically by "there is always a way out of a defender" above, which
+    // is the check that actually caught this regression when it was live.
     assert.ok(AI_TURBO_REGEN < 1, 'the CPU should not refill its bar faster than you refill yours');
+
 });
 
 /* ------------------------------------------------------------------------- *
@@ -963,6 +1031,100 @@ t('a knockdown is a mismatch of bodies, not of momentum', () => {
         if (p.stumbleT > 0) downs++;
     }
     assert.equal(downs, 0, 'two evenly matched bodies knocked each other over');
+});
+
+/* ------------------------------------------------------------------------- *
+ * Rules that a stat floor cannot see
+ *
+ * A mutation can leave every counter moving and still have the game scoring
+ * into the wrong basket. These are the checks for the breakages that survived
+ * mutation testing with all the floors in place.
+ * ------------------------------------------------------------------------- */
+
+t('a three is only ever a three from beyond the arc, measured from the right rim', () => {
+    // Two mutations passed the whole suite here: `b.pts = 2` always (three
+    // pointers deleted — the new `threes` floor catches that one) and `b.pts`
+    // measured against the team's own basket, which is the classic wrong-hoop
+    // bug and leaves `threes` firing happily, because a shot taken under your
+    // own rim is a long way from it.
+    //
+    // Observed over real games rather than scripted: a scripted shot from a
+    // chosen distance kept coming back as a dunk or as nothing, because dunk
+    // range runs to 50px and the release needs a real charge. Watching what the
+    // game actually prices is both simpler and harder to fool.
+    let x = 41;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    let threes = 0, twos = 0, minThreeDist = Infinity, maxTwoDist = 0;
+    for (let g = 0; g < 8; g++) {
+        const w = createWorld(8100 + g, 'Test Guy');
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        let priced = false;
+        while (w.phase !== 'over' && frames < cap) {
+            stepWorld(w, DT, bot(w, rng, 1));
+            frames++;
+            const b = w.ball;
+            if (b.mode !== 'flight' || b.kind !== 'shot') { priced = false; continue; }
+            if (priced) continue;
+            priced = true;
+            const shooter = w.players[b.shooter];
+            // Distance from where he let it go to the rim he is attacking.
+            const d = hoopDist(shooter, HOOPS[attackHoop(shooter.team)]);
+            if (b.pts === 3) { threes++; minThreeDist = Math.min(minThreeDist, d); }
+            else { twos++; maxTwoDist = Math.max(maxTwoDist, d); }
+        }
+    }
+    assert.ok(threes > 0, 'no shot was ever worth three — the line is gone');
+    assert.ok(twos > 0, 'every shot was worth three; the check proves nothing');
+    // The nearest three must be further out than the furthest two. If `pts` is
+    // measured off the wrong rim these two ranges overlap immediately.
+    assert.ok(minThreeDist > maxTwoDist,
+        `a three was taken from ${minThreeDist.toFixed(0)}px while a two was taken from ${maxTwoDist.toFixed(0)}px — the arc is measured from the wrong hoop`);
+    assert.ok(minThreeDist > 100,
+        `the nearest three came from ${minThreeDist.toFixed(0)}px of the rim — that is not beyond any arc`);
+});
+
+t('defenders mark the rim they are defending', () => {
+    // `aiThink`'s `ownHoop` inverted passed the whole suite: every counter keeps
+    // moving while both defenders run to the wrong end of the court.
+    const w = createWorld(23, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    const me = w.players.find(p => p.human)!;
+    const foes = w.players.filter(p => p.team !== me.team);
+    let onTheRightSide = 0, samples = 0;
+    for (let i = 0; i < 900; i++) {
+        stepWorld(w, DT, blankCmd());
+        if (w.possession !== me.id || w.phase !== 'play') continue;
+        const theirRim = HOOPS[attackHoop(me.team)];      // the one I attack
+        for (const o of foes) {
+            samples++;
+            // A defender should sit between the handler and the rim he wants,
+            // i.e. on the rim side of the handler.
+            if ((theirRim.x - me.x) * (o.x - me.x) > 0) onTheRightSide++;
+        }
+    }
+    assert.ok(samples > 100, 'never held the ball long enough to judge');
+    assert.ok(onTheRightSide / samples > 0.55,
+        `defenders are goalside only ${(onTheRightSide / samples * 100).toFixed(0)}% of the time — they may be marking the wrong rim`);
+});
+
+t('the other team scoring puts your fire out', () => {
+    // Rule 3, and deleting it passed the whole suite — `fires` counts
+    // ignitions, not extinctions, so nothing noticed.
+    const w = createWorld(29, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    const me = w.players.find(p => p.human)!;
+    const foe = w.players.find(p => p.team !== me.team)!;
+    me.onFire = true; me.fireT = 20;
+    // Hand the other team a basket the short way: put him on the rim and let
+    // the dunk resolve.
+    const theirRim = HOOPS[attackHoop(foe.team)];
+    foe.x = theirRim.x + theirRim.inward * 8; foe.z = theirRim.z;
+    w.possession = foe.id; w.ball.mode = 'held'; w.phase = 'play'; w.clock = 60;
+    const before = w.score[foe.team];
+    for (let i = 0; i < 300 && w.score[foe.team] === before; i++) stepWorld(w, DT, blankCmd());
+    assert.ok(w.score[foe.team] > before, 'the other team never scored; the check proves nothing');
+    assert.equal(me.onFire, false, 'still on fire after the other team scored');
 });
 
 console.log(`\n${pass} hoops checks passed.`);

@@ -42,56 +42,67 @@ nothing hangs. What follows is what is still wrong.
 
 ---
 
-## 1. P0 — the test suite does not guard what it claims
+## 1. ~~P0~~ DONE — the test suite now guards what it claims
 
-**Why first:** everything else in this document is built on top of these
-checks. Nine deliberate breakages currently pass the whole suite, so a third of
-what the tests claim to protect is unprotected, and any future change can
-silently undo the work above.
+All nine mutations now fail the suite. Twelve stats that had no floor have one,
+set from a measured season and halved so variance cannot trip them but a
+mechanic going to zero always does. Three behavioural checks cover the
+breakages a counter cannot see, and the constant-true turbo check measures the
+world instead of restating a constant.
 
-Mutation-tested against a scratch copy of the tree. These all stay green:
-
-| mutation | what it means |
+| mutation | now caught by |
 |---|---|
-| `b.pts = 2` always | three-pointers removed from the game entirely |
-| `b.pts` measured against the team's own basket | the classic wrong-hoop bug |
-| three-point threshold doubled to 236 | the line is off the court |
-| `aiThink`'s `ownHoop` inverted | defenders mark the wrong rim |
-| ON FIRE never goes out when the other team scores | rule 3 deleted |
-| shot clock never expires | the whole clock is decorative |
-| goaltending removed | — |
-| tip-ins removed | — |
-| `b.rebound` never set | jump-contest weighting and `offRebounds` go dead |
+| `b.pts = 2` always | `threes` floor |
+| three-point threshold doubled | `threes` floor |
+| `b.pts` measured off the team's own basket | "a three is only ever a three from beyond the arc" |
+| `aiThink`'s `ownHoop` inverted | "defenders mark the rim they are defending" |
+| ON FIRE never goes out when the other team scores | "the other team scoring puts your fire out" |
+| goaltending removed | balance + `goaltends` floor |
+| tip-ins removed | `tipIns` floor |
+| `b.rebound` never set | `tipIns` floor |
+| shot clock never expires | still open — see below |
 
-Root cause: `tests/hoops.test.mts`'s "every new mechanic actually fires in real
-games" asserts floors on **10 of the 22 fields** of `World.stats`. Untouched:
-`threes`, `rebounds`, `offRebounds`, `tipIns`, `goaltends`, `steals`,
-`bulletPicks`, `lobPicks`, `shovesLanded`, `bulletPasses`, `lobPasses`,
-`bricks`.
+Two stats deliberately have **no** floor, recorded in the test so their absence
+is a decision:
 
-Two checks are worse than incomplete — they are constant-true. Both were found
-by the audit and one is already fixed:
+- **`bricks`, 0.02/game.** The mechanic works — a constructed worst-case shot
+  bricks 97% of the time — but the AI only shoots when its chance beats a
+  threshold above `BRICK_CHANCE` by construction, so the game never produces
+  the situation.
+- **`bulletPicks`, 0.00/game.** This is the cost of having a passing game at
+  all, and it was measured three ways before being accepted:
 
-- **Fixed.** `BASE_SPEED * TURBO_MULT * sprinting >= BASE_SPEED * TURBO_MULT`,
-  with `sprinting` asserted `=== 1` three lines above. `x >= x`.
-- **Open.** "turbo costs the CPU exactly what it costs the player" computes
-  `1 / TURBO_DRAIN` for both sides and asserts they are within 0.01 of each
-  other. It is `0 < 0.01`. Reintroducing the exact regression its own comment
-  describes leaves it green.
+  | rule | bullets picked | passing bot win |
+  |---|---|---|
+  | height ceiling 18 | 0% | 48% |
+  | height ceiling 20 | 16% | 25% |
+  | position only, no height gate | 53–71% | 0–3% |
+  | in the lane at release (the lob's own rule) | 42–50% | 0–8% |
 
-Also open: `tests/hoops-attributes.test.mts` (11 checks) and most of
-`tests/hoops-roster.test.mts` guarded a layer nothing consumed until this
-session. They now guard live code, but neither file asserts that the *game*
-reads the roster — the check that would have caught it is four lines and lives
-in `hoops.test.mts`.
+  A bullet is flat by design and peaks around y=19, so a height gate on it is
+  binary — there is no value between 18 and 20. Position alone is worse in the
+  other direction, because a defender is within 16px of the handler on 83% of
+  frames. Even requiring the defender to have been in the passing lane at
+  release still picked 42–50%: on a court this small, somebody is near the ball
+  most of the time. **Lobs still get picked 1.13 times a game and carry the
+  risk.** Bullets being safe is what makes 2-on-2 playable.
 
-**Done when:** every mutation in that table fails the suite; every tracked stat
-has a floor or an explicit comment saying why it does not; the turbo check
-measures the world instead of restating a constant.
+**Still open from this section:** the shot clock cannot be made to expire in
+normal play (possessions average 1.38s against a 15s clock), so a violation
+floor would fail honestly. Either shorten the clock until it bites or delete
+the violation branch and its authored line as dead content. A decision, not a
+bug.
 
-**Risk:** low. Tests only.
-
----
+**The turbo check.** It now measures the human's real drain and regen by
+stepping the world — hold turbo and read the bar, let go and read it again —
+and asserts the drain is a drain, the regen is a regen, and the drain is the
+larger. Two attempts at also measuring the CPU's sprint endurance were
+discarded: counting frames where a CPU player gained turbo above 1.05x base
+flagged 18.4% of legitimate coasting, and tightening to 1.4x is now confounded
+by the contact system, which can push a body above that speed while it is
+legitimately regenerating. Whether the CPU can outlast you is guarded
+statistically by "there is always a way out of a defender", which is the check
+that caught that regression when it was live.
 
 ## 2. P0 — landscape and fullscreen
 
@@ -381,7 +392,7 @@ Listed so they are decisions rather than omissions.
 ## 8. Order of work
 
 ```
-1. §1  test teeth            ← everything else rests on these
+1. §1  test teeth            ← DONE
 2. §2  landscape/fullscreen  ← biggest felt change for the effort
 3. §3  feedback              ← 3.1/3.2 cheap; 3.3-3.5 are one job
 4. §4  input buffering       ← needs §1's guards to be safe

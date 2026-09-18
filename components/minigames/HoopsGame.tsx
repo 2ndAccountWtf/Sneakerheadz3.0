@@ -584,7 +584,7 @@ export const blankCmd = (): Cmd => ({
 /* Utility                                                             */
 /* ------------------------------------------------------------------ */
 
-const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 /** mulberry32 — tiny, fast, seedable. Determinism makes the sim testable. */
 const rng = (w: World) => {
