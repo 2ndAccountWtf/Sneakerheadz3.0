@@ -10,7 +10,7 @@
  * It is deliberately pure — no React, no dispatch — so the reducer stays the
  * single writer of game state and the whole thing stays testable.
  */
-import type { GameState, Player, InventoryItem, StatusEffect, StorageItem } from '../../types';
+import type { GameState, Player, InventoryItem, StatusEffect, StorageItem, Sneaker } from '../../types';
 import type { ScenarioOutcome } from '../../types/interactions';
 import type { Buff, BuffKind, OutcomeLogEntry, MiniGameRequest } from '../../types/game';
 import type { MarketSignal } from '../../types/news';
@@ -101,6 +101,58 @@ function makeInventoryItem(sneakerId: string, price: number): InventoryItem {
     };
 }
 
+/**
+ * Which pair gets taken when something takes "a random pair".
+ *
+ * Not uniform over the whole bag, which is what it used to be. Losing Bag
+ * Snatch, getting stopped by the TSA or being mugged all reach through here,
+ * and a flat pick takes a $75,000 Legendary as readily as a $40 pair — so the
+ * cost of one bad footrace was decided by which pair the dice landed on rather
+ * than by anything the player did.
+ *
+ * Restricting it to the cheaper half keeps the stake real (you do lose a pair,
+ * and it can still be a good one if your whole bag is good) while bounding the
+ * worst case by what you chose to carry. The player who is running around with
+ * one grail and nine cheap pairs no longer loses the grail to a coin flip.
+ */
+function pickFromCheaperHalf(inventory: InventoryItem[]): InventoryItem | undefined {
+    if (inventory.length <= 1) return inventory[0];
+    const valued = [...inventory].sort((a, b) =>
+        (SNEAKERS.find(s => s.id === a.sneakerId)?.basePrice ?? 0)
+        - (SNEAKERS.find(s => s.id === b.sneakerId)?.basePrice ?? 0));
+    // Round up, so a bag of three still risks two of them rather than one.
+    return pick(valued.slice(0, Math.ceil(valued.length / 2)));
+}
+
+/**
+ * How often `random-rare` reaches past the Rare tier into the Legendary one.
+ *
+ * One in twenty. Rare enough that a Legendary falling out of a mini-game is
+ * something the player remembers, rather than the coin flip it was.
+ */
+const LEGENDARY_CHANCE = 0.05;
+
+/**
+ * Pick weighted toward the cheap end, by the reciprocal of price.
+ *
+ * Used inside the Legendary tier, which is not a tier so much as a range: it
+ * runs from $1,200 to $75,000, a factor of sixty-two. Picking uniformly inside
+ * it would make the $75,000 pair as likely as the $1,200 one and put the jackpot
+ * squarely in the middle of the distribution. Reciprocal weighting keeps the
+ * whole tier reachable while leaving the top of it where a jackpot belongs: in
+ * the tail.
+ */
+function pickCheapestBiased(pool: Sneaker[]): Sneaker {
+    const weights = pool.map(s => 1 / Math.max(1, s.basePrice));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let roll = Math.random() * total;
+    for (let i = 0; i < pool.length; i++) {
+        roll -= weights[i];
+        if (roll <= 0) return pool[i];
+    }
+    return pool[pool.length - 1];
+}
+
 /** Resolves the symbolic sneaker references used in authored content. */
 function resolveSneakerId(value: string): string | null {
     if (SNEAKERS.some(s => s.id === value)) return value;
@@ -110,7 +162,17 @@ function resolveSneakerId(value: string): string | null {
         return (pick(legendaries) ?? pick(SNEAKERS)!).id;
     }
     if (value === 'random-rare') {
-        const rares = SNEAKERS.filter(s => s.rarity === 'Rare' || s.rarity === 'Legendary');
+        const rares = SNEAKERS.filter(s => s.rarity === 'Rare');
+        const legendaries = SNEAKERS.filter(s => s.rarity === 'Legendary');
+        // `random-rare` used to draw uniformly from Rare *and* Legendary in one
+        // flat pool of 31. Fourteen of those are Legendary, so 45% of every
+        // chase win was a Legendary and the expected value of winning one
+        // footrace was $10,950 — 5.5x the entire starting stake, repeatable
+        // five times on a full energy bar. A Legendary should be a story, not
+        // the median outcome of an Arcade game.
+        if (legendaries.length > 0 && rares.length > 0 && Math.random() < LEGENDARY_CHANCE) {
+            return pickCheapestBiased(legendaries).id;
+        }
         return (pick(rares) ?? pick(SNEAKERS)!).id;
     }
     return null;
@@ -190,7 +252,7 @@ function applyInventoryChange(
         }
         if (r.value === 'random-sneaker' || resolveSneakerId(String(r.value))) {
             const target = r.value === 'random-sneaker'
-                ? pick(next.inventory)
+                ? pickFromCheaperHalf(next.inventory)
                 : next.inventory.find(i => i.sneakerId === r.value);
             if (!target) {
                 log.push({ icon: '🤷', text: `Nothing in your bag to take.`, tone: 'neutral' });

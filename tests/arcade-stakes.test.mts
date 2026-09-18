@@ -21,7 +21,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ENTRIES, requestFor } from '../screens/ArcadeScreen.tsx';
-import { MINIGAME_QUIT_FORFEIT, MAX_INVENTORY_SIZE, INITIAL_PLAYER, STREET_SALE_RATE } from '../constants.ts';
+import { MINIGAME_QUIT_FORFEIT, MAX_INVENTORY_SIZE, INITIAL_PLAYER, INITIAL_PLAYER_CASH, STREET_SALE_RATE } from '../constants.ts';
 import { SNEAKERS } from '../data/sneakers.ts';
 import { applyOutcomes } from '../systems/outcomes/outcomeEngine.ts';
 import type { GameState, Player } from '../types.ts';
@@ -213,6 +213,116 @@ t('a game you cannot afford cannot be started into negative energy', () => {
     const after = gameReducer({ ...inGame(req as never), player: P({ energy: 1 }) } as GameState,
         { type: 'LAUNCH_MINIGAME', payload: req } as never);
     assert.ok(after.player.energy >= 0, 'energy went negative');
+});
+
+/* ------------------------------------------------------------------------- *
+ * What a prize is, and what a loss takes
+ *
+ * Both of these are distributions, so they are measured over a sample rather
+ * than asserted on one draw. The bounds are wide enough that a correct build
+ * will not fail them by luck, and narrow enough that the behaviour they
+ * replaced — 45% Legendary, and a loss that took your best pair — cannot pass.
+ * ------------------------------------------------------------------------- */
+
+const DRAWS = 20000;
+const priceOf = (id: string) => SNEAKERS.find(s => s.id === id)!.basePrice;
+const drawPrize = (token: string) => {
+    const r = applyOutcomes(P(), [
+        { type: 'inventoryChange', add: [{ kind: 'item', value: token, qty: 1 }], description: 'prize' },
+    ] as ScenarioOutcome[], { day: 3 });
+    return SNEAKERS.find(x => x.id === r.player.inventory[0].sneakerId)!;
+};
+
+t('a chase win can be a Legendary, but rarely', () => {
+    // It used to be 45%: `random-rare` drew uniformly from one flat pool of
+    // Rare *and* Legendary, so the expected value of winning a single footrace
+    // was $10,950 — 5.5x the whole starting stake, five times a day.
+    const drawn = Array.from({ length: DRAWS }, () => drawPrize('random-rare'));
+    const legendary = drawn.filter(s => s.rarity === 'Legendary').length / DRAWS;
+    assert.ok(legendary > 0, 'a Legendary became unreachable; the tier may as well not exist');
+    assert.ok(legendary < 0.12, `${(legendary * 100).toFixed(1)}% of wins are Legendary; it is meant to be a story, not the median`);
+    assert.ok(legendary > 0.015, `${(legendary * 100).toFixed(1)}% is rare enough to be a rounding error rather than a jackpot`);
+    // And the run stops paying for itself off one win.
+    const ev = drawn.reduce((a, s) => a + s.basePrice, 0) / DRAWS;
+    assert.ok(ev < INITIAL_PLAYER_CASH, `one win is worth $${Math.round(ev).toLocaleString()}, at or above the entire starting stake`);
+});
+
+t('the jackpot sits in the tail, not the middle of the tier', () => {
+    // The Legendary tier runs $1,200 to $75,000, a factor of sixty-two. Picked
+    // uniformly inside it, the $75,000 pair would be exactly as likely as the
+    // cheapest one, which puts the jackpot in the middle of the distribution.
+    const legs = SNEAKERS.filter(s => s.rarity === 'Legendary');
+    const dearest = legs.reduce((a, b) => (a.basePrice > b.basePrice ? a : b));
+    const cheapest = legs.reduce((a, b) => (a.basePrice < b.basePrice ? a : b));
+    const drawn = Array.from({ length: DRAWS * 3 }, () => drawPrize('random-rare'))
+        .filter(s => s.rarity === 'Legendary');
+    const n = (s: { id: string }) => drawn.filter(d => d.id === s.id).length;
+    assert.ok(n(cheapest) > n(dearest) * 3,
+        `the $${cheapest.basePrice.toLocaleString()} pair should turn up far more often than the $${dearest.basePrice.toLocaleString()} one`);
+});
+
+t('every Legendary is still reachable, through the weighted pick', () => {
+    // Weighting toward the cheap end must not weight anything to zero — a pair
+    // nobody can ever be given is a pair that did not need drawing.
+    //
+    // Deliberately drawn through `random-rare`. The first version of this check
+    // used `random-legendary`, which picks uniformly and never touches the
+    // weighting at all, so it sat there green while a weight of zero on
+    // everything above $20,000 made five pairs unwinnable. A reachability check
+    // has to go through the code path that decides reachability.
+    const legs = SNEAKERS.filter(s => s.rarity === 'Legendary');
+    const seen = new Set(Array.from({ length: 120000 }, () => drawPrize('random-rare')).map(s => s.id));
+    for (const l of legs) {
+        assert.ok(seen.has(l.id), `${l.name} ($${l.basePrice.toLocaleString()}) can never be won`);
+    }
+});
+
+t('a Legendary gift is still a Legendary', () => {
+    // Bibi's gift scene asks for `random-legendary` by name. Narrowing
+    // `random-rare` must not have narrowed that too.
+    for (let i = 0; i < 200; i++) assert.equal(drawPrize('random-legendary').rarity, 'Legendary');
+});
+
+t('a loss takes a pair, but not the best one you own', () => {
+    // Bag Snatch, the TSA and every mugging reach through the same pick. It was
+    // uniform over the whole bag, so one bad footrace could take a $75,000 pair
+    // off a player carrying nine cheap ones — the cost decided by the dice
+    // rather than by anything they did.
+    const grail = SNEAKERS.reduce((a, b) => (a.basePrice > b.basePrice ? a : b));
+    const cheap = [...SNEAKERS].sort((a, b) => a.basePrice - b.basePrice).slice(0, 9);
+    const bag = [grail, ...cheap].map((s, i) => ({ instanceId: `i${i}`, sneakerId: s.id, purchasePrice: 1, isFake: false }));
+    for (let i = 0; i < 2000; i++) {
+        const r = applyOutcomes(P({ inventory: [...bag] }), [
+            { type: 'inventoryChange', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'gone' },
+        ] as ScenarioOutcome[], { day: 3 });
+        assert.equal(r.player.inventory.length, bag.length - 1, 'nothing was taken at all');
+        const gone = bag.find(b => !r.player.inventory.some(x => x.instanceId === b.instanceId))!;
+        assert.notEqual(gone.sneakerId, grail.id,
+            `a loss took the $${grail.basePrice.toLocaleString()} ${grail.name} out of a bag of nine cheap pairs`);
+    }
+});
+
+t('a bag of nothing but grails still loses a grail', () => {
+    // The stake has to stay real. "Cheaper half" bounds the loss by what you
+    // chose to carry; it does not make a rich bag immune.
+    const legs = SNEAKERS.filter(s => s.rarity === 'Legendary').slice(0, 6);
+    const bag = legs.map((s, i) => ({ instanceId: `g${i}`, sneakerId: s.id, purchasePrice: 1, isFake: false }));
+    const r = applyOutcomes(P({ inventory: [...bag] }), [
+        { type: 'inventoryChange', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'gone' },
+    ] as ScenarioOutcome[], { day: 3 });
+    assert.equal(r.player.inventory.length, bag.length - 1);
+    const gone = bag.find(b => !r.player.inventory.some(x => x.instanceId === b.instanceId))!;
+    assert.equal(SNEAKERS.find(s => s.id === gone.sneakerId)!.rarity, 'Legendary');
+});
+
+t('a single pair is still takeable', () => {
+    // Half of one is zero if you round down, which would make the last pair in
+    // the bag permanently safe.
+    const only = [{ instanceId: 'o1', sneakerId: SNEAKERS[0].id, purchasePrice: 1, isFake: false }];
+    const r = applyOutcomes(P({ inventory: only }), [
+        { type: 'inventoryChange', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'gone' },
+    ] as ScenarioOutcome[], { day: 3 });
+    assert.equal(r.player.inventory.length, 0, 'the last pair in the bag was untouchable');
 });
 
 console.log(`\n${pass} arcade checks passed.`);
