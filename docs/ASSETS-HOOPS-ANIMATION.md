@@ -51,22 +51,60 @@ here, and none may be.** What follows is drawn from scratch for this game.
 Do **not** target 54 dunks. That was the marquee feature of a 1993 arcade
 cabinet with a team digitising real athletes, and the dunk is on screen for
 roughly **five seconds of a ninety-second game** (measured: 9.15 dunks/game at
-~0.5s each).
+~0.5s each). Four or five finishes dealt at random gets most of the variety
+benefit — the engine deals from a list, so a sixth dunk is a file, not a code
+change.
 
-Take the *structure* instead, which is where the quality actually lives:
+But **do not copy Jam's 23 either**, and this is the part that matters:
 
-1. **A single action gets ~10 frames.** Not one pose held, and not two frames
-   ping-ponging. Ten frames is enough for anticipation, action and
-   follow-through — and that three-beat shape is the entire difference between
-   "the sprite moved" and "the player moved".
-2. **Running and running-with-the-ball are different animations.** Jam keeps
-   `RUN_SEQ` and `RUNDRIB_SEQ` apart. Ours uses one cycle for both, which is
-   why a player carrying the ball reads exactly like a player who is not.
-3. **Variety is a feature, not a garnish.** 54 dunks is why the fiftieth dunk
-   still landed. We want the same property at a tenth of the cost: a handful
-   of finishes dealt at random rather than one played 9 times a game.
+### The rule: frames are set by duration, not by importance
 
-So: **fewer sequences than Jam, the same frames per sequence.**
+```
+frames  =  duration  ×  animation fps
+```
+
+Animation frames are consumed over time. Pixel art reads well at **12–20 fps**
+— below 12 it strobes, above about 20 you are paying for drawings that each
+show for two game frames and nobody ever sees. Our sim runs at a fixed 60fps,
+so a 20fps clip holds each frame for 3 game frames.
+
+That makes frame count a *consequence* of how long the action lasts, and every
+one of our durations is already a constant in `HoopsGame.tsx`:
+
+| action | duration | source | @12fps | **@15fps** | @20fps |
+|---|---:|---|---:|---:|---:|
+| dunk (normal) | 0.72s | `dunkDur` :1198 | 9 | **11** | 14 |
+| dunk (turbo) | 0.80s | `dunkDur` :1198 | 10 | **12** | 16 |
+| alley-oop finish | 0.38s | `dunkDur` :1198 | 5 | **6** | 8 |
+| tip-in | 0.28s | `dunkDur` :1198 | 3 | **4** | 6 |
+| stagger / knocked down | 0.85s | `STUMBLE_TIME` :148 | 10 | **13** | 17 |
+| shot gather | 0.62s | `SHOT_CHARGE_TIME` :188 | 7 | **9** | 12 |
+| jump, floor to floor | 0.77s | measured from `GRAVITY`/`JUMP_V` | 9 | **12** | 15 |
+| pivot | 0.12s | must stay fast | 1 | **3** | 2 |
+| landing | 0.12s | must stay fast | 1 | **3** | 2 |
+
+So Jam's 23-frame showpieces are not a richer version of our dunk — they are a
+**longer** one. Our dunk is 0.72–0.80 seconds because that is what the
+gameplay wants. Twenty-three frames inside 0.8s is 29fps: each drawing would
+be on screen for two game frames, and the illustrator would be paid for
+roughly a dozen images no player will ever resolve.
+
+### The trap this rule protects against
+
+More frames on a *short* action does not make it smoother. It makes it
+**longer**, and a longer action is a less responsive game.
+
+A ten-frame pivot is a half-second pivot. Turning around would stop being
+something you do and start being something you commit to, and the game would
+feel worse than it does now — which is the exact opposite of the point. Pivot,
+landing and skid are short **because they must be**, and they get 3–4 frames
+each for that reason and no other.
+
+Cycles play by a different rule again. A run is a loop, not a one-shot, so its
+length is set by stride cadence rather than by a timer, and it wants an **even**
+count because the two halves mirror each other. 8 is the classic run cycle;
+10 and 12 are genuinely smoother and worth the extra drawings, because running
+is what the player looks at more than anything else in the game.
 
 ---
 
@@ -127,8 +165,8 @@ assets/art/hoops/<sequence>@<frames>.png
 
 The `@N` suffix is the frame count and the loader reads it — a sheet without
 it is drawn as one enormous frame, which looks like a rendering fault and is a
-naming one. A 8-frame run cycle is therefore `384 × 64` and named
-`hoops-run@8.png`.
+naming one. The 10-frame run cycle is therefore `480 × 64` and named
+`hoops-run@10.png`.
 
 ### 2.4 Silhouette and readability
 
@@ -159,71 +197,73 @@ Characters face **right** in every frame. The engine mirrors for left.
 
 ## 3. The frame list
 
-Ordered by how much screen time each gets, which is not the order of how
+Every count below is `duration × 15fps`, rounded, using the durations in §1.
+Ordered by how much screen time each gets — which is not the order of how
 exciting they are. Tier 1 is most of what a player ever looks at.
 
 ### Tier 1 — locomotion (the 90%)
 
-| sequence | frames | notes |
+| sequence | frames | why that number |
 |---|---:|---|
-| `hoops-idle@4` | 4 | Standing, weight shifting, breathing. Not a freeze. |
-| `hoops-run@8` | 8 | No ball. Full stride, real arm swing, body leaned into it. |
-| `hoops-dribble@8` | 8 | **Separate cycle.** Ball low and to the side, off-arm out. The single most valuable sheet in this document — it is how you tell at a glance who has the ball. |
-| `hoops-turbo@8` | 8 | Sprint. Lower stance, longer stride, more lean than `run`. |
-| `hoops-pivot@3` | 3 | Planting and turning the other way. This is what kills the "skating" feel; without it a reversal is a mirror flip. |
-| `hoops-skid@3` | 3 | Hard stop, heels dug in, dust. Plays when velocity dies fast. |
+| `hoops-idle@6` | 6 | Slow loop, ~1.5s. Weight shifting, breathing. Not a freeze. |
+| `hoops-run@10` | 10 | Loop, 5 per step. No ball, full stride, real arm swing, body leaned in. |
+| `hoops-dribble@10` | 10 | **Separate cycle.** Ball low and to the side, off-arm out. The single most valuable sheet here — it is how you tell at a glance who has the ball. |
+| `hoops-turbo@10` | 10 | Sprint. Lower stance, longer stride, more lean than `run`. |
+| `hoops-pivot@3` | 3 | 0.12s. **Short on purpose** — see §1. Planting and turning the other way; this is what kills the "skating" feel. |
+| `hoops-skid@4` | 4 | 0.25s. Hard stop, heels dug in. |
 
-**Subtotal: 34 frames.** If only one batch ever gets drawn, make it this one.
+**Subtotal: 43 frames.** If only one batch ever gets drawn, make it this one.
 
 ### Tier 2 — the ball
 
-| sequence | frames | notes |
+| sequence | frames | why that number |
 |---|---:|---|
-| `hoops-gather@4` | 4 | Shot wind-up, the crouch before the jumper. Anticipation — the defender needs to be able to read it. Currently a boolean. |
-| `hoops-jumper@6` | 6 | Rise, release, **follow-through with the wrist held**. The follow-through is not optional; it is what makes a shot feel shot. |
-| `hoops-pass@4` | 4 | Bullet. Chest, sharp, weight forward. |
-| `hoops-lob@4` | 4 | Two hands, up and over. Must read differently from `pass` at a glance. |
-| `hoops-layup@6` | 6 | Off one foot, ball up off the glass. |
+| `hoops-gather@9` | 9 | `SHOT_CHARGE_TIME` is 0.62s — a long, readable wind-up the defender is meant to react to. It is currently a boolean. |
+| `hoops-jumper@9` | 9 | Rise, release, **follow-through with the wrist held**. The follow-through is not optional; it is what makes a shot feel shot. |
+| `hoops-pass@5` | 5 | ~0.3s. Chest, sharp, weight forward. |
+| `hoops-lob@5` | 5 | Two hands, up and over. Must read differently from `pass` at a glance. |
+| `hoops-layup@8` | 8 | ~0.5s. Off one foot, ball up off the glass. |
 
-**Subtotal: 24 frames.**
+**Subtotal: 36 frames.**
 
 ### Tier 3 — the spectacle
 
-| sequence | frames | notes |
+| sequence | frames | why that number |
 |---|---:|---|
-| `hoops-dunk-a@10` | 10 | One-hand tomahawk. |
-| `hoops-dunk-b@10` | 10 | Two-hand, knees tucked. |
-| `hoops-dunk-c@12` | 12 | 360. |
-| `hoops-dunk-d@12` | 12 | Something anatomically indefensible. This is the one people screenshot. |
-| `hoops-alley@10` | 10 | Catch in the air and finish. Separate from the dunks: it starts with empty hands. |
+| `hoops-dunk-a@11` | 11 | 0.72s `dunkDur`. One-hand tomahawk. |
+| `hoops-dunk-b@11` | 11 | 0.72s. Two-hand, knees tucked. |
+| `hoops-dunk-c@11` | 11 | 0.72s. 360. |
+| `hoops-dunk-d@12` | 12 | 0.80s — the turbo dunk is the long one. Something anatomically indefensible. This is the one people screenshot. |
+| `hoops-dunk-e@12` | 12 | 0.80s. Second turbo finish, so the big one is not always the same big one. |
+| `hoops-alley@6` | 6 | 0.38s — an alley finish is *half the length of a dunk*. Catch in the air and slam. Starts with empty hands, so it cannot reuse a dunk. |
+| `hoops-tip@4` | 4 | 0.28s, the shortest action in the game. Put-back off the rim. |
 
-**Subtotal: 54 frames.** Four dunks dealt at random gets most of the variety
-benefit of Jam's fifty-four, at 7% of the cost. More can be added later — the
-engine deals from a list, so a fifth dunk is a file, not a code change.
+**Subtotal: 67 frames.** Five finishes plus the two short ones. The engine
+deals from a list, so a sixth dunk is a file drop, not a code change.
 
 ### Tier 4 — contact and defence
 
-| sequence | frames | notes |
+| sequence | frames | why that number |
 |---|---:|---|
-| `hoops-block@6` | 6 | Vertical, arm fully extended, ugly and committed. |
-| `hoops-steal@4` | 4 | The reach-in. |
-| `hoops-shove@5` | 5 | The push. Wind-up, contact, recovery. |
-| `hoops-stagger@6` | 6 | Taking the shove: off balance, arms wheeling, going down. |
-| `hoops-down@2` | 2 | On the floor. Currently the walk pose rotated and squashed. |
-| `hoops-getup@4` | 4 | Pushing back up. Sells the 0.85s you are out of the play. |
-| `hoops-land@3` | 3 | Absorbing a landing. Three frames of weight, and the reason jumping will stop feeling weightless. |
+| `hoops-block@8` | 8 | ~0.5s of the 0.77s jump. Vertical, arm fully extended, ugly and committed. |
+| `hoops-steal@5` | 5 | ~0.3s. The reach-in. |
+| `hoops-shove@6` | 6 | ~0.35s. Wind-up, contact, recovery. |
+| `hoops-stagger@13` | 13 | `STUMBLE_TIME` is **0.85s** — the longest single action in the game and currently the walk pose rotated. Off balance, arms wheeling, going down. Worth every frame: this is the payoff of the signature move. |
+| `hoops-down@2` | 2 | Held on the floor. The tail of `stagger`, so it is cheap. |
+| `hoops-getup@6` | 6 | ~0.4s. Pushing back up. Sells the time you are out of the play. |
+| `hoops-land@3` | 3 | 0.12s. **Short on purpose.** Three frames of absorbed weight is the difference between landing and teleporting. |
 
-**Subtotal: 30 frames.**
+**Subtotal: 43 frames.**
 
 ### Tier 5 — flavour
 
-| sequence | frames | notes |
+| sequence | frames | why that number |
 |---|---:|---|
-| `hoops-celebrate@6` | 6 | After a bucket. |
-| `hoops-gassed@4` | 4 | Hands on knees, empty turbo bar. The game has a GASSED state and nothing shows it. |
-| `hoops-fire-idle@4` | 4 | On fire. Can be the idle with a different stance; the flame FX is code. |
+| `hoops-celebrate@8` | 8 | ~0.5s. After a bucket. |
+| `hoops-gassed@6` | 6 | Loop. Hands on knees, empty turbo bar. The game has a GASSED state and nothing shows it. |
+| `hoops-fire-idle@6` | 6 | Loop. On fire. The flames themselves are code; this is the stance. |
 
-**Subtotal: 14 frames.**
+**Subtotal: 20 frames.**
 
 ---
 
@@ -231,19 +271,19 @@ engine deals from a list, so a fifth dunk is a file, not a code change.
 
 | tier | frames |
 |---|---:|
-| 1 — locomotion | 34 |
-| 2 — the ball | 24 |
-| 3 — spectacle | 54 |
-| 4 — contact | 30 |
-| 5 — flavour | 14 |
-| **total** | **156** |
+| 1 — locomotion | 43 |
+| 2 — the ball | 36 |
+| 3 — spectacle | 67 |
+| 4 — contact | 43 |
+| 5 — flavour | 20 |
+| **total** | **209** |
 
-156 frames against the 4 that exist today.
+209 frames against the 4 that exist today.
 
-For scale: that is roughly what NBA Jam spent on **fifteen of its fifty-four
-dunks**. We are not out-drawing a 1993 arcade cabinet on volume. We are
-spending the frames where the game actually looks at them, which that cabinet
-did not have to care about because it was not also a shoe-trading game.
+Note what the duration rule did to the first draft of this table: the gather
+went from 4 frames to 9 and the stagger from 6 to 13, because both are long
+actions that were being under-drawn; the alley-oop came *down* from 10 to 6,
+because it is a 0.38s move that was being over-drawn. Frames follow the clock.
 
 ### Batch order
 
@@ -282,6 +322,8 @@ Recorded here so the wiring is not mistaken for art work.
 
 > Draw a 48×64 pixel basketball player, facing right, in the palette from
 > `systems/sprites/palette.ts`, one horizontal strip per action, named
-> `hoops-<action>@<frames>.png`. Every action gets anticipation, action and
+> `hoops-<action>@<frames>.png` — the number in the filename is the frame
+> count and it is not negotiable, because each one is that action's real
+> duration times 15fps. Every action gets anticipation, action and
 > follow-through. Exaggerate everything — at 32 pixels on a phone, subtle
 > reads as broken.
