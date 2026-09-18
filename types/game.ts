@@ -63,6 +63,16 @@ export interface MiniGameRequest {
     onWin?: import('./interactions').ScenarioOutcome[];
     /** Applied when the player loses. */
     onLose?: import('./interactions').ScenarioOutcome[];
+    /**
+     * Energy the game takes out of you, charged once when it starts.
+     *
+     * Charged on launch rather than written into `onWin`/`onLose`, because the
+     * Arcade advertises this number on the card and the payloads were where it
+     * went to die: eight of the twelve games charged nothing at all, and three
+     * more charged only on one branch, so winning Pizza Run was free while
+     * losing it cost 14. Playing is what tires you out, not the result.
+     */
+    energyCost?: number;
 }
 
 export interface SideQuest {

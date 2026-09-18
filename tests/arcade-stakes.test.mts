@@ -20,7 +20,7 @@
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ENTRIES } from '../screens/ArcadeScreen.tsx';
+import { ENTRIES, requestFor } from '../screens/ArcadeScreen.tsx';
 import { MINIGAME_QUIT_FORFEIT, MAX_INVENTORY_SIZE, INITIAL_PLAYER, STREET_SALE_RATE } from '../constants.ts';
 import { SNEAKERS } from '../data/sneakers.ts';
 import { applyOutcomes } from '../systems/outcomes/outcomeEngine.ts';
@@ -31,7 +31,7 @@ import type { ScenarioOutcome } from '../types/interactions.ts';
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
 
-const built = ENTRIES.map(e => ({ entry: e, req: e.build({ cityName: 'Tokyo' } as never) }));
+const built = ENTRIES.map(e => ({ entry: e, req: requestFor(e, { cityName: 'Tokyo' }) }));
 /** Games with an authored win payload — the box game writes its own. */
 const winnable = built.filter(b => (b.req.onWin ?? []).length > 0);
 
@@ -174,6 +174,45 @@ t('the Bail Out button is wired to the quit action, not to a loss', () => {
     assert.ok(quitLine, 'the quit handler has been renamed; this check is stale');
     assert.match(quitLine, /QUIT_MINIGAME/, 'Bail Out is dispatching something other than QUIT_MINIGAME');
     assert.doesNotMatch(quitLine, /RESOLVE_MINIGAME/, 'Bail Out resolves as a loss again');
+});
+
+/* ------------------------------------------------------------------------- *
+ * Energy: the number on the card
+ * ------------------------------------------------------------------------- */
+
+t('the advertised energy cost is the one that gets charged', () => {
+    // It used to be decorative. `energyCost` gated the Play button and was then
+    // never deducted; only the win/lose payloads charged energy, and only some
+    // of them. Measured across the twelve entries: eight charged nothing at all
+    // on either branch, Pizza Run charged 14 for losing and nothing for winning,
+    // and Cart Race charged 16 for winning and nothing for losing. Flight 404
+    // printed a 25 on the card and took none of it.
+    for (const { entry, req } of built) {
+        const before = { ...inGame(req as never), player: P({ energy: 100 }) } as GameState;
+        const after = gameReducer(before, { type: 'LAUNCH_MINIGAME', payload: req } as never);
+        assert.equal(100 - after.player.energy, entry.energyCost,
+            `${entry.id} advertises ${entry.energyCost} energy and charges ${100 - after.player.energy}`);
+    }
+});
+
+t('energy is charged for playing, not for the result', () => {
+    // Otherwise the same game costs different amounts depending on how it ends,
+    // which is how Pizza Run came to be free if you were good at it.
+    for (const { entry, req } of built) {
+        for (const won of [true, false]) {
+            const drained = P({ energy: 100 }).energy
+                - applyOutcomes(P({ energy: 100 }), (won ? req.onWin : req.onLose) ?? [], { day: 3 }).player.energy;
+            assert.equal(drained, 0,
+                `${entry.id} still drains ${drained} energy in its ${won ? 'onWin' : 'onLose'} payload, on top of the launch charge`);
+        }
+    }
+});
+
+t('a game you cannot afford cannot be started into negative energy', () => {
+    const { req } = built.find(b => b.entry.energyCost > 0)!;
+    const after = gameReducer({ ...inGame(req as never), player: P({ energy: 1 }) } as GameState,
+        { type: 'LAUNCH_MINIGAME', payload: req } as never);
+    assert.ok(after.player.energy >= 0, 'energy went negative');
 });
 
 console.log(`\n${pass} arcade checks passed.`);

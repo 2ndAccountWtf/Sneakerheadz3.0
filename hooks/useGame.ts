@@ -847,8 +847,23 @@ const rawReducer = (state: GameState, action: Action): GameState => {
             return { ...state, activeInteraction: null };
         }
 
-        case 'LAUNCH_MINIGAME':
-            return { ...state, activeMiniGame: action.payload, outcomeLog: [] };
+        /**
+         * Starting a game is what costs you the energy, not how it ends.
+         *
+         * The Arcade prints this number on every card, and it used to be purely
+         * decorative: it gated the Play button and was then never deducted. Only
+         * the payloads charged energy, and only some of them — eight of the
+         * twelve games charged nothing, and Pizza Run charged 14 for losing and
+         * nothing for winning. Charging on launch makes the advertised figure
+         * the real one, once, whichever way the game goes.
+         */
+        case 'LAUNCH_MINIGAME': {
+            const cost = action.payload.energyCost ?? 0;
+            const player = cost > 0
+                ? { ...state.player, energy: Math.max(0, state.player.energy - cost) }
+                : state.player;
+            return { ...state, player, activeMiniGame: action.payload, outcomeLog: [] };
+        }
 
         case 'RESOLVE_MINIGAME': {
             const req = state.activeMiniGame;

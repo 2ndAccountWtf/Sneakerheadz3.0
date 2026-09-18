@@ -22,8 +22,19 @@ const money = (n: number, text: string): ScenarioOutcome =>
     n >= 0
         ? { type: 'inventoryChange', add: [{ kind: 'currency', value: 'cash', qty: n }], description: text }
         : { type: 'inventoryChange', remove: [{ kind: 'currency', value: 'cash', qty: -n }], description: text };
-const energy = (n: number, text: string): ScenarioOutcome => ({ type: 'stat_change', payload: { stat: 'energy', value: n }, description: text });
 const health = (n: number, text: string): ScenarioOutcome => ({ type: 'stat_change', payload: { stat: 'health', value: n }, description: text });
+
+/**
+ * The request the Play button actually sends.
+ *
+ * The energy cost is stamped on here rather than written into each `build()`,
+ * so the number on the card and the number charged cannot drift apart — they
+ * are the same field read once. Exported because the tests have to go through
+ * the same path the button does: the last round of Arcade bugs all lived in the
+ * gap between what the reducer did and what the call site handed it.
+ */
+export const requestFor = (entry: ArcadeEntry, ctx: { cityName: string }): MiniGameRequest =>
+    ({ ...entry.build(ctx), energyCost: entry.energyCost });
 
 export const ENTRIES: ArcadeEntry[] = [
     {
@@ -37,8 +48,8 @@ export const ENTRIES: ArcadeEntry[] = [
             game: 'street-ball',
             title: `${cityName} Blacktop`,
             config: { opponent: 'Guy In Jeans' },
-            onWin: [money(150, 'You collect the side bet.'), cred(6, 'The court saw it.'), energy(-10, 'That was a real run.')],
-            onLose: [money(-150, 'You pay out the side bet.'), cred(-2, 'Word gets around.'), energy(-10, 'You are gassed.')],
+            onWin: [money(150, 'You collect the side bet.'), cred(6, 'The court saw it.')],
+            onLose: [money(-150, 'You pay out the side bet.'), cred(-2, 'Word gets around.')],
         }),
     },
     {
@@ -71,11 +82,9 @@ export const ENTRIES: ArcadeEntry[] = [
                 { type: 'inventoryChange', add: [{ kind: 'item', value: 'random-rare', qty: 1 }], description: 'You get the box back — and it was not even yours.' },
                 money(240, 'The owner catches up, out of breath, and makes you take something for it.'),
                 cred(8, 'People saw you run him down.'),
-                energy(-18, 'Lungs on fire.'),
             ],
             onLose: [
                 { type: 'inventoryChange', remove: [{ kind: 'item', value: 'random-sneaker', qty: 1 }], description: 'He got yours too, somehow.' },
-                energy(-18, 'All that for nothing.'),
             ],
         }),
     },
@@ -94,7 +103,6 @@ export const ENTRIES: ArcadeEntry[] = [
                 { type: 'inventoryChange', add: [{ kind: 'item', value: 'random-rare', qty: 1 }], description: 'You get it back, plus whatever else was in the cart.' },
                 money(300, 'There was a roll of notes in the cart. He is in no position to ask for it.'),
                 cred(11, 'The whole street watched you run down a shopping trolley.'),
-                energy(-16, 'That was all downhill and you are still wrecked.'),
             ],
             onLose: [money(-220, 'He sells it before you reach the bottom.'), health(-12, 'You went over the handlebars of something.')],
         }),
@@ -173,7 +181,7 @@ export const ENTRIES: ArcadeEntry[] = [
             game: 'pizza-run',
             title: 'Night Shift',
             onWin: [money(900, 'You made rent.'), cred(4, 'Somebody tipped you in respect, which does not pay rent.')],
-            onLose: [money(-60, 'You are paying for the boxes you scattered.'), energy(-14, 'A whole shift for nothing.')],
+            onLose: [money(-60, 'You are paying for the boxes you scattered.')],
         }),
     },
     {
@@ -220,7 +228,7 @@ export const ENTRIES: ArcadeEntry[] = [
                 cred(9, 'You made the clip.'),
                 { type: 'statusEffect', effect: 'guidance', duration: '24h', label: 'Podcast Intel', description: 'You heard which model is next.' },
             ],
-            onLose: [cred(-5, 'The chat decided you have low vibrational energy.'), energy(-8, 'You argued with a man about elk for an hour.')],
+            onLose: [cred(-5, 'The chat decided you have low vibrational energy.')],
         }),
     },
 ];
@@ -269,7 +277,7 @@ const ArcadeScreen: React.FC = () => {
                             <button
                                 className="btn btn-accent w-full mt-auto"
                                 disabled={tooTired}
-                                onClick={() => launchMiniGame(entry.build({ cityName }))}
+                                onClick={() => launchMiniGame(requestFor(entry, { cityName }))}
                             >
                                 {tooTired ? 'Too Tired' : 'Play'}
                             </button>
