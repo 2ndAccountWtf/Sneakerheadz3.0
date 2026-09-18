@@ -26,7 +26,7 @@ hundreds of games. What has already shipped, with the measured effect:
 | tie → sudden death | a draw was recorded as a loss, ~1 game in 12 |
 | passing lane is a lane | `BULLET_ARC` 16 vs a pick ceiling of 26 — a bullet never rose above its own gate |
 | contact has weight | never-passes bot 92% → 40%; **passing now beats hoarding** |
-| roster wired in | `derive()` had zero call sites; every opponent played identically |
+| roster wired in | `derive()` had zero call sites; every opponent played identically. **4 of 12 modifiers reach the sim; 8 still do not — see §3.5** |
 
 Current balance, 50 games per profile:
 
@@ -127,8 +127,9 @@ and the game is embedded in a larger app whose chrome has to get out of the way.
 
 ## 3. P1 — feedback the player is owed
 
-Three separate places where the game knows something and does not tell you.
-Cheap, and they are most of what "unfinished" feels like.
+Places where the game knows something and does not tell you, or tells you
+something it decided by a mechanism nobody would guess. 3.1 and 3.2 are cheap.
+3.3 to 3.5 are one connected problem with a shared fix.
 
 ### 3.1 65% of possession changes happen in silence
 
@@ -158,27 +159,84 @@ information, which is why this is a feedback gap rather than a bug.
 **Done when:** reaching a streak of 2 is announced regardless of how the bucket
 was scored.
 
-### 3.3 Goaltending deletes ~3 made baskets a game with no tell
+### 3.3 Goaltending is 71% of all blocking, and now we know why
 
-Measured over 200 games: **1072 goaltends, 53% of them on a shot the model had
-already resolved as a make.** Goaltends are 5.24 of 7.37 total blocks; in
-AI-vs-AI, 9.22 of 9.97. The check at `:2206` never looks at `b.made`, and the
-AI's goaltend jump fires at 5% per tick whenever it is near the ball's
-in-flight position.
+The first draft of this document said goaltending was "too common" without
+establishing a cause, which was not good enough. Measured, the reason is
+mechanical and has nothing to do with the rate being mistuned.
 
-From the player's chair: a good look leaves your hand, travels, and vanishes,
-with no shot-block contact you could have anticipated. This is the single
-mechanic most likely to read as "why did that not go in".
+**The two checks use the same conditions and get wildly different numbers of
+chances to fire.** Both require an airborne defender within `BLOCK_R` (16px):
 
-Related, and part of the same problem: **CPU jump shots have no wind-up at
-all.** `aiThink` calls `launchShot` directly, so `p.charge` is never set for a
-CPU shooter — measured at 0.086% of AI frames. The release meter and gather
-pose only ever appear over you. A bot that stands under the shooter and jumps
-every frame manages **1.63 non-goaltend blocks a game against 4.75 goaltends**:
-you cannot block a CPU jumper on purpose, only swat it in flight.
+| | roll | when |
+|---|---|---|
+| block at release (`:1107`) | `rng < 0.55` | **once**, on the single frame the shot leaves the hand |
+| goaltend in flight (`:2206`) | `rng < 0.5` | **every frame** the ball is inside `GOALTEND_R` past `GOALTEND_MIN_T` |
 
-**Done when:** the goaltend rate is materially lower, a CPU jumper has a
-readable wind-up, and blocking a shot on purpose is possible.
+Measured over 25 games: a shot that enters the goaltend window stays there for
+a **mean of 18.8 frames** (max 57). At 0.5 per frame, that is:
+
+```
+goaltend   P(at least one hit) over 18.8 frames  =  100.00%
+block      P                                      =   55.00%,
+           and only if he is already airborne at that exact instant
+```
+
+**The goaltend gets roughly 19× the rolls for the same radius and the same
+rule.** It is not more common because it is tuned high. It is more common
+because it is a repeated roll against a single one — so once a defender is up
+and near the ball, the save is certain. That also explains the other half of
+the complaint: the 53% of goaltends that erase an already-resolved make are not
+a separate bug, they are the same certainty applied to shots that were going in.
+
+### 3.4 What NBA Jam does about the same problem
+
+Read as design rules only. **No code, data or art from that repository is used
+here, and none may be.** These came back as summaries of TMS34010 assembly
+rather than a line-by-line reading, so treat them as strong indications:
+
+- **Block chance is 1% to 25%, scaled by the defender's skill attribute.**
+  Ours is 50% and 55%, scaled by nothing.
+- The percentage appears to gate whether the defender **tries** the block, not
+  whether a met condition succeeds — a meaningful difference from ours, where
+  the roll decides the outcome.
+- **Trajectory matters:** the code distinguishes a player still going up from
+  one coming down, and blocks are described as more effective on the descent.
+  We check height (`o.y > 10`) but never direction.
+- A blocked ball is deflected with velocity away from the hoop and possession
+  goes to the defender. That part we already do.
+
+So the shape of the fix is Jam's, not a number we invent: **a much lower
+chance, scaled by the attribute we already compute and do not read, with
+trajectory as a condition.**
+
+### 3.5 Six roster modifiers are still unread
+
+Directly relevant to the above, and an honest correction to what shipped
+earlier in the session. `derive()` is wired in now and four of its twelve
+multipliers reach the simulation. Eight do not:
+
+```
+speedMult       read        accelMult       UNREAD
+jumpMult        read        dunkBias        UNREAD
+dunkRangeMult   read        shotWindowMult  UNREAD
+stealResist     read        deepMult        UNREAD
+                            stealMult       UNREAD
+                            blockMult       UNREAD
+                            turboCapMult    UNREAD
+                            turboRegenMult  UNREAD
+```
+
+**`blockMult` is the one §3.4 wants.** Wiring it is what turns the block from a
+flat coin-flip into the attribute-scaled thing Jam describes, and it is the
+difference between a good defender and a bad one actually meaning something on
+a contest.
+
+**Done when:** the goaltend is a chance rather than a certainty — one roll per
+shot, or a per-frame chance low enough that a full window does not approach
+100% — scaled by `blockMult`; trajectory is a condition; a CPU jumper has a
+readable wind-up; and blocking a shot on purpose is possible. Re-measure the
+balance table in §0 afterwards, because this moves scoring.
 
 **Risk:** medium — 3.3 moves scoring. Re-measure the balance table in §0.
 
@@ -325,7 +383,7 @@ Listed so they are decisions rather than omissions.
 ```
 1. §1  test teeth            ← everything else rests on these
 2. §2  landscape/fullscreen  ← biggest felt change for the effort
-3. §3  feedback              ← cheap, and most of what reads as unfinished
+3. §3  feedback              ← 3.1/3.2 cheap; 3.3-3.5 are one job
 4. §4  input buffering       ← needs §1's guards to be safe
 5. §5  animation             ← as the art lands, tier by tier
 6. §6  small and true
