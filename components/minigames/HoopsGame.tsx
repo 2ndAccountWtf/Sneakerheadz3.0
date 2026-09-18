@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { MiniGameResult } from './MiniGameShell';
-import { profileFor, partnerFor, playerProfile, mateProfile, type HoopsProfile } from '../../systems/hoops/roster';
+import { profileFor, partnerFor, playerProfile, mateProfile, derive, type HoopsProfile, type Modifiers } from '../../systems/hoops/roster';
 import {
     ArcadeShell,
     useInput,
@@ -374,6 +374,8 @@ export interface Player {
      * in the roster to look up: he is derived from the man he came with.
      */
     profile: HoopsProfile;
+    /** `derive(profile.attributes)`, cached once. See `systems/hoops/roster.ts`. */
+    mods: Modifiers;
     x: number; z: number;
     vx: number; vz: number;
     facing: 1 | -1;
@@ -650,7 +652,7 @@ export const dunkRangeFor = (p: Player): number => {
     const t = clamp((speedMag(p) - floor) / (ceil - floor), 0, 1);
     let r = DUNK_RANGE_BASE + DUNK_RANGE_BONUS * t;
     if (p.onFire) r += DUNK_RANGE_FIRE_BONUS;
-    return r;
+    return r * p.mods.dunkRangeMult;
 };
 
 /** Sprinting hard enough that a dunk from here should look and feel bigger. */
@@ -832,6 +834,11 @@ const mkPlayer = (
     profile: HoopsProfile,
 ): Player => ({
     id, team, human, name, kit, profile,
+    // The attributes, turned into the multipliers the sim actually reads.
+    // `derive()` and its 497 lines of roster existed with zero call sites
+    // outside their own test: every opponent played an identical game, and
+    // the `skill` the venue screen threaded in had no effect whatsoever.
+    mods: derive(profile.attributes),
     x, z, vx: 0, vz: 0,
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
@@ -1461,12 +1468,15 @@ const endGame = (w: World, reason: EndReason = 'target') => {
 /* ------------------------------------------------------------------ */
 
 const speedOf = (p: Player, turbo: boolean) => {
-    let s = BASE_SPEED;
+    let s = BASE_SPEED * p.mods.speedMult;
     if (p.onFire) s *= FIRE_MULT;
     if (turbo) s *= TURBO_MULT;
     if (p.charge >= 0) s *= 0.45;    // gathering for a shot slows you down
     return s;
 };
+
+/** Jump velocity for this body. A big leaves the floor harder than a guard. */
+const jumpOf = (p: Player) => JUMP_V * p.mods.jumpMult;
 
 /**
  * Movement has weight. `applyMove` used to assign velocity directly — a body
@@ -1539,6 +1549,70 @@ const applyMove = (p: Player, dx: number, dz: number, speed: number, dt: number,
     p.stride += (speedNow * dt) / 11;
 };
 
+/**
+ * What running into somebody costs.
+ *
+ * Bodies already separated; this is the part that was missing. Both players
+ * lose speed along the line of contact, scaled by how hard they met and by
+ * how much each of them can shrug off — so a body in your path is a body you
+ * have to get through rather than one you stand against at top speed.
+ *
+ * Turbo is not handled here at all, and that is deliberate. A sprinter arrives
+ * with more momentum and keeps more of it after the tax, which is the "speed
+ * advantage rather than contact immunity" model: the button makes you better
+ * at contact instead of exempt from it.
+ *
+ * The mismatch that staggers is a real one — a sprinter meeting somebody
+ * roughly stationary, with the strength to knock them over. `stealResist`
+ * doubles as how hard somebody is to move, which is what it already means.
+ */
+const CONTACT_LOSS = 0.55;        // share of your own approach speed taken off
+const STAGGER_CLOSING = 120;      // px/s of closing speed before a knockdown is possible
+const STAGGER_EDGE = 1.30;        // how much stronger the winner has to actually be
+
+export const collide = (w: World, a: Player, c: Player) => {
+    if (a.stumbleT > 0 || c.stumbleT > 0) return;
+    const d = dist2d(a.x, a.z, c.x, c.z);
+    if (d < 0.001) return;
+    // Unit vector from c to a, in the x/z-scaled space the sim measures in.
+    const ux = (a.x - c.x) / d;
+    const uz = ((a.z - c.z) * Z_PX) / d;
+
+    // Each body is taxed on *its own* approach speed, not on the closing speed
+    // they share. The first version split the closing speed evenly, which
+    // quietly rewarded the driver: a defender standing his ground lost as much
+    // as the man who ran into him, so contact helped whoever was moving and a
+    // driving bot went from 92% to 100%. Running into somebody should cost the
+    // one who ran in.
+    const aInto = Math.max(0, -(a.vx * ux + a.vz * Z_PX * uz));
+    const cInto = Math.max(0, c.vx * ux + c.vz * Z_PX * uz);
+    if (aInto + cInto <= 0) return;           // drifting apart; nothing to resolve
+
+    const takeA = (CONTACT_LOSS * aInto) / Math.max(0.35, a.mods.stealResist);
+    const takeC = (CONTACT_LOSS * cInto) / Math.max(0.35, c.mods.stealResist);
+    a.vx += ux * takeA; a.vz += (uz * takeA) / Z_PX;
+    c.vx -= ux * takeC; c.vz -= (uz * takeC) / Z_PX;
+
+    // A knockdown is a mismatch of *bodies*, not of momentum. Folding speed
+    // into the strength term made every sprinter beat every stationary
+    // defender, so somebody was on the floor for a fifth of all frames. Speed
+    // decides whether the collision is hard enough to matter; `stealResist` —
+    // already "how hard this player is to move" — decides who loses it.
+    if (aInto + cInto < STAGGER_CLOSING) return;
+    const loser = a.mods.stealResist > c.mods.stealResist * STAGGER_EDGE ? c
+        : c.mods.stealResist > a.mods.stealResist * STAGGER_EDGE ? a
+        : null;
+    if (!loser) return;
+    loser.stumbleT = STUMBLE_TIME * 0.6;      // shorter than a deliberate shove
+    loser.charge = -1;
+    w.shake = Math.max(w.shake, 4);
+    w.hitstop = Math.max(w.hitstop, 0.05);
+    sfx('shove');
+    if (w.possession === loser.id) {
+        looseBall(w, loser.x, loser.z, 16, (loser.x - (loser === a ? c.x : a.x)) * 2, -40);
+    }
+};
+
 const clampToCourt = (p: Player) => {
     // Clamping the position without the velocity leaves you standing on the
     // wall still holding the speed you arrived with, and peeling off has to
@@ -1566,12 +1640,23 @@ const clampToCourt = (p: Player) => {
  */
 const LANE_BLOCK_FLOOR = 0.82;
 const LANE_BLOCK_R = 22;
+/** How much of the lane-block penalty a sprint shrugs off. 1 would be the old
+ *  behaviour — complete immunity to a defender standing in front of you. */
+const TURBO_ESCAPE = 0.72;
 
 export const laneBlockFactor = (w: World, p: Player, turbo: boolean): number => {
     if (w.possession !== p.id) return 1;
-    // Sprinting powers through. This is the whole reason the button exists:
-    // without an escape the slow-down is not defensive pressure, it is a trap.
-    if (turbo) return 1;
+    // Sprinting powers through *most* of it. The button has to be a real
+    // escape or the slow-down is a trap rather than pressure — but it used to
+    // return 1 outright, which made a sprinter immune to a man standing
+    // directly in his path. Since dunk range scales with speed, turbo was
+    // being paid for once and rewarded twice: it deleted the only positional
+    // defence in the game and extended the dunk to 50px at the same time, and
+    // a bot that simply drove won 92% of its games.
+    //
+    // Keeping a small penalty means position still counts against a sprint,
+    // while `TURBO_ESCAPE` close to 1 keeps the escape worth having.
+    const escape = turbo ? TURBO_ESCAPE : 0;
     const hoop = HOOPS[attackHoop(p.team)];
     let worst = 1;
     for (const o of w.players) {
@@ -1580,7 +1665,8 @@ export const laneBlockFactor = (w: World, p: Player, turbo: boolean): number => 
         if (d >= LANE_BLOCK_R) continue;
         const towardHoop = (hoop.x - p.x) * (o.x - p.x) > 0;
         if (!towardHoop) continue;
-        worst = Math.min(worst, LANE_BLOCK_FLOOR + (1 - LANE_BLOCK_FLOOR) * (d / LANE_BLOCK_R));
+        const raw = LANE_BLOCK_FLOOR + (1 - LANE_BLOCK_FLOOR) * (d / LANE_BLOCK_R);
+        worst = Math.min(worst, raw + (1 - raw) * escape);
     }
     return worst;
 };
@@ -1701,7 +1787,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
             p.y === 0 && p.aiTimer <= 0 && !guardClose && handler.cool <= 0
             && hoopDist(p, hoop) < ALLEY_HOOP_R && rng(w) < 0.05
         ) {
-            p.vy = JUMP_V;
+            p.vy = jumpOf(p);
             p.alleyCall = ALLEY_CALL_TIME;
             p.aiTimer = 1.2;
         }
@@ -1726,7 +1812,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // Contest: if he is gathering, jump. If he is just dribbling,
             // gamble on a poke at a cadence so it never feels like a wall.
             if (handler.charge >= 0 && dd < BLOCK_R && p.y === 0 && rng(w) < 0.018 * gamble) {
-                p.vy = JUMP_V;
+                p.vy = jumpOf(p);
             } else if (
                 dd < SHOVE_R && p.turbo > 0.35 && p.cool <= 0 && p.aiTimer <= 0
                 && handler.y <= 2 && rng(w) < 0.012 * gamble
@@ -1824,7 +1910,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
             && p.y === 0 && p.aiTimer <= 0 && b.t > GOALTEND_MIN_T - 0.08
             && dist2d(p.x, p.z, b.x, b.z) < BLOCK_R + 4 && rng(w) < 0.05
         ) {
-            p.vy = JUMP_V;
+            p.vy = jumpOf(p);
             p.aiTimer = 0.4;
         }
 
@@ -1836,7 +1922,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
             && dist2d(p.x, p.z, b.x, b.z) < 24 && b.y > 8 && b.y < 60
         ) {
             const willing = p.team === b.missTeam ? 0.16 : 0.1;   // offence crashes harder
-            if (rng(w) < willing) { p.vy = JUMP_V; p.aiTimer = 0.4; }
+            if (rng(w) < willing) { p.vy = jumpOf(p); p.aiTimer = 0.4; }
         }
     }
 
@@ -1946,7 +2032,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
                 // Cut, right now, under the rim: jump and call for the lob.
                 // The teammate AI/human holding the ball recognises an
                 // airborne man this close to the hoop and can hit the alley.
-                p.vy = JUMP_V;
+                p.vy = jumpOf(p);
                 p.alleyCall = ALLEY_CALL_TIME;
             } else if (mate.cool <= 0 && w.possession === mate.id) {
                 // Too far out for a lob: just call for the rock, grounded.
@@ -1975,7 +2061,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         // Defence: SHOOT jumps (block / contest), PASS steals. Hold TURBO and
         // PASS becomes the shove instead — the read is "am I close enough and
         // willing to burn turbo", same as it is for the CPU.
-        if (cmd.aPress && p.y === 0) p.vy = JUMP_V;
+        if (cmd.aPress && p.y === 0) p.vy = jumpOf(p);
         if (cmd.bPress && p.cool <= 0 && w.possession !== null) {
             const handler = w.players[w.possession];
             const dd = dist2d(p.x, p.z, handler.x, handler.z);
@@ -2590,7 +2676,19 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
         clampToCourt(p);
     }
 
-    // Bodies are solid-ish: push apart so four figures never occupy one pixel.
+    // Bodies are solid, and running into one costs you something.
+    //
+    // This loop used to move positions and never touch velocity, so a body was
+    // a wall you could stand against at top speed: measured, you could walk
+    // into a planted defender for two seconds and hold vx at exactly 76.00 the
+    // whole time, or drive an unplanted one 31.8px down the court without ever
+    // slowing down. Four figures never overlapped, and nothing else about
+    // contact was true.
+    //
+    // NBA Jam's own defensive model is the opposite: contact reduces the
+    // carrier's velocity, redirects it, and on a big enough mismatch staggers
+    // somebody — and turbo there is a speed advantage rather than immunity to
+    // any of it. That is the shape this follows.
     for (let i = 0; i < w.players.length; i++) {
         for (let j = i + 1; j < w.players.length; j++) {
             const a = w.players[i];
@@ -2604,6 +2702,7 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
                 a.x += ux * push; c.x -= ux * push;
                 a.z += uz * push * 0.5; c.z -= uz * push * 0.5;
                 clampToCourt(a); clampToCourt(c);
+                collide(w, a, c);
             }
         }
     }

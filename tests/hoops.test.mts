@@ -25,9 +25,10 @@ import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
     laneBlockFactor, TURBO_DRAIN, TURBO_REGEN, AI_TURBO_REGEN,
-    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME,
+    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME, collide,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
+import { profileFor } from '../systems/hoops/roster.ts';
 
 let pass = 0;
 const t = (n: string, f: () => void) => { f(); pass++; console.log('  ok  ' + n); };
@@ -609,11 +610,28 @@ t('there is always a way out of a defender — sprinting is it', () => {
         walking > 0.7,
         `walking into a set defender costs ${((1 - walking) * 100).toFixed(0)}% of your speed — that is a cage, not pressure`,
     );
-    assert.equal(sprinting, 1, 'turbo must beat the lane block — it is the only escape the player has');
-    // And the escape has to actually outrun him: no slow-down on a sprint
-    // means top speed against his top speed.
-    assert.ok(BASE_SPEED * TURBO_MULT * sprinting >= BASE_SPEED * TURBO_MULT,
-        'sprinting away is still slower than being chased');
+    // Turbo beats most of the lane block, not all of it. It used to return 1
+    // outright, which made a sprinter immune to a man standing directly in his
+    // path — and since dunk range scales with speed, the button was paid for
+    // once and rewarded twice. A bot that simply drove won 92% of its games
+    // and passing was pointless. Leaving a small penalty in is what makes
+    // position count against a drive at all.
+    assert.ok(sprinting > walking, 'turbo must beat the lane block — it is the only escape the player has');
+    assert.ok(
+        sprinting > 0.93,
+        `sprinting past a set defender costs ${((1 - sprinting) * 100).toFixed(0)}% — the escape has to stay worth pressing`,
+    );
+    assert.ok(sprinting < 1, 'turbo is immunity to position again, which is what made driving unbeatable');
+    // And the escape has to genuinely outrun him. This assertion used to read
+    // `BASE_SPEED * TURBO_MULT * sprinting >= BASE_SPEED * TURBO_MULT` with
+    // `sprinting` asserted to be exactly 1 three lines above — `x >= x`,
+    // constant-true, guarding nothing. What it was reaching for is that a
+    // sprinting handler with a body on him still beats a defender who is not
+    // sprinting.
+    assert.ok(
+        BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED,
+        'a sprinting handler no longer outruns a walking defender',
+    );
 });
 
 t('turbo costs the CPU exactly what it costs the player', () => {
@@ -729,11 +747,16 @@ t('a gather does not outlive the possession it started in', () => {
     w.possession = other.id;
     p.charge = 0.24;
 
-    const shotsBefore = w.stats.shots;
     stepWorld(w, DT, blankCmd());
 
     assert.ok(p.charge < 0, `a player with no ball is still gathering at ${p.charge.toFixed(2)}`);
-    assert.equal(w.stats.shots, shotsBefore, 'a stale charge fired a shot on a player with no ball');
+    // Specifically that *he* did not shoot. An earlier version asserted the
+    // global shot counter did not move, which also forbade the AI who actually
+    // holds the ball from taking its own perfectly legal shot on that frame.
+    assert.ok(
+        !(w.ball.mode === 'flight' && w.ball.kind === 'shot' && w.ball.shooter === p.id),
+        'a stale charge fired a shot on a player with no ball',
+    );
 
     // And the speed penalty is gone with it: full pace on the very next frames.
     for (let i = 0; i < 15; i++) { stepWorld(w, DT, { ...blankCmd(), right: true }); }
@@ -869,6 +892,77 @@ t('a shove costs real turbo, the way the CPU pays for it', () => {
     stepWorld(w, DT, { ...blankCmd(), b: true, bPress: true, c: true });
     assert.equal(w.stats.shovesLanded, landedBefore,
         'an empty turbo bar still bought a shove');
+});
+
+/* ------------------------------------------------------------------------- *
+ * The roster, and contact
+ * ------------------------------------------------------------------------- */
+
+t('two different opponents produce two different games', () => {
+    // The four-line check that would have caught the whole thing. `roster.ts`
+    // authors 13 profiles across 7 attributes, `derive()` turns them into 12
+    // multipliers, `tests/hoops-attributes.test.mts` holds that layer to its
+    // contract — and `derive()` had no call site outside that test. Grandma
+    // Laces (range 0.97, speed 0.40) and Yasser (range 0.05, dunk 0.55) played
+    // the same game to six decimal places, and the `skill` the venue screen
+    // threads in had no effect at all.
+    const play = (foe: string) => {
+        let x = 4242;
+        const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+        const w = createWorld(4242, 'Test Guy', profileFor(foe, 0.5));
+        let f = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        while (w.phase !== 'over' && f < cap) { stepWorld(w, DT, bot(w, rng, 1)); f++; }
+        return `${w.score[0]}-${w.score[1]}@${f}`;
+    };
+    const results = new Set(['grandma-laces', 'big-mike', 'wiz-k', 'yasser-abbasfat'].map(play));
+    assert.ok(results.size > 1,
+        `every opponent plays an identical game (${[...results][0]}) — the roster is not wired in`);
+});
+
+t('running into somebody costs the man who ran in, and not the man stood still', () => {
+    // The separation loop moved positions and never touched velocity, so a
+    // body was a wall you could stand against at top speed: measured, you
+    // could drive a defender 31.8px down the court while holding vx at exactly
+    // 76.00. NBA Jam's model is the opposite — contact bleeds the carrier's
+    // speed, and turbo is a speed advantage rather than immunity to any of it.
+    //
+    // Tested on `collide` directly. Two emergent versions of this check failed
+    // to have teeth: ground covered cannot separate contact from
+    // `laneBlockFactor` when the runner has the ball, and even without it a
+    // body is an impassable wall either way, so the distance is the same with
+    // the velocity tax deleted. What the tax actually changes is who pays for
+    // the collision, which is this.
+    const { w, p } = soloWorld();
+    const foe = w.players.find(q => q.team !== p.team)!;
+    p.x = 150; p.z = 0.5; p.vx = 100; p.vz = 0;      // running right, hard
+    foe.x = 158; foe.z = 0.5; foe.vx = 0; foe.vz = 0; // standing his ground
+    p.mods = { ...p.mods, stealResist: 1 };
+    foe.mods = { ...foe.mods, stealResist: 1 };
+
+    collide(w, p, foe);
+
+    assert.ok(p.vx < 100, `the man who ran in kept all ${p.vx.toFixed(1)}px/s of his speed`);
+    assert.equal(foe.vx, 0, 'the man standing still was taxed for a collision he did not cause');
+});
+
+t('a knockdown is a mismatch of bodies, not of momentum', () => {
+    // Folding speed into the strength term made every sprinter beat every
+    // stationary defender: somebody was on the floor for 18-20% of all frames
+    // and a driving bot won 100%. Equal bodies must not knock each other down
+    // however hard they meet.
+    const { w, p } = soloWorld();
+    const foe = w.players.find(q => q.team !== p.team)!;
+    p.mods = { ...p.mods, stealResist: 1 };
+    foe.mods = { ...foe.mods, stealResist: 1 };
+    foe.x = p.x + 14; foe.z = p.z;
+    let downs = 0;
+    for (let i = 0; i < 120; i++) {
+        foe.vx = 0; foe.vz = 0; foe.stumbleT = 0;
+        stepWorld(w, DT, { ...blankCmd(), right: true, c: true });
+        if (p.stumbleT > 0) downs++;
+    }
+    assert.equal(downs, 0, 'two evenly matched bodies knocked each other over');
 });
 
 console.log(`\n${pass} hoops checks passed.`);
