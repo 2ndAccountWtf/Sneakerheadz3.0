@@ -195,11 +195,32 @@ Six of twelve now reach the simulation, up from four. Still unread:
 
 **Still open in this section:**
 
-- **The CPU's missing shot wind-up.** `aiThink` calls `launchShot` directly, so
-  `p.charge` is never set for a CPU shooter (0.086% of AI frames). The release
-  meter and gather pose only ever appear over you, so a CPU jumper has no tell
-  and cannot be blocked on purpose — only swatted in flight. This is the other
-  half of why blocking felt arbitrary and it is untouched.
+- **The CPU has no shot tell.** `aiThink` calls `launchShot` directly, so
+  `p.charge` is never set for a CPU shooter (0.086% of AI frames). A CPU jumper
+  therefore gives nothing away before the ball leaves, and cannot be blocked on
+  purpose — only swatted in flight. This is the other half of why blocking felt
+  arbitrary and it is untouched.
+
+  **Do not fix this by giving the CPU a release meter.** Checked against the
+  leaked NBA Jam source (design rules only; no code, data or art from it is used
+  here): Jam has no release-timing mechanic at all. The shoot button is a plain
+  press, the make/miss is a single 0-999 roll at launch against an accumulated
+  spatial percentage, and the only thing hold duration decides is whether the
+  quick-shot animation plays instead of the normal one. The tell a defender
+  reads there is **the jump** — you are airborne, you are committed, and the
+  window is the flight of the ball. See `docs/NBA-JAM-MECHANICS.md`.
+
+  So there are two separable questions, and they are the user's call, not a
+  polish task:
+
+  1. **Does our release meter stay?** `SHOT_CHARGE_TIME` / `SHOT_SWEET` /
+     `SHOT_WINDOW` / `SHOT_COOK` are ours — authored into this game, not
+     inherited. Removing them is a design change, not a fix, and it would make
+     the jumper a pure spatial roll the way Jam's is.
+  2. **Either way, the CPU needs a gather.** Even with the meter gone, a shooter
+     who launches on the same frame they decide to is unreadable. The fix is a
+     visible wind-up on the CPU — a gather pose and a few frames before release
+     — not a meter drawn over its head.
 - **No persistent "this team has the ball" marker.** The `▼` marks who you are
   driving, not who is holding it.
 - **Three mutations still pass.** Removing the descending-ball condition,
@@ -348,7 +369,7 @@ Listed so they are decisions rather than omissions.
 ```
 1. §1  test teeth            ← DONE
 2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
-3. §3  feedback              ← DONE except the CPU shot wind-up
+3. §3  feedback              ← DONE except the CPU shot tell (needs a design call)
 4. §4  input buffering       ← needs §1's guards to be safe
 5. §5  animation             ← as the art lands, tier by tier
 6. §6  small and true

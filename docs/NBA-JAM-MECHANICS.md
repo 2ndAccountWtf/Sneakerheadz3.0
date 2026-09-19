@@ -9,7 +9,8 @@
 > This document was researched in a sandbox where **every direct fetch was
 > blocked at the network proxy**. Everything below comes from search-result
 > snippets and model prior knowledge, not from a page that was actually read.
-> One claim is confidently stated and is, to the best of my knowledge, **wrong**:
+> One claim is confidently stated and is **wrong** — since verified against the
+> leaked source itself, reading for design rules only:
 >
 > **There is no shot release-timing mechanic in NBA Jam (1993) or Tournament
 > Edition.** Shot success is probabilistic — driven by distance from the basket,
@@ -20,9 +21,10 @@
 > wrong"* should be read as describing **NBA Street / NBA 2K**, not Jam.
 >
 > This matters for implementation in a specific way: our Hoops game **already
-> has** a charge-and-release meter, and it is a deliberate improvement on Jam
-> rather than a reproduction of it. Keep it. Just do not treat it as fidelity to
-> the source, and do not let it crowd out the mechanics Jam actually leans on —
+> has** a charge-and-release meter, and nobody outside this project asked for
+> one. Whether it stays is an open design decision — see the shooting section
+> below for what Jam does instead — but it must never be argued for as fidelity
+> to the source, and it must not crowd out the mechanics Jam actually leans on,
 > which are spatial (where you are, how fast you are moving, who is near you)
 > rather than rhythmic.
 >
@@ -99,11 +101,43 @@
 - Star players (Jordan, Bird, etc.) have higher accuracy
 - Bench players have lower base percentages
 
-**Release timing mechanic:**
-- **YES, timing exists.** Hold Shoot to charge; release at peak of jump for best accuracy
-- Quick release (tap) = reduced shot %
-- Late release (hold too long) = reduced shot %
-- "Sweet spot" release window maximizes shot percentage
+**Release timing mechanic — NONE. Verified against the source.**
+
+This is the one claim in this document that was flatly wrong, and it has now
+been checked against the leaked source directly rather than inferred. Reading
+only for design rules; no code, no data and no art from that repository is used
+here, and none may be.
+
+- The shoot button is read as a plain press. The make/miss decision is **one
+  random roll taken at launch** against an accumulated percentage: a 0-999 roll
+  compared to the shot percentage, once, in `PLYR.ASM` around the `#noairb`
+  label. Nothing in that computation reads how long the button was held.
+- The only thing hold duration is used for is **animation choice**. The player
+  struct carries `plyr_shtbutn`, commented in `PLYR.EQU` as "Ticks since last
+  shoot button press"; a second press within a 2-9 tick window is read as a
+  double-tap and picks the quick-shot sequence instead of the normal one. It
+  changes which animation plays, not whether the ball goes in.
+- The percentage itself is entirely **spatial and attribute-driven**: base is
+  the shooter's shot-skill attribute; a three-pointer costs a flat penalty for
+  low-skill shooters; inside a close-in radius adds a large bonus; past a far
+  radius subtracts nearly the whole percentage; each of the two opponents
+  subtracts a flat amount when tight and a distance-and-height-scaled amount
+  when genuinely in the shooter's face (with a smaller penalty if the shooter
+  is jumping above the defender); then a linear subtraction per unit of hoop
+  distance; then a floor so nothing is truly hopeless.
+- On top of that sit three pity/drama rules, all of which raise the percentage
+  and none of which lower it: **consecutive bricks** by the same player force
+  the next non-desperation shot in; an end-of-game minimum applies when a team
+  is down, higher still when the shot would tie; and on fire adds a large flat
+  bonus, reduced to a fixed value at extreme range.
+
+So the tell a defender reads in Jam is the **jump**, not a meter: you are in
+the air, you are committed, and the defender's window is the flight of the ball.
+
+**Our game differs deliberately.** Hoops has a charge-and-release meter
+(`SHOT_CHARGE_TIME`, `SHOT_SWEET`, `SHOT_WINDOW`, `SHOT_COOK` in
+`HoopsGame.tsx`). That is ours, not Jam's. It is not fidelity to the source and
+should never be defended as such.
 
 **"On Fire" status:**
 - Grants ~95–99% shot accuracy from anywhere on court
