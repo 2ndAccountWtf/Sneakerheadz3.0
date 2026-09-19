@@ -198,6 +198,10 @@ t('every new mechanic actually fires in real games', () => {
         ['lobPasses', 1],
         ['lobPicks', 0.3],
         ['shovesLanded', 0.3],
+        // Bricks used to sit in the no-floor note below with the instruction
+        // "give it a floor and delete this comment" attached. Measured three in
+        // 3,913 shots at BRICK_CHANCE 0.24, and 0.52 a game at 0.32 — so: floor.
+        ['bricks', 0.2],
     ];
     for (const [key, min] of expected) {
         assert.ok(
@@ -206,14 +210,9 @@ t('every new mechanic actually fires in real games', () => {
         );
     }
 
-    // Two stats deliberately have no floor, recorded here so their absence is a
-    // decision rather than an oversight — and so that if either ever comes back
-    // to life, somebody reads this comment.
-    //
-    // `bricks` measures 0.02/game. The mechanic works (a constructed
-    // worst-case shot bricks 97% of the time) but the game never produces that
-    // situation, because the AI only shoots when its chance beats a threshold
-    // above BRICK_CHANCE by construction.
+    // One stat deliberately has no floor, recorded here so its absence is a
+    // decision rather than an oversight — and so that if it ever comes back to
+    // life, somebody reads this comment.
     //
     // `bulletPicks` measures 0.00/game, and that is the cost of making passing
     // viable at all. A bullet is flat by design — it peaks around y=19 — so the
@@ -225,7 +224,6 @@ t('every new mechanic actually fires in real games', () => {
     // this small a defender is simply near the ball most of the time.
     // Bullets being uninterceptable is the price of a passing game; lobs still
     // get picked 1.13 times a game and carry the risk.
-    assert.ok(s.per('bricks') < 1, 'bricks came alive — give it a floor and delete this comment');
     assert.ok(s.per('bulletPicks') < 1, 'bullet picks came alive — give it a floor and delete this comment');
 });
 
@@ -721,7 +719,22 @@ t('turbo costs the CPU exactly what it costs the player', () => {
         const before = p.turbo;
         const frames = 30;
         for (let i = 0; i < frames; i++) {
+            // The state this measurement needs, re-asserted every frame rather
+            // than assumed. `humanControl` is where turbo is spent and earned,
+            // and the player loop skips it entirely for a man who is dunking,
+            // gathering or face down on the floor — so any of those three left
+            // this reading 0.000/s and failed a check about turbo for reasons
+            // that had nothing to do with turbo. Same for the phase: `score`,
+            // `tip` and `over` all return before the player loop, and frozen
+            // hitstop frames read no input at all.
+            //
+            // It happened. Giving the CPU handler a committed depth lane moved
+            // the whole simulation, and frame 240 of seed 31 — which used to be
+            // a man on his feet in live play — became a basket celebration.
+            w.phase = 'play'; w.phaseT = 0; w.hitstop = 0;
             p.onFire = false;
+            p.stumbleT = 0; p.dunkT = 0; p.gather = -1; p.cool = 0;
+            for (const q of w.players) if (q.id !== p.id) { q.x = 40; q.z = 0.05; q.cool = 1; }
             stepWorld(w, DT, { ...blankCmd(), right: true, c: holdTurbo });
         }
         return (p.turbo - before) / (frames * DT);      // bar units per second
@@ -1598,6 +1611,118 @@ t('a shooter out-shoots a bricklayer from deep, in real games', () => {
     assert.ok(shooter > 0.3, `the best shooter on the blacktop hits ${shooter.toFixed(2)} threes a game — the shot is not a weapon for anybody`);
     assert.ok(shooter / bricklayer > 2,
         `a 0.97-range shooter hits ${shooter.toFixed(2)} threes a game against a 0.05-range one's ${bricklayer.toFixed(2)} — only a ${(shooter / bricklayer).toFixed(1)}x gap`);
+});
+
+
+/* ---------------------------------------------------------------------------
+ * The small-and-true list: things that were wrong and cheap, recorded in the
+ * PRD as P3 and each fixed here. None of them is a headline; all of them were
+ * invisible to the suite.
+ * ------------------------------------------------------------------------- */
+
+t('a shot-clock violation over a live dunk does not fire a second shot', () => {
+    // One possession used to produce two `stats.shots`, a second ball in
+    // flight that the dunk silently clobbered, and two points *despite* the
+    // violation. A shot already on its way is not a stall.
+    const { w, p } = offenceWorld();
+    const shots0 = w.stats.shots;
+    const score0 = w.score[p.team];
+    stepWorld(w, DT, pressA());
+    assert.ok(p.dunkT > 0, 'the press did not start a dunk — the check proves nothing');
+
+    w.shotClock = 0.004;            // expires on the very next frame
+    let heaves = 0, frames = 0;
+    while (frames < 120 && p.dunkT > 0) {
+        stepWorld(w, DT, blankCmd());
+        frames++;
+        if (w.ball.kind === 'heave') heaves++;
+    }
+    assert.ok(w.shotClock <= 0, 'the shot clock never actually expired — the check proves nothing');
+    assert.equal(heaves, 0, 'the clock threw a heave over a live dunk');
+    assert.equal(w.stats.shots - shots0, 1,
+        `one possession produced ${w.stats.shots - shots0} shots`);
+    assert.equal(w.score[p.team] - score0, 2, 'the dunk did not finish');
+});
+
+t('the anti-stall fallback never hands the ball to a man on the floor', () => {
+    // The pickup scramble skips anyone `stumbleT > 0`; the 3.5s fallback did
+    // not, so a ball nobody chased could be handed to a body lying on it — and
+    // a prone player reads no input at all. Believed unreachable in play, since
+    // a stumble is 0.85s and always expires first. Constructed, therefore, and
+    // honest about that: this checks the guard, not the odds of reaching it.
+    const w = createWorld(55, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    const down = w.players[0], up = w.players[1];
+    const far = [w.players[2], w.players[3]];
+
+    // Ball dead in a corner, one man face down on top of it, everybody else
+    // well outside the 13px pickup reach so only the fallback can resolve it.
+    w.possession = null;
+    w.ball.mode = 'loose';
+    w.ball.x = COURT_L + 20; w.ball.z = 0.2; w.ball.y = 3;
+    w.ball.vx = 0; w.ball.vz = 0; w.ball.vy = 0;
+    w.ball.looseT = 3.4; w.ball.pickCool = 0; w.ball.rebound = false;
+
+    let frames = 0;
+    while (frames < 40 && w.possession === null) {
+        w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS; w.hitstop = 0;
+        w.ball.x = COURT_L + 20; w.ball.z = 0.2; w.ball.y = 3;
+        w.ball.vx = 0; w.ball.vz = 0; w.ball.vy = 0;
+        // Re-pinned every frame: `aiThink` sends everybody at a loose ball, so
+        // without this they simply walk over and the fallback never runs.
+        down.x = w.ball.x; down.z = w.ball.z; down.y = 0; down.vx = 0; down.vz = 0;
+        down.stumbleT = 5;
+        up.x = COURT_L + 60; up.z = 0.2; up.y = 0; up.vx = 0; up.vz = 0; up.stumbleT = 0;
+        for (const q of far) { q.x = COURT_R - 4; q.z = 0.9; q.vx = 0; q.vz = 0; q.stumbleT = 0; }
+        stepWorld(w, DT, blankCmd());
+        frames++;
+    }
+
+    assert.ok(w.possession !== null, 'the fallback never fired — the check proves nothing');
+    assert.notEqual(w.possession, down.id, 'the ball was handed to a player lying on the floor');
+    assert.equal(w.possession, up.id, 'the fallback did not pick the nearest man still standing');
+});
+
+t('the CPU handler picks a depth lane instead of shaking between two', () => {
+    // He wants the lane his man is not in; his man wants the lane he is in.
+    // Decided every frame that is a feedback loop, and it measured like one:
+    // 1.51 mid-line crossings per CPU possession, 30% of possessions with two
+    // or more, one possession with thirty. `LANE_DWELL` turns the loop into a
+    // decision. Both bounds matter — a handler who never changes lanes at all
+    // would pass the first assertion and has given up the move entirely.
+    let x = 99;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    let crossings = 0, poss = 0, jittery = 0;
+    for (let g = 0; g < 12; g++) {
+        const w = createWorld(5300 + g, 'Test Guy');
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        let who: number | null = null, side: number | null = null, inThis = 0;
+        const endPoss = () => {
+            if (who !== null) { poss++; if (inThis >= 2) jittery++; }
+            who = null; side = null; inThis = 0;
+        };
+        while (w.phase !== 'over' && frames < cap) {
+            stepWorld(w, DT, bot(w, rng, 1.2));
+            frames++;
+            const h = w.possession !== null ? w.players[w.possession] : null;
+            // Only the CPU side: the human's lane is whatever the player asks for.
+            if (!h || h.human || h.team === 0) { endPoss(); continue; }
+            if (who !== h.id) { endPoss(); who = h.id; }
+            const s = h.z > 0.5 ? 1 : 0;
+            if (side !== null && s !== side) { crossings++; inThis++; }
+            side = s;
+        }
+        endPoss();
+    }
+    assert.ok(poss > 150, `only ${poss} CPU possessions across twelve games — the check proves nothing`);
+    const per = crossings / poss;
+    assert.ok(per < 0.9,
+        `the CPU handler crosses the mid-line ${per.toFixed(2)} times a possession — it is shaking, not moving`);
+    assert.ok(jittery / poss < 0.2,
+        `${((jittery / poss) * 100).toFixed(0)}% of CPU possessions cross the mid-line twice or more`);
+    assert.ok(per > 0.15,
+        `the CPU handler changes lanes ${per.toFixed(2)} times a possession — the drift has been dwelled out of existence`);
 });
 
 

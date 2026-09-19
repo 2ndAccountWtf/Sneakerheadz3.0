@@ -243,9 +243,42 @@ const SHOT_JUMP = 0.82;         // a jumper is not a max-effort leap
 /** Safety valve. The release is at the apex; this only fires if something
  *  strange has happened to the shooter's vertical — never in normal play. */
 const SHOT_GATHER_MAX = 0.7;
+/**
+ * Every shot gets at least this much tell, even one started in mid-air.
+ *
+ * Normally the release is at the apex and this never binds — the gather runs
+ * about nineteen frames. But a man who is already off his feet and falling when
+ * he commits is past the apex the moment he starts, and released instantly:
+ * measured at 6% of human jumpers, and a free no-tell shot is precisely what
+ * was just taken away from the CPU.
+ */
+const SHOT_GATHER_MIN = 6 / 60;
 
-const AI_SKILL = 1;          // opponents are worse than a perfect release
-const MATE_SKILL = 0.84;        // your teammate is worse than that. He tries.
+/**
+ * The one shooting asymmetry between the four men on the court: your AI
+ * teammate is a little worse than everybody else, because being handed the ball
+ * by your own partner and watching him bury it is not the fantasy.
+ *
+ * There used to be an `AI_SKILL = 1` beside this, commented "opponents are
+ * worse than a perfect release". Both halves were wrong. It was a multiplier of
+ * one — an identity element dressed as a difficulty knob, and moving it to 0.88
+ * barely shifted the win rate because most scoring is dunks, which never touch
+ * `shotChance` at all — and the perfect release it measured itself against does
+ * not exist any more. Opponent quality comes from the profile: `touchMult`,
+ * `deepMult` and the rest of `derive()`, which is where a difficulty knob can
+ * actually be felt.
+ */
+const MATE_SKILL = 0.84;
+/**
+ * How long the CPU ball-handler commits to a depth lane before looking again.
+ *
+ * He wants the lane his man is not in; his man wants the lane he is in. Decided
+ * every frame, that is a feedback loop, and it measured like one: 1.51 mid-line
+ * crossings per CPU possession, 30% of possessions with two or more, and one
+ * possession with thirty. Nothing breaks — it just reads as a man shaking
+ * rather than a man moving. A dwell turns the loop into a decision.
+ */
+const LANE_DWELL = 0.8;
 const SHOT_CLOCK = 15;
 const FIRE_STREAK = 3;          // classic: three straight makes and you ignite
 const FIRE_SECONDS = 22;        // hard ceiling so a hot run can't last forever
@@ -255,11 +288,17 @@ const FIRE_SECONDS = 22;        // hard ceiling so a hot run can't last forever
  * `shotChance` already folds in distance, contest and release quality, so
  * this reads directly off the number the miss roll used: a heave is always
  * one (it is a prayer by definition), anything else only qualifies if the
- * player who took it basically had no business shooting. Tuned by measuring
- * what share of *misses* this produces in the headless season — see the
- * report for the actual number; the target was roughly one in six.
+ * player who took it basically had no business shooting.
+ *
+ * Raised from 0.24, knowingly, after measuring it as near-dead content: three
+ * bricks in 3,913 shots across 150 games, for five authored lines, a custom
+ * no-bounce physics path, a render, a dust puff and a stats counter. NBA Jam's
+ * own equivalent — the airball — fires on roughly 1.5-3% of shots behind a set
+ * of conditions. 0.24 measured 0.9% of shots here; 0.32 measures 2.1%, which is
+ * inside that band, and leaves makes and the rebound split alone. 0.40 gives
+ * 5.5% and that is too often for a joke.
  */
-const BRICK_CHANCE = 0.24;
+const BRICK_CHANCE = 0.32;
 
 /** How many seconds of game clock count as "the final seconds" for the
  * buzzer-beater slow-motion and the grace that lets a released shot finish
@@ -463,6 +502,9 @@ export interface Player {
     gather: number;
     /** The skill factor captured when the wind-up started, spent at release. */
     shotSkill: number;
+    /** CPU only: the depth lane currently being driven to, and how long is left
+     *  on the commitment to it. See `LANE_DWELL`. */
+    lane: number; laneT: number;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -936,7 +978,7 @@ const mkPlayer = (
     x, z, vx: 0, vz: 0,
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
-    turbo: 1, gather: -1, shotSkill: 1, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -1206,7 +1248,15 @@ const startShot = (w: World, p: Player, skill: number) => {
  *  frame from the main loop, after the vertical has been integrated. */
 const stepGather = (w: World, p: Player, dt: number) => {
     if (p.gather < 0) return;
+    // The ball can leave his hands *after* the top-of-loop clear and before
+    // this runs: a steal resolved by a player later in the array, on this same
+    // frame. The clear catches it next frame, which is one frame too late —
+    // this would already have released a shot from a man holding nothing.
+    // Surfaced by mutating the depth-lane fix, of all things, which shifted the
+    // simulation enough to make the one-frame window land.
+    if (w.possession !== p.id) { p.gather = -1; return; }
     p.gather += dt;
+    if (p.gather < SHOT_GATHER_MIN) return;
     if (p.vy <= 0 || p.gather > SHOT_GATHER_MAX) launchShot(w, p, p.shotSkill);
 };
 
@@ -1827,13 +1877,14 @@ const aiThink = (w: World, p: Player, dt: number) => {
     const b = w.ball;
     const hoop = HOOPS[attackHoop(p.team)];
     const ownHoop = HOOPS[attackHoop(1 - p.team as 0 | 1)];
-    const skill = p.team === 0 ? MATE_SKILL : AI_SKILL;
+    const skill = p.team === 0 ? MATE_SKILL : 1;
     const gamble = p.team === 0 ? 0.5 : 1;   // your teammate does not gamble much
     let tx = p.x;
     let tz = p.z;
     let turbo = false;
 
     p.aiTimer = Math.max(0, p.aiTimer - dt);
+    p.laneT = Math.max(0, p.laneT - dt);
 
     if (w.possession === p.id) {
         /* --- with the ball --------------------------------------------- */
@@ -1849,7 +1900,11 @@ const aiThink = (w: World, p: Player, dt: number) => {
         const nearestFoe = opponentsOf(w, p).sort(
             (a, c) => dist2d(a.x, a.z, p.x, p.z) - dist2d(c.x, c.z, p.x, p.z),
         )[0];
-        tz = nearestFoe.z > 0.5 ? 0.28 : 0.72;
+        if (p.laneT <= 0) {
+            p.lane = nearestFoe.z > 0.5 ? 0.28 : 0.72;
+            p.laneT = LANE_DWELL;
+        }
+        tz = p.lane;
         // Burn turbo to cover ground, and again to shake a defender off the hip.
         turbo = p.turbo > 0.25 && (d > 60 || open < 14);
 
@@ -2574,13 +2629,22 @@ const stepBall = (w: World, dt: number) => {
             }
         } else if (b.looseT > 3.5) {
             // Anti-stall: nobody has scooped it, hand it to the nearest body.
-            let near = w.players[0];
+            // The candidate loop above skips anyone `stumbleT > 0`; this one did
+            // not, so a ball nobody chased for three and a half seconds could be
+            // handed to a man lying on the floor — who then dribbles from the
+            // prone branch of the player loop, which reads no input at all.
+            // Believed unreachable in play, since a stumble is 0.85s and always
+            // expires first. It is still a two-word guard.
+            let near: Player | null = null;
             let nd = 999;
             for (const p of w.players) {
+                if (p.stumbleT > 0) continue;
                 const d = dist2d(p.x, p.z, b.x, b.z);
                 if (d < nd) { nd = d; near = p; }
             }
-            giveBall(w, near.id);
+            // If every single body is down, leave it loose and try again next
+            // frame rather than forcing it into somebody's hands.
+            if (near) giveBall(w, near.id);
         }
     }
 };
@@ -2818,12 +2882,19 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
 
     if (w.possession !== null) {
         w.shotClock -= dt;
-        if (w.shotClock <= 0) {
+        const holder = w.players[w.possession];
+        // A shot already on its way is not a stall. The clock used to fire its
+        // heave regardless, so a violation landing mid-dunk produced two
+        // `stats.shots`, a second ball in flight that the dunk silently
+        // clobbered, and two points *despite* the violation. A gather is the
+        // same case one step earlier. Either way the possession has committed
+        // to a shot and the clock has nothing left to enforce — let it finish.
+        const committed = holder.dunkT > 0 || holder.gather >= 0;
+        if (w.shotClock <= 0 && !committed) {
             // Shot clock in street ball is enforced by people yelling. A heave
             // goes up, it almost never falls, and the game keeps moving.
-            const p = w.players[w.possession];
             say(w, 'Somebody yells "SHOT CLOCK" and he throws it at the rim.');
-            launchShot(w, p, 1, true);
+            launchShot(w, holder, 1, true);
         }
     }
 
@@ -3101,7 +3172,10 @@ const drawHoop = (ctx: CanvasRenderingContext2D, w: World, idx: 0 | 1) => {
         const nx = x + i * 2.4;
         line(ctx, nx, rimY + 1, x + i * 1.3, rimY + 9, 'rgba(230,237,243,0.55)', 0.7);
     }
-    line(ctx, x, rimY + 9, x - h.inward * 0, rimY + 9, 'rgba(230,237,243,0.4)', 0.7);
+    // The hem across the bottom of the net, joining the two outermost strands.
+    // It used to run from `x` to `x - h.inward * 0` — the same point twice —
+    // so it drew nothing at all. The 3.9 is where the `i = +-3` strands land.
+    line(ctx, x - 3.9, rimY + 9, x + 3.9, rimY + 9, 'rgba(230,237,243,0.4)', 0.7);
     if (flash > 0) {
         circle(ctx, x, rimY, 12 * flash + 4, `rgba(255,180,0,${0.35 * flash})`);
     }

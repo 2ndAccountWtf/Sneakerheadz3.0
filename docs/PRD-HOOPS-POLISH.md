@@ -411,37 +411,67 @@ than sliding.
 
 ---
 
-## 6. P3 — small and true
+## 6. P3 — small and true — DONE
 
-Worth doing, none of them urgent.
+Seven items, none of them a headline, all of them invisible to the suite.
 
-- **The brick is dead content.** `BRICK_CHANCE = 0.24`, measured at **3 bricks
-  in 3,913 shots (0.08%)** across 150 games, zero in AI-vs-AI. Five authored
-  lines, a custom no-bounce physics path, the 🧱 render, a dust puff and a
-  stats counter that no player will ever see. The mechanic works — a
-  constructed worst-case shot bricks 97% of the time — the game just never
-  produces that situation. Either raise the chance or accept it as an easter
-  egg, but decide knowingly.
-- **A shot-clock violation during a dunk fires a heave *and* the dunk still
-  scores.** One possession produces two `stats.shots`, a second ball in flight
-  that is silently clobbered, and 2 points despite the violation. Guard the
-  heave with `p.dunkT === 0`, or reset the clock in `startDunk`.
-- **`AI_SKILL = 1` is a no-op knob** whose comment says "opponents are worse
-  than a perfect release". Measured: moving it 1 → 0.88 barely shifts the win
-  rate, because ~60% of scoring is dunks, which bypass shot chance. Either
-  make it mean something or delete it and the comment.
-- **A zero-length draw call.** `HoopsGame.tsx:2880` draws a line from `x` to
-  `x - h.inward * 0` — the same point. One net strand renders nothing.
-- **The AI ball handler yo-yos across the depth lanes**, 96 mid-line crossings
-  a game, because the handler targets the far lane from the nearest defender
-  while that defender targets the handler's lane. Nothing breaks; it reads as
-  jitter. Hysteresis settles it.
-- **The anti-stall fallback can hand the ball to a downed player.** The
-  loose-ball candidate loop filters `stumbleT > 0`; the 3.5s fallback does not.
-  Believed unreachable in play (a stumble always expires first) but it is a
-  two-word guard.
-- **62% of rebounds are offensive.** Missing is barely punished, and there are
-  1.27 tip-ins a game on top. A tuning call, not a defect.
+- **The brick was dead content — raised, knowingly.** Three bricks in 3,913
+  shots across 150 games (0.08%), for five authored lines, a custom no-bounce
+  physics path, a render, a dust puff and a stats counter. NBA Jam's own
+  equivalent, the airball, fires on roughly 1.5–3% of shots. `BRICK_CHANCE`
+  0.24 measured 0.9% of shots here after the meter came out; **0.32 measures
+  2.1%**, inside that band, and leaves makes and the rebound split alone. 0.40
+  gives 5.5%, which is too often for a joke. It now has a floor of 0.2 a game,
+  which is what the old no-floor note literally instructed whoever brought it
+  back to life to do.
+- **A shot-clock violation over a live dunk fired a heave as well — fixed.**
+  One possession produced two `stats.shots`, a second ball in flight that the
+  dunk silently clobbered, and two points *despite* the violation. The clock
+  now checks whether the possession has already committed to a shot — a dunk or
+  a gather — and lets it finish. Guarded.
+- **`AI_SKILL = 1` — deleted.** An identity element dressed as a difficulty
+  knob, whose comment measured it against a "perfect release" that no longer
+  exists. Opponent quality comes from the profile and always did. `MATE_SKILL`
+  stays, and now carries the comment explaining that it is the only shooting
+  asymmetry on the court.
+- **The zero-length draw call — fixed.** It ran from `x` to `x - h.inward * 0`,
+  the same point twice, so the net's bottom hem drew nothing. It now joins the
+  two outermost strands.
+- **The AI lane yo-yo — fixed and measured.** The handler wants the depth lane
+  his man is not in; his man wants the lane the handler is in. Decided every
+  frame, that is a feedback loop, and it measured like one: **1.51 mid-line
+  crossings per CPU possession, 30% of possessions with two or more, one
+  possession with thirty.** `LANE_DWELL = 0.8s` turns the loop into a decision:
+  **0.61 crossings a possession, 13% with two or more.** 0.5s was not enough
+  (0.76) and 1.2s bought almost nothing on top (0.56). Guarded at both ends —
+  a handler who never changed lanes at all would also be wrong.
+- **The anti-stall could hand the ball to a downed player — fixed.** The
+  pickup scramble skips `stumbleT > 0`; the 3.5s fallback did not, and a prone
+  player reads no input at all. Still believed unreachable in play, since a
+  stumble is 0.85s and always expires first, so the check is constructed and
+  says so.
+- **62% of rebounds were offensive — now 52%, and accepted.** Two-on-two with
+  the shooter and his man both at the rim makes this close to a coin flip by
+  construction, and punishing misses harder would make games longer rather than
+  better. Recorded with the number so the next person is deciding, not
+  inheriting.
+
+**One more found on the way.** Mutating the lane fix — not the shot code —
+tripped `no player ever holds a gather without the ball`. The ball can leave a
+shooter's hands *after* the top-of-loop clear and before `stepGather` runs, on
+the same frame, when a player later in the array steals it. The clear catches
+it a frame too late; by then the wind-up has released a shot from a man holding
+nothing. `stepGather` now checks possession itself. Not separately guarded —
+the between-frame half is already covered and the intra-frame half needs a
+mid-loop steal to construct — but re-running the mutation with the guard in
+place makes that failure disappear, which is the evidence it does something.
+
+**Two test fixtures were trusting a seed rather than setting up their state,**
+and the lane change broke both by moving the whole simulation. `turbo costs the
+CPU exactly what it costs the player` read 0.000/s because frame 240 of seed 31
+stopped being live play and became a basket celebration — `score`, `tip`, `over`
+and hitstop all return before the player loop. Both now assert the state they
+need every frame instead of assuming it.
 
 ---
 
@@ -469,13 +499,13 @@ Listed so they are decisions rather than omissions.
 ## 8. Order of work
 
 ```
-1. §1  test teeth            ← DONE
-2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
-3. §3  feedback              ← DONE
-4. §4  input buffering       ← DONE
-4b §4.5 release meter out    ← DONE
-5. §5  animation             ← as the art lands, tier by tier
-6. §6  small and true
+1. §1   test teeth            ← DONE
+2. §2   landscape/fullscreen  ← DONE (unverified on a real device)
+3. §3   feedback              ← DONE
+4. §4   input buffering       ← DONE
+5. §4.5 release meter out     ← DONE
+6. §6   small and true        ← DONE
+7. §5   animation             ← the only one left: as the art lands, tier by tier
 ```
 
 §5 runs in parallel with everything from the moment the illustrator starts.
