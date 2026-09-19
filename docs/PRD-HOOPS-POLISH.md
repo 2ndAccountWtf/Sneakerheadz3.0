@@ -228,17 +228,17 @@ Six of twelve now reach the simulation, up from four. Still unread:
   all survive. The first two are refinements whose absence changes nothing a
   player would notice; recorded rather than papered over.
 
-## 4. P1 — input buffering, done properly
+## 4. P1 — input buffering — DONE
 
 A first attempt was built and **reverted** in this session. Recording why, so
-the second attempt does not repeat it.
+nobody repeats it.
 
-The measured problem is real. Presses are consumed by the frame whether or not
-anything can act on them: `stepWorld` returns early during hitstop, and the
+The measured problem is real. Presses were consumed by the frame whether or not
+anything could act on them: `stepWorld` returns early during hitstop, and the
 dunk and stumble branches `continue` before `humanControl` runs. Drops
 measured at **51 consecutive frames during a stumble, 17–48 during a dunk, up
-to 8 on a hit.** And there is no buffer, so pressing SHOOT two frames before
-landing does nothing — the press is gone by the frame the jump could start.
+to 8 on a hit.** And there was no buffer, so pressing SHOOT two frames before
+landing did nothing — the press was gone by the frame the jump could start.
 
 The reverted attempt banked every press at the top of `stepWorld` and cleared
 it as soon as `humanControl` *ran*. That is wrong in both directions:
@@ -250,28 +250,81 @@ it as soon as `humanControl` *ran*. That is wrong in both directions:
   `humanControl` does run while you are airborne; the jump branch declines the
   press because `p.y !== 0`; "it ran, so the press is spent" then threw it away.
 
-Measured cost, three human thumb speeds, 40 games each:
+### What shipped
+
+`PRESS_BUFFER = 6/60`, a `w.buf` of two countdowns, and one rule: **a press
+survives being declined and clears only when it is acted upon.** Each branch of
+`humanControl` that does something calls `tookA()`/`tookB()`; every branch that
+declines simply does not, and the press is still there next frame. No return
+value, no refactor of the 200-line function — the consumption is local to the
+branch that earns it, which is where the knowledge lives anyway.
+
+Three things a press must *not* survive, each of them as much the spec as the
+frames it must:
+
+- **A hit.** Cleared explicitly in the hitstop branch. The buffer is not aged
+  during the frozen frames, so without that clear a press banked one frame
+  before the hit comes out on recovery with its whole window unspent.
+- **The body of a stumble or a dunk.** No special case needed: those last 0.28s
+  to 0.85s and the window is 0.1s, so a press thrown at the *start* expires
+  while a press in the last few frames comes out as the body recovers. That
+  falls out of the window being short, which is why it is short.
+- **A change of who has the ball.** This one was not in the original plan and is
+  the reason the first measurement looked bad. Both buttons mean completely
+  different things per role — PASS is a steal on defence, a swap off-ball, a
+  pass with the ball — so `w.buf` stamps the role each press was made in
+  (`aRole`/`bRole`) and drops it if the role changed. Without the stamp, a reach
+  at a loose ball came out as handing over the man you were driving.
+
+### Measured
+
+An intent-blind thumb model: the bot decides to press, the button goes down for
+four frames, and the edge happens once whether or not the game can use it. 400
+games at each of three thumb speeds, before and after.
 
 ```
-press rate   with buffer   without
-3 Hz             15%         18%
-5 Hz             15%         25%
-8 Hz             20%         23%
+press rate   presses answered        win rate
+             before   after      before   after
+3 Hz          48%      51%         6%      6%
+5 Hz          39%      42%        10%     10%
+8 Hz          32%      35%        15%     15%
 ```
 
-Passes went 43 → 49 a game, past the measured optimum. It lost at every rate,
-so this was not an artefact of the test bot mashing.
+Responsiveness up three points at every speed, win rate identical at every
+speed. That is the result the section asked for.
 
-**The correct semantics:** a press survives being *declined* and clears only
-when it is *acted upon*. That needs `humanControl` to report what it consumed,
-which is a refactor of a ~200-line function rather than a patch.
+The role stamp is what made it that. Without it, 8 Hz fell from 15% to **7%**:
+a buffered PASS press that outlived a possession change became an unwanted
+pass, passes went 24.1 to 29.1 a game, and the existing `passing is not a
+losing strategy` check failed outright at 22%. Buffering SHOOT alone measured
+14% — close to baseline — which is how the pass button was identified as the
+culprit rather than the buffer.
 
-**Done when:** pressing an action up to ~6 frames early makes it come out on
-the first frame it is legal; no action ever fires from a press given during a
-stumble or a dunk that has since ended; the balance table in §0 is unchanged.
+One number moved in the committed suite and it moved for a good reason.
+Goaltending fell from 1.08 to 0.90 a game while **alley-oops rose from 0.77 to
+1.15**: a player whose lob call actually comes out finishes at the rim instead
+of leaving a descending ball for someone to swat. The `goaltends` floor was
+stale anyway — it was set at 1 against a measured 3.83, and §3 had already
+walked the real number down to 1.10 without moving the floor with it, leaving a
+guard sitting 10% under the thing it guarded. Now 0.4, with the history in the
+comment.
 
-**Risk:** medium-high. Touches every input path. Do it after §1 so the guards
-exist first.
+### Teeth
+
+Seven new checks (hoops 35 → 42; suite 1020 → 1027). Six mutations run:
+
+```
+no buffer at all (read the raw edge)      3 checks fail
+buffer never expires                      2 fail (+1 existing)
+hitstop no longer clears it               1 fail
+no role stamp                             1 fail (+2 existing)
+v1 semantics (cleared because it ran)     4 fail
+bank before the hitstop early return      0 fail  — not observable
+```
+
+The last one is honest bookkeeping: with the explicit clear in place, moving
+the banking above the early return changes no behaviour, so the check that
+claimed to guard it was vacuous and was deleted rather than kept as decoration.
 
 ---
 
@@ -370,7 +423,7 @@ Listed so they are decisions rather than omissions.
 1. §1  test teeth            ← DONE
 2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
 3. §3  feedback              ← DONE except the CPU shot tell (needs a design call)
-4. §4  input buffering       ← needs §1's guards to be safe
+4. §4  input buffering       ← DONE
 5. §5  animation             ← as the art lands, tier by tier
 6. §6  small and true
 ```

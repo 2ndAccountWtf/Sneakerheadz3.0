@@ -246,6 +246,34 @@ const BUZZER_WINDOW = 6;
  * owns that), it just visibly slows down. */
 const SLOWMO_FACTOR = 0.42;
 
+/**
+ * How long a press waits for a frame that can act on it.
+ *
+ * Without this, a press is consumed by the frame it arrived on whether or not
+ * anything could use it, and several things routinely cannot: `stepWorld`
+ * returns early during hitstop, and the dunk and stumble branches `continue`
+ * before `humanControl` ever runs. Measured drops: 51 consecutive frames
+ * during a stumble, 17-48 during a dunk, up to 8 on a hit. Worse, the case a
+ * player actually notices — pressing SHOOT two frames before you land, so the
+ * jump comes out the instant your feet touch — was impossible, because
+ * `humanControl` *does* run while you are airborne and simply declined the
+ * press.
+ *
+ * So the rule is: a press survives being **declined** and clears only when it
+ * is **acted upon**. Six frames is deliberately short. It is long enough to
+ * cover a human's anticipation of a landing and the tail of a dunk or a
+ * stumble, and far too short to carry a decision across one of those in full:
+ * a press thrown at the *start* of a 0.85s stumble expires long before the
+ * body is upright again, which is correct — that decision was made in a
+ * situation that no longer exists. Presses arriving during hitstop are
+ * dropped outright for the same reason; see `stepWorld`.
+ *
+ * An earlier attempt banked presses and cleared them as soon as
+ * `humanControl` *ran*, which fixed neither case and queued actions through
+ * hitstop. It lost at every thumb speed measured and was reverted.
+ */
+const PRESS_BUFFER = 6 / 60;
+
 /* ------------------------------------------------------------------ */
 /* Commentary                                                          */
 /* ------------------------------------------------------------------ */
@@ -541,6 +569,20 @@ export interface World {
      * particles/popups that made the moment). Scaled to how big the hit was —
      * see the hitstop check at the top of `stepWorld`. */
     hitstop: number;
+    /**
+     * Seconds of life left on a banked SHOOT / PASS press. Zero means nothing
+     * is waiting. Aged in `stepWorld`, cleared by whichever branch of
+     * `humanControl` actually acts on it — see `PRESS_BUFFER`. Only the human
+     * has one; the CPU decides and acts on the same frame by construction.
+     *
+     * `aRole`/`bRole` record what the human was when each press was made — 2
+     * holding the ball, 1 his team holding it, 0 neither — because both
+     * buttons mean completely different things in each. Press PASS as a steal
+     * while the ball is loose, have your man come down with the rebound inside
+     * the buffer window, and without this the steal you asked for comes out as
+     * a pass you did not. Same press, different game.
+     */
+    buf: { a: number; b: number; aRole: number; bRole: number };
     /**
      * Eased camera focus + zoom, in screen space, updated once a frame in
      * `stepWorld` (see `cameraTarget`) and simply read back in `drawWorld`.
@@ -949,6 +991,7 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
         winner: null,
         overtime: false,
         hitstop: 0,
+        buf: { a: 0, b: 0, aRole: -1, bRole: -1 },
         cam: { zoom: 1, fx: CAM_PIVOT_X, fy: CAM_PIVOT_Y },
         buzzerLive: false,
         endHoldT: 0,
@@ -2003,6 +2046,15 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
     const teamHasBall = w.possession !== null && w.players[w.possession].team === p.team;
     const mate = teammateOf(w, p);
 
+    // A banked press and the two ways to spend it. `pressA`/`pressB` ask "is
+    // one waiting"; `tookA`/`tookB` are called by the branch that actually
+    // does something about it, so a press this frame declined is still there
+    // on the next one. That is the whole of the buffer — see `PRESS_BUFFER`.
+    const pressA = w.buf.a > 0;
+    const pressB = w.buf.b > 0;
+    const tookA = () => { w.buf.a = 0; };
+    const tookB = () => { w.buf.b = 0; };
+
     const wantTurbo = cmd.c && (p.onFire || p.turbo > 0);
     if (wantTurbo && !p.onFire) p.turbo = clamp(p.turbo - TURBO_DRAIN * dt, 0, 1);
     else p.turbo = clamp(p.turbo + TURBO_REGEN * dt, 0, 1);
@@ -2024,12 +2076,18 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
     if (hasBall) {
         const hoop = HOOPS[attackHoop(p.team)];
         const d = hoopDist(p, hoop);
-        if (cmd.aPress && p.cool <= 0) {
+        if (pressA && p.cool <= 0) {
+            tookA();
             // Dunk range is live and speed-driven (see dunkRangeFor): walk it
             // in and you need to be underneath the rim, sprint in on TURBO and
             // the same button slams it from well outside that.
             if (d < dunkRangeFor(p)) startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
-            else p.charge = 0;                     // start the release meter
+            // A banked press whose button is already back up is a stale tap.
+            // The dunk above does not care — it is atomic — but opening the
+            // meter here would release it on this same frame, for a shot of
+            // zero quality nobody asked for. So the meter wants the button
+            // still down; a tap that outlived its own cooldown is dropped.
+            else if (cmd.a) p.charge = 0;          // start the release meter
         }
         if (p.charge >= 0) {
             p.charge += dt / SHOT_CHARGE_TIME;
@@ -2048,7 +2106,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         // button cannot hold the ball forever). Mirrors the shot-charge meter
         // just above it: `cmd.b` read as a level, not the edge, is what lets
         // this tell a tap from a hold at all.
-        if (cmd.bPress && p.cool <= 0 && p.passChargeT < 0) p.passChargeT = 0;
+        if (pressB && p.cool <= 0 && p.passChargeT < 0) { tookB(); p.passChargeT = 0; }
         if (p.passChargeT >= 0) {
             p.passChargeT += dt;
             if (!cmd.b || p.passChargeT > PASS_MAX_HOLD) {
@@ -2059,21 +2117,29 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
     } else if (teamHasBall) {
         const hoop = HOOPS[attackHoop(p.team)];
         const nearHoop = hoopDist(p, hoop) < ALLEY_HOOP_R;
-        if (cmd.aPress) {
+        if (pressA) {
             if (nearHoop && p.y === 0) {
+                tookA();
                 // Cut, right now, under the rim: jump and call for the lob.
                 // The teammate AI/human holding the ball recognises an
                 // airborne man this close to the hoop and can hit the alley.
                 p.vy = jumpOf(p);
                 p.alleyCall = ALLEY_CALL_TIME;
             } else if (mate.cool <= 0 && w.possession === mate.id) {
+                tookA();
                 // Too far out for a lob: just call for the rock, grounded.
                 launchPass(w, mate, p);
             }
         }
         // PASS without the ball, on offence, swaps which of your two guys you
         // are driving — straight out of the arcade original.
-        if (cmd.bPress && p.swapCool <= 0 && mate.swapCool <= 0) {
+        if (pressB && p.swapCool <= 0 && mate.swapCool <= 0) {
+            // Spent before the swap, not after: the mate is later in the
+            // player array and is stepped again on this same frame, now
+            // flagged human. Leaving the press banked handed him a press he
+            // never made — which is the same bug the three guards below were
+            // added for, now fixed at the source as well.
+            tookB();
             p.human = false;
             mate.human = true;
             p.swapCool = SWAP_COOL;
@@ -2093,8 +2159,12 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         // Defence: SHOOT jumps (block / contest), PASS steals. Hold TURBO and
         // PASS becomes the shove instead — the read is "am I close enough and
         // willing to burn turbo", same as it is for the CPU.
-        if (cmd.aPress && p.y === 0) p.vy = jumpOf(p);
-        if (cmd.bPress && p.cool <= 0 && w.possession !== null) {
+        // The case the buffer exists for: press while still in the air and the
+        // jump comes out on the first frame your feet are down, instead of the
+        // press being spent on a frame that could never use it.
+        if (pressA && p.y === 0) { tookA(); p.vy = jumpOf(p); }
+        if (pressB && p.cool <= 0 && w.possession !== null) {
+            tookB();
             const handler = w.players[w.possession];
             const dd = dist2d(p.x, p.z, handler.x, handler.z);
             // The cooldown is priced by what you actually did, not by having
@@ -2553,11 +2623,38 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     if (w.hitstop > 0) {
         w.hitstop = Math.max(0, w.hitstop - dt);
         stepCosmetics(w, dt);
+        // Nothing survives a hit. A press arriving during the frozen frames
+        // was a reaction to what is on screen *now*, and by the time the world
+        // moves again the situation it answered is gone; a press banked just
+        // before the hit is the same decision, one frame older. Both get
+        // dropped, which is what the frames were already doing before the
+        // buffer existed — it is the one place the old behaviour was right.
+        //
+        // This clear is what does the work, not the fact that the banking
+        // below sits after the early return: the buffer is *not* aged during
+        // the frozen frames, so without it a press banked a frame before the
+        // hit would come out on recovery with its whole window unspent.
+        w.buf.a = 0;
+        w.buf.b = 0;
         return;
     }
 
     w.t += dt;
     stepCosmetics(w, dt);
+
+    // Age first, then bank, so a press that arrived this frame gets its full
+    // window and is live on this very frame rather than the next one.
+    w.buf.a = Math.max(0, w.buf.a - dt);
+    w.buf.b = Math.max(0, w.buf.b - dt);
+    const you = w.players.find(pl => pl.human);
+    const role = !you ? -1
+        : w.possession === you.id ? 2
+        : w.possession !== null && w.players[w.possession].team === you.team ? 1
+        : 0;
+    if (w.buf.aRole !== role) w.buf.a = 0;
+    if (w.buf.bRole !== role) w.buf.b = 0;
+    if (cmd.aPress) { w.buf.a = PRESS_BUFFER; w.buf.aRole = role; }
+    if (cmd.bPress) { w.buf.b = PRESS_BUFFER; w.buf.bRole = role; }
 
     // Camera: eased toward wherever `cameraTarget` wants it this instant, so
     // a dunk punch-in or a fast-break pull-back arrives as a motion rather

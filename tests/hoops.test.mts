@@ -168,7 +168,17 @@ t('every new mechanic actually fires in real games', () => {
         // bulletPasses 36.8, lobPasses 4.42, lobPicks 1.13, shovesLanded 1.12.
         ['threes', 0.2],
         ['tipIns', 0.5],
-        ['goaltends', 1],
+        // Goaltending has been deliberately walked down twice and its floor
+        // was not walked down with it, which left a guard sitting 10% under
+        // the thing it guarded. 3.83 when it was a per-frame roll over an
+        // 18-frame window and accounted for 71% of all blocking; 1.10 once it
+        // became one attribute-scaled roll on a descending ball; 0.78 once the
+        // input buffer stopped throwing the player's presses away, because a
+        // player who lands the alley-oop he called for gives the defence fewer
+        // descending balls to swat — alley-oops went 0.77 to 1.15 a game over
+        // the same change. About one a game is where this is meant to sit, so
+        // the floor's job is to catch it vanishing, not to pin it in place.
+        ['goaltends', 0.4],
         ['steals', 2],
         ['rebounds', 1],
         ['offRebounds', 0.5],
@@ -1195,12 +1205,203 @@ t('reaching a streak of two is always announced', () => {
             const hit = w.players.some(p => p.streak === 2 && (was.get(p.id) ?? 0) < 2);
             if (!hit) continue;
             reached++;
-            if (heat.has(w.say) || /HEATING UP/.test(w.banner ?? '')) announced++;
+            if (heat.has(w.say) || /HEATING UP/.test(w.bannerText)) announced++;
         }
     }
     assert.ok(reached > 15, `only ${reached} streaks reached two; the check proves nothing`);
     assert.ok(announced / reached > 0.9,
         `only ${(announced / reached * 100).toFixed(0)}% of streaks were announced — the dunk call is eating them again`);
 });
+
+/* ---------------------------------------------------------------------------
+ * Input buffering.
+ *
+ * A press survives being *declined* and clears only when it is *acted upon*.
+ * These checks pin both halves of that, because a buffer that only ever grows
+ * is worse than none: the frames a press must NOT survive — a hit, the body of
+ * a stumble, a change of who has the ball — are as much the spec as the frames
+ * it must. Every one of them fails if `w.buf` stops being consulted.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The human on defence with the ball safely in an opponent's hands, which is
+ * the state where SHOOT means nothing but "leave your feet".
+ *
+ * `pin` has to be called before every step, and the reason is worth recording:
+ * parking the ball-handler in a corner and walking away is not inert. He drives,
+ * he shoots, he scores, the phase goes to `score`, and `humanControl` stops
+ * being called at all — which read exactly like the press being dropped. So the
+ * handler is re-parked and re-cooled each frame; `aiThink` gates every offensive
+ * action on `p.cool`, so a cooldown he can never burn off is what actually holds
+ * him still.
+ */
+function defenceWorld() {
+    const w = createWorld(31, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS; w.hitstop = 0; w.shake = 0;
+    const p = w.players.find(q => q.human)!;
+    const foe = w.players.find(q => q.team !== p.team)!;
+    p.x = 150; p.z = 0.5; p.y = 0; p.vx = 0; p.vz = 0; p.vy = 0;
+    p.charge = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
+    const pin = () => {
+        for (const q of w.players) if (q.id !== p.id) {
+            q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; q.vy = 0; q.y = 0;
+            q.cool = 1; q.swapCool = 0; q.dunkT = 0; q.charge = -1; q.stumbleT = 0;
+        }
+        w.possession = foe.id;
+        w.ball.mode = 'held';
+        w.shotClock = 15;
+    };
+    pin();
+    w.buf.a = 0; w.buf.b = 0; w.buf.aRole = -1; w.buf.bRole = -1;
+    return { w, p, pin };
+}
+
+/** The human holding the ball a step from the rim, so SHOOT means "dunk". */
+function offenceWorld() {
+    const w = createWorld(33, 'Test Guy');
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
+    w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS; w.hitstop = 0; w.shake = 0;
+    const p = w.players.find(q => q.human)!;
+    const hoop = HOOPS[attackHoop(p.team)];
+    p.x = hoop.x - 6; p.z = hoop.z; p.y = 0; p.vx = 0; p.vz = 0; p.vy = 0;
+    p.charge = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
+    for (const q of w.players) if (q.id !== p.id) { q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; }
+    w.possession = p.id;
+    w.ball.mode = 'held';
+    w.buf.a = 0; w.buf.b = 0; w.buf.aRole = -1; w.buf.bRole = -1;
+    return { w, p };
+}
+
+const pressA = (): Cmd => { const c = blankCmd(); c.a = true; c.aPress = true; return c; };
+const pressB = (): Cmd => { const c = blankCmd(); c.b = true; c.bPress = true; return c; };
+const holdA = (): Cmd => { const c = blankCmd(); c.a = true; return c; };
+
+/** Frames from the takeoff press until the body is back on the floor. */
+function airFrames(): number {
+    const { w, p, pin } = defenceWorld();
+    pin(); stepWorld(w, DT, pressA());
+    let n = 1;
+    while ((p.y > 0 || p.vy !== 0) && n < 300) { pin(); stepWorld(w, DT, blankCmd()); n++; }
+    return n;
+}
+
+/** Jump, press SHOOT `early` frames before touchdown, and report whether a
+ *  second jump ever came out. */
+function jumpsAgain(early: number): boolean {
+    const air = airFrames();
+    const { w, p, pin } = defenceWorld();
+    pin(); stepWorld(w, DT, pressA());
+    const at = Math.max(1, air - early);
+    let landed = false, rose = false;
+    for (let f = 1; f <= air + 15; f++) {
+        pin();
+        stepWorld(w, DT, f === at ? pressA() : blankCmd());
+        if (!landed) { if (p.y === 0 && p.vy === 0) landed = true; continue; }
+        if (p.y > 1) rose = true;
+    }
+    return rose;
+}
+
+t('a press four frames before touchdown jumps the moment you land', () => {
+    // The case the whole buffer exists for. `humanControl` does run while you
+    // are airborne, so the old code was not dropping this press by accident —
+    // it declined it on a frame that could not use it and then spent it.
+    assert.ok(jumpsAgain(4), 'a press four frames early was thrown away');
+});
+
+t('a press at the top of the jump is not still waiting when you land', () => {
+    // The other half. A buffer that never expires is just a queue, and a queue
+    // replays a decision made half a second ago in a game that has moved on.
+    assert.ok(!jumpsAgain(30), 'a press half a second stale came out on landing');
+});
+
+t('a press during a cooldown fires when the cooldown ends', () => {
+    const { w, p } = offenceWorld();
+    p.cool = 3 * DT;
+    stepWorld(w, DT, pressA());
+    assert.equal(p.dunkT, 0, 'the cooldown did not actually decline the press — the check proves nothing');
+    for (let f = 0; f < 4; f++) stepWorld(w, DT, holdA());
+    assert.ok(p.dunkT > 0, 'the press was eaten by three frames of cooldown');
+});
+
+t('no press survives a hit, whenever it was made', () => {
+    // The buffer is not aged during the frozen frames, so without the explicit
+    // clear a banked press comes out on recovery with its whole window intact
+    // — which is exactly the queue-through-hitstop behaviour that got the first
+    // attempt at this reverted.
+    //
+    // Only the *banked* case is observable. A press arriving mid-freeze is
+    // unbankable twice over — the banking sits after the early return, and the
+    // clear would wipe it anyway — so moving the banking above the return
+    // changes no behaviour and no test can tell. Belt and braces, recorded as
+    // such rather than guarded by a check that cannot fail.
+    const { w, p, pin } = defenceWorld();
+    pin(); stepWorld(w, DT, pressA());
+    assert.ok(p.y > 0, 'the first press did not jump — the check proves nothing');
+    pin(); stepWorld(w, DT, pressA());
+    assert.ok(w.buf.a > 0, 'the airborne press was not banked — the check proves nothing');
+
+    w.hitstop = 0.1;
+    pin(); stepWorld(w, DT, blankCmd());
+    assert.equal(w.buf.a, 0, 'a banked press sat out the freeze and was still waiting');
+
+    let landed = false, rose = false;
+    for (let f = 0; f < 90; f++) {
+        pin(); stepWorld(w, DT, blankCmd());
+        if (!landed) { if (p.y === 0 && p.vy === 0) landed = true; continue; }
+        if (p.y > 1) rose = true;
+    }
+    assert.ok(!rose, 'a press frozen out by a hit came out anyway');
+});
+
+/** Shove the human over, press SHOOT either at the start of the stumble or in
+ *  its last frames, and report whether he jumped on getting up. */
+function jumpsAfterStumble(atStart: boolean) {
+    const { w, p, pin } = defenceWorld();
+    p.stumbleT = STUMBLE_TIME;
+    let pressed = false, rose = false;
+    const frames = Math.round(STUMBLE_TIME / DT) + 20;
+    for (let f = 0; f < frames; f++) {
+        const now = !pressed && (atStart ? f === 0 : p.stumbleT > 0 && p.stumbleT <= 3 * DT);
+        if (now) pressed = true;
+        pin();
+        stepWorld(w, DT, now ? pressA() : blankCmd());
+        if (p.stumbleT === 0 && p.y > 1) rose = true;
+    }
+    return { pressed, rose };
+}
+
+t('a press thrown at the start of a stumble is gone by the time you get up', () => {
+    const r = jumpsAfterStumble(true);
+    assert.ok(r.pressed, 'the press never happened — the check proves nothing');
+    assert.ok(!r.rose, 'a press from 51 frames ago fired as the player stood up');
+});
+
+t('a press in the last frames of a stumble fires as you get up', () => {
+    const r = jumpsAfterStumble(false);
+    assert.ok(r.pressed, 'the press never happened — the check proves nothing');
+    assert.ok(r.rose, 'a press three frames from standing up was thrown away');
+});
+
+t('a steal press does not become a swap when your man gets the ball', () => {
+    // PASS is a steal on defence and a swap on offence. Without the role stamp
+    // on the banked press, a reach at a loose ball turns into handing over the
+    // man you were driving, six frames later, for no reason you could see.
+    const { w, p, pin } = defenceWorld();
+    p.cool = 5 * DT;
+    pin(); stepWorld(w, DT, pressB());
+    assert.ok(w.buf.b > 0, 'the press was not banked at all — the check proves nothing');
+    // Your man comes down with it, inside the buffer window.
+    const mate = w.players.find(q => q.team === p.team && q.id !== p.id)!;
+    for (let f = 0; f < 8; f++) {
+        w.possession = mate.id;
+        w.ball.mode = 'held';
+        mate.cool = 1;
+        stepWorld(w, DT, blankCmd());
+    }
+    assert.ok(p.human, 'a press meant as a steal swapped which man you were driving');
+});
+
 
 console.log(`\n${pass} hoops checks passed.`);
