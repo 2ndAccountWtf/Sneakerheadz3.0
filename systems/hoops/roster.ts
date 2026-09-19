@@ -430,8 +430,17 @@ export interface Modifiers {
     dunkRangeMult: number;
     /** 0..1. How much the AI prefers going up over pulling up. */
     dunkBias: number;
-    /** Multiplies the shot release window — a shooter's timing is forgiving. */
-    shotWindowMult: number;
+    /**
+     * Multiplies make chance on every jump shot. This is shooting touch, and
+     * it is the thing that used to be the player's thumb: the game had a
+     * charge-and-release meter, the release quality off that meter was the
+     * biggest single term in `shotChance`, and this modifier existed to widen
+     * the meter's sweet spot. The meter is gone — NBA Jam never had one, shot
+     * success there is distance, defenders and the shooter's own rating — so
+     * the touch belongs to the shooter instead. Applied at every range;
+     * `deepMult` stacks on top of it beyond the arc.
+     */
+    touchMult: number;
     /** Multiplies make chance on shots beyond the arc. The three-point game. */
     deepMult: number;
     /** Divides an opponent's chance of taking the ball off them. */
@@ -463,7 +472,13 @@ const ACCEL_SPAN: readonly [number, number] = [0.78, 1.22];
 const JUMP_SPAN: readonly [number, number] = [0.80, 1.20];
 /** Widest span on purpose: dunk range is the most visible attribute there is. */
 const DUNK_RANGE_SPAN: readonly [number, number] = [0.58, 1.42];
-const SHOT_WINDOW_SPAN: readonly [number, number] = [0.66, 1.34];
+/**
+ * Narrower than DEEP on purpose. Touch applies to every shot, so the same
+ * span would make a shooter better than a non-shooter everywhere by the same
+ * margin they are better from three — which leaves nothing for the deep game
+ * to be the marquee axis of.
+ */
+const TOUCH_SPAN: readonly [number, number] = [0.84, 1.16];
 /** Deep shooting is the other marquee axis, so it swings nearly as hard. */
 const DEEP_SPAN: readonly [number, number] = [0.55, 1.45];
 const HANDLES_SPAN: readonly [number, number] = [0.60, 1.40];
@@ -482,7 +497,7 @@ export function derive(a: Attributes): Modifiers {
         jumpMult: across(JUMP_SPAN, a.jump),
         dunkRangeMult: across(DUNK_RANGE_SPAN, a.dunk),
         dunkBias: clamp01(a.dunk),
-        shotWindowMult: across(SHOT_WINDOW_SPAN, a.range),
+        touchMult: across(TOUCH_SPAN, a.range),
         deepMult: across(DEEP_SPAN, a.range),
         stealResist: across(HANDLES_SPAN, a.handles),
         stealMult: across(DEFENSE_SPAN, a.defense),

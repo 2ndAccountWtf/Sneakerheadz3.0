@@ -55,8 +55,12 @@ function bot(w: World, rng: () => number, passesPerSecond: number, sloppy = 0.05
     const near = Math.hypot(me.x - hoop.x, (me.z - hoop.z) * 70);
     if (mine) {
         if (rng() < passesPerSecond * DT) { c.b = true; c.bPress = true; }
+        // Drive, and press SHOOT once you are close: in dunk range that is a
+        // dunk, a step outside it is a pull-up. The trailing `else c.a = true`
+        // that used to live here was the bot holding the release meter down —
+        // with the meter gone, SHOOT is a pure press and holding it means
+        // nothing at all.
         else if (near < 46) { c.a = true; c.aPress = true; }
-        else c.a = true;
     } else if (rng() < 0.10) { c.b = true; c.bPress = true; }
     else if (rng() < 0.06) { c.a = true; c.aPress = true; }
     return c;
@@ -166,7 +170,15 @@ t('every new mechanic actually fires in real games', () => {
         // Previously unguarded. Measured per game: threes 0.75, tipIns 1.90,
         // goaltends 3.83, steals 7.48, rebounds 3.43, offRebounds 2.48,
         // bulletPasses 36.8, lobPasses 4.42, lobPicks 1.13, shovesLanded 1.12.
-        ['threes', 0.2],
+        // Measured 0.75 when release timing was the biggest term in a shot and
+        // a well-timed deep look beat the distance falloff by 25%; 0.23 with
+        // the meter gone. That is not the three dying — it is the three
+        // belonging to the roster now. 'Test Guy' is a nobody with 0.5 range,
+        // and the same season run against the best shooter on the blacktop
+        // measures 0.49 against a bricklayer's 0.15, which is the gap the
+        // separate roster check below actually guards. This floor only has to
+        // catch the shot disappearing for everyone.
+        ['threes', 0.1],
         ['tipIns', 0.5],
         // Goaltending has been deliberately walked down twice and its floor
         // was not walked down with it, which left a guard sitting 10% under
@@ -218,26 +230,29 @@ t('every new mechanic actually fires in real games', () => {
 });
 
 /**
- * The brick mechanic: a shot bad enough (contested, rushed, off balance)
- * renders as an actual brick and does not bounce — see BRICK_CHANCE and the
- * miss handling in stepBall/launchShot. A bot that plays *well* — the one
- * `season()` above drives — almost never produces one, on purpose: the AI
- * only voluntarily shoots when its own odds are decent, so "every new
- * mechanic actually fires" above does not (and should not) assert a floor
- * on bricks. This test drives the human player through a deliberately
- * terrible attempt instead — miles out, a defender in his face, released
- * the instant the meter starts moving — the exact shape of shot a player
- * with poor range takes over and over, and confirms the rebound actually
- * knows the difference between "missed" and "that was a brick".
+ * The brick mechanic: a shot bad enough renders as an actual brick and does
+ * not bounce — see BRICK_CHANCE and the miss handling in stepBall/launchShot.
+ * A bot that plays *well* — the one `season()` above drives — almost never
+ * produces one, on purpose: the AI only voluntarily shoots when its own odds
+ * are decent, so "every new mechanic actually fires" above does not (and
+ * should not) assert a floor on bricks. This test drives the human player
+ * through a deliberately terrible attempt instead.
+ *
+ * What makes a shot bad used to be two things, and is now one. The release
+ * meter is gone — there is no "rushed" any more, because there is no timing
+ * to rush — so the whole difference between these two samples is the defender
+ * standing in the shooter's face from 140px out. That is the correct shape for
+ * it: bad shots are a question of where you are and who is on you, which is
+ * what `shotChance` has always actually measured.
  */
-t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does not', () => {
+t('a genuinely bad, contested shot bricks — a clean open one does not', () => {
     const w = createWorld(777, 'Practice Dummy');
     for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
 
     const farHoop = HOOPS[attackHoop(w.players[0].team)];
     const farX = Math.max(COURT_L + 4, Math.min(COURT_R - 4, farHoop.x + (farHoop.x < 176 ? 140 : -140)));
 
-    const attempt = (contested: boolean, releaseFrames: number) => {
+    const attempt = (contested: boolean) => {
         // Keep the game running long enough to gather a real sample — the
         // AI teammate and opponents are still playing every frame too, and
         // would otherwise decide the game on points long before this loop
@@ -267,7 +282,7 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
 
         const me = w.players[0];
         me.x = farX; me.z = 0.5; me.vx = 0; me.vz = 0;
-        me.cool = 0; me.charge = -1; me.dunkT = 0; me.stumbleT = 0;
+        me.cool = 0; me.gather = -1; me.dunkT = 0; me.stumbleT = 0;
         const defender = w.players[2];
         const other = w.players[3];
         defender.stumbleT = 0; other.stumbleT = 0;
@@ -291,15 +306,14 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
         w.possession = 0;
         w.ball.mode = 'held';
 
-        let cmd = blankCmd();
+        const cmd = blankCmd();
         cmd.a = true; cmd.aPress = true;
         stepWorld(w, DT, cmd);
-        for (let i = 1; i < releaseFrames; i++) {
-            cmd = blankCmd();
-            cmd.a = true;
-            stepWorld(w, DT, cmd);
-        }
-        stepWorld(w, DT, blankCmd());
+        // The wind-up. One press commits; the ball leaves at the apex, which
+        // is a little under twenty frames away, and the defender gets all of
+        // them to climb into the shot. Step until it is gone rather than
+        // guessing a frame count.
+        for (let i = 0; i < 40 && me.gather >= 0; i++) stepWorld(w, DT, blankCmd());
         // TS narrows `w.ball.mode` to the 'held' literal we just assigned
         // above and does not re-widen it across the stepWorld() calls in
         // between, even though stepWorld freely changes it — hence the cast.
@@ -309,7 +323,7 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
     let badAttempts = 0, badMisses = 0, badBricks = 0;
     for (let i = 0; i < 150; i++) {
         const shots0 = w.stats.shots, makes0 = w.stats.makes, bricks0 = w.stats.bricks;
-        attempt(true, 2 + (i % 5));  // contested, released almost instantly
+        attempt(true);   // a hand in his face from 140px out
         if (w.stats.shots > shots0) {
             badAttempts++;
             if (w.stats.makes === makes0) { badMisses++; if (w.stats.bricks > bricks0) badBricks++; }
@@ -317,11 +331,9 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
     }
 
     let goodAttempts = 0, goodMisses = 0, goodBricks = 0;
-    // SHOT_CHARGE_TIME is 0.62s (~37 frames at 60Hz) and SHOT_SWEET sits at
-    // 0.84 of that — 31 frames lands in the sweet spot, wide open.
     for (let i = 0; i < 150; i++) {
         const shots0 = w.stats.shots, makes0 = w.stats.makes, bricks0 = w.stats.bricks;
-        attempt(false, 31);
+        attempt(false);  // same spot, nobody near him
         if (w.stats.shots > shots0) {
             goodAttempts++;
             if (w.stats.makes === makes0) { goodMisses++; if (w.stats.bricks > bricks0) goodBricks++; }
@@ -329,18 +341,18 @@ t('a genuinely bad, contested, rushed shot bricks — a clean in-rhythm one does
     }
 
     assert.ok(badAttempts > 100, `only ${badAttempts}/150 scripted bad shots actually got a shot off`);
-    assert.ok(badMisses > 20, `only ${badMisses} misses out of ${badAttempts} rushed, contested attempts — that scenario should miss constantly`);
+    assert.ok(badMisses > 20, `only ${badMisses} misses out of ${badAttempts} contested attempts — that scenario should miss constantly`);
     const badBrickShare = badBricks / Math.max(1, badMisses);
     assert.ok(
         badBrickShare > 0.15,
-        `a rushed, heavily contested shot bricks only ${(badBrickShare * 100).toFixed(0)}% of its misses — the mechanic should fire often for a genuinely bad look`,
+        `a heavily contested shot bricks only ${(badBrickShare * 100).toFixed(0)}% of its misses — the mechanic should fire often for a genuinely bad look`,
     );
 
     assert.ok(goodAttempts > 100, `only ${goodAttempts}/150 scripted good shots actually got a shot off`);
     const goodBrickShare = goodBricks / Math.max(1, goodMisses);
     assert.ok(
         goodBrickShare < badBrickShare,
-        `an open, well-timed shot bricks its misses (${(goodBrickShare * 100).toFixed(0)}%) as often as a rushed contested one (${(badBrickShare * 100).toFixed(0)}%) — bricks should track shot quality, not fire on every miss`,
+        `an open shot bricks its misses (${(goodBrickShare * 100).toFixed(0)}%) as often as a contested one (${(badBrickShare * 100).toFixed(0)}%) — bricks should track shot quality, not fire on every miss`,
     );
 });
 
@@ -363,7 +375,7 @@ t('a shot in the air when the clock hits zero finishes, made or missed, before t
 
         const me = w.players[0];
         me.x = 190; me.z = 0.5; me.vx = 0; me.vz = 0;
-        me.cool = 0; me.charge = -1; me.dunkT = 0; me.stumbleT = 0;
+        me.cool = 0; me.gather = -1; me.dunkT = 0; me.stumbleT = 0;
         w.players[2].x = 300; w.players[2].z = 0.9;   // well clear — not testing contest here
         w.players[3].x = 300; w.players[3].z = 0.1;
         w.possession = 0;
@@ -424,7 +436,7 @@ function freshMovementWorld(): World {
     w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS;
     w.hitstop = 0; w.shake = 0;
     const me = w.players[0];
-    me.x = 176; me.z = 0.5; me.vx = 0; me.vz = 0; me.charge = -1; me.dunkT = 0;
+    me.x = 176; me.z = 0.5; me.vx = 0; me.vz = 0; me.gather = -1; me.dunkT = 0;
     me.stumbleT = 0; me.onFire = false; me.turbo = 1;
     w.possession = 0;
     w.ball.mode = 'held';
@@ -743,7 +755,7 @@ function soloWorld() {
     const w = createWorld(7, 'Test Guy');
     for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
     const p = w.players.find(q => q.human)!;
-    p.x = 150; p.z = 0.15; p.vx = 0; p.vz = 0; p.charge = -1; p.cool = 0;
+    p.x = 150; p.z = 0.15; p.vx = 0; p.vz = 0; p.gather = -1; p.cool = 0;
     return { w, p };
 }
 const park = (w: World, p: { id: number }) => {
@@ -824,11 +836,11 @@ t('a gather does not outlive the possession it started in', () => {
     const { w, p } = soloWorld();
     const other = w.players.find(q => q.id !== p.id)!;
     w.possession = other.id;
-    p.charge = 0.24;
+    p.gather = 0.24;
 
     stepWorld(w, DT, blankCmd());
 
-    assert.ok(p.charge < 0, `a player with no ball is still gathering at ${p.charge.toFixed(2)}`);
+    assert.ok(p.gather < 0, `a player with no ball is still gathering at ${p.gather.toFixed(2)}`);
     // Specifically that *he* did not shoot. An earlier version asserted the
     // global shot counter did not move, which also forbade the AI who actually
     // holds the ball from taking its own perfectly legal shot on that frame.
@@ -855,8 +867,8 @@ t('no player ever holds a gather without the ball', () => {
         stepWorld(w, DT, bot(w, rng, 1));
         frames++;
         for (const q of w.players) {
-            assert.ok(!(q.charge >= 0 && w.possession !== q.id),
-                `frame ${frames}: ${q.name} is gathering at ${q.charge.toFixed(2)} without the ball`);
+            assert.ok(!(q.gather >= 0 && w.possession !== q.id),
+                `frame ${frames}: ${q.name} is gathering at ${q.gather.toFixed(2)} without the ball`);
         }
     }
     assert.ok(frames > 1000, 'the game ended too early for this sweep to mean anything');
@@ -1242,11 +1254,11 @@ function defenceWorld() {
     const p = w.players.find(q => q.human)!;
     const foe = w.players.find(q => q.team !== p.team)!;
     p.x = 150; p.z = 0.5; p.y = 0; p.vx = 0; p.vz = 0; p.vy = 0;
-    p.charge = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
+    p.gather = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
     const pin = () => {
         for (const q of w.players) if (q.id !== p.id) {
             q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; q.vy = 0; q.y = 0;
-            q.cool = 1; q.swapCool = 0; q.dunkT = 0; q.charge = -1; q.stumbleT = 0;
+            q.cool = 1; q.swapCool = 0; q.dunkT = 0; q.gather = -1; q.stumbleT = 0;
         }
         w.possession = foe.id;
         w.ball.mode = 'held';
@@ -1265,7 +1277,7 @@ function offenceWorld() {
     const p = w.players.find(q => q.human)!;
     const hoop = HOOPS[attackHoop(p.team)];
     p.x = hoop.x - 6; p.z = hoop.z; p.y = 0; p.vx = 0; p.vz = 0; p.vy = 0;
-    p.charge = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
+    p.gather = -1; p.cool = 0; p.swapCool = 0; p.dunkT = 0; p.stumbleT = 0;
     for (const q of w.players) if (q.id !== p.id) { q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; }
     w.possession = p.id;
     w.ball.mode = 'held';
@@ -1401,6 +1413,191 @@ t('a steal press does not become a swap when your man gets the ball', () => {
         stepWorld(w, DT, blankCmd());
     }
     assert.ok(p.human, 'a press meant as a steal swapped which man you were driving');
+});
+
+
+/* ---------------------------------------------------------------------------
+ * The jump shot, with the release meter removed.
+ *
+ * SHOOT used to open a charge bar with a green sweet spot, and release quality
+ * was the largest single term in `shotChance` — larger than the distance,
+ * larger than the hand in your face. NBA Jam has no such thing and never did:
+ * the button is a plain press and the make is one roll against a percentage
+ * built from range, defenders and the shooter's own rating. What the meter
+ * was really providing, and the only part worth keeping, was a window in which
+ * a shot could be contested on purpose. So the window stayed and the timing
+ * went: press SHOOT, the shooter plants, goes up, and lets it go at the top.
+ * ------------------------------------------------------------------------- */
+
+/** The human with the ball, planted well outside dunk range, one defender
+ *  placed at `guardGap` px (or parked in the far corner when open). */
+function jumperRun(guarded: boolean, tries: number) {
+    const w = createWorld(777, 'Practice Dummy');
+    for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
+    const me = w.players[0];
+    const hoop = HOOPS[attackHoop(me.team)];
+    const farX = Math.max(COURT_L + 4, Math.min(COURT_R - 4, hoop.x + (hoop.x < 176 ? 96 : -96)));
+    const parkedFar = farX < 176 ? COURT_R - 4 : COURT_L + 4;
+
+    let shots = 0, blocks = 0, windupTotal = 0, airborneAtPress = 0, releasedFalling = 0;
+    for (let i = 0; i < tries; i++) {
+        w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS; w.hitstop = 0; w.shotClock = 10;
+        me.x = farX; me.z = 0.5; me.vx = 0; me.vz = 0; me.y = 0; me.vy = 0;
+        me.cool = 0; me.gather = -1; me.dunkT = 0; me.stumbleT = 0;
+        const onBall = w.players[2], other = w.players[3];
+        for (const d of [onBall, other]) { d.stumbleT = 0; d.vx = 0; d.vz = 0; d.y = 0; d.vy = 0; d.cool = 0; d.dunkT = 0; }
+        other.x = parkedFar; other.z = 0.85;
+        // Inside BLOCK_R and on the floor: he has to decide to go up himself.
+        // Nothing here scripts the contest — that is the point of the check.
+        if (guarded) { onBall.x = me.x + 12; onBall.z = me.z; }
+        else { onBall.x = parkedFar; onBall.z = 0.1; }
+        w.possession = 0; w.ball.mode = 'held';
+
+        const b0 = w.stats.blocks, s0 = w.stats.shots;
+        const cmd = blankCmd(); cmd.a = true; cmd.aPress = true;
+        stepWorld(w, DT, cmd);
+        if (me.y > 0 && me.vy > 0) airborneAtPress++;
+        let f = 0;
+        while (f < 60 && me.gather >= 0) { stepWorld(w, DT, blankCmd()); f++; }
+        if (me.vy <= 0) releasedFalling++;
+        windupTotal += f;
+        for (let k = 0; k < 200 && (w.ball.mode as string) === 'flight'; k++) stepWorld(w, DT, blankCmd());
+        if (w.stats.shots > s0) shots++;
+        if (w.stats.blocks > b0) blocks++;
+    }
+    return { shots, blocks, windup: windupTotal / tries, airborneAtPress, releasedFalling, tries };
+}
+
+t('a jumper is a wind-up, not an instant', () => {
+    const r = jumperRun(false, 60);
+    assert.equal(r.airborneAtPress, r.tries,
+        `the shooter was still on the floor after pressing SHOOT on ${r.tries - r.airborneAtPress} of ${r.tries} attempts`);
+    assert.ok(r.windup > 12 && r.windup < 26,
+        `the ball leaves ${r.windup.toFixed(1)} frames after the press — a tell nobody can react to, or a hang nobody would sit through`);
+    assert.equal(r.releasedFalling, r.tries, 'the ball left before the top of the jump');
+    assert.equal(r.shots, r.tries, `only ${r.shots} of ${r.tries} wide-open attempts got a shot away at all`);
+});
+
+t('a defender who goes up with the shooter gets a piece of it', () => {
+    // The whole reason the wind-up survived the meter. Nothing in here tells
+    // the defender to jump: he is stood on the floor inside BLOCK_R when the
+    // shot starts and has the length of the gather to decide for himself.
+    // Delete the gather and he has no frames at all — which is exactly how the
+    // CPU shot behaved before this, and why blocking felt arbitrary.
+    const open = jumperRun(false, 200);
+    const guarded = jumperRun(true, 200);
+    assert.equal(open.blocks, 0, `${open.blocks} shots were blocked with nobody within 200px — the check proves nothing`);
+    assert.ok(guarded.blocks > 6,
+        `only ${guarded.blocks} of 200 shots taken over a defender were blocked — the wind-up is not contestable`);
+    assert.ok(guarded.shots > 120,
+        `only ${guarded.shots} of 200 guarded attempts got a shot off — the defender is eating the possession, not contesting the shot`);
+});
+
+t('every jump shot in a real game has a wind-up, the CPU included', () => {
+    // The CPU used to call the shot straight out of `aiThink`: no gather, no
+    // pose, nothing to read. You could not block a CPU jumper on purpose, only
+    // swat one already in the air, and that was half of why blocking felt
+    // arbitrary. Watched over real games rather than scripted, because the
+    // thing being checked is that the CPU's own decision path goes through the
+    // wind-up — a scripted shot would only ever prove it about the human.
+    let x = 77;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    let cpuShots = 0, cpuWithWindUp = 0, humanShots = 0, humanWithWindUp = 0;
+    for (let g = 0; g < 8; g++) {
+        const w = createWorld(8300 + g, 'Test Guy');
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        let priced = false;
+        let wasGathering = w.players.map(() => false);
+        while (w.phase !== 'over' && frames < cap) {
+            const before = wasGathering;
+            stepWorld(w, DT, bot(w, rng, 1));
+            wasGathering = w.players.map(q => q.gather >= 0);
+            frames++;
+            const b = w.ball;
+            if (b.mode !== 'flight' || b.kind !== 'shot') { priced = false; continue; }
+            if (priced) continue;
+            priced = true;
+            const shooter = w.players[b.shooter];
+            if (shooter.human) { humanShots++; if (before[b.shooter]) humanWithWindUp++; }
+            else { cpuShots++; if (before[b.shooter]) cpuWithWindUp++; }
+        }
+    }
+    assert.ok(cpuShots > 40, `only ${cpuShots} CPU jump shots across eight games — the check proves nothing`);
+    assert.ok(humanShots > 10, `only ${humanShots} human jump shots across eight games — the check proves nothing`);
+    assert.ok(cpuWithWindUp / cpuShots > 0.95,
+        `only ${((cpuWithWindUp / cpuShots) * 100).toFixed(0)}% of CPU jumpers had a wind-up — the CPU is shooting with no tell again`);
+    assert.ok(humanWithWindUp / humanShots > 0.95,
+        `only ${((humanWithWindUp / humanShots) * 100).toFixed(0)}% of human jumpers had a wind-up`);
+});
+
+t('a jumper counts from where you left your feet', () => {
+    // The shooter used to keep driving through his own wind-up, because
+    // `aiThink`/`humanControl` — and therefore `applyMove` — still ran while
+    // he was in it. The point value is read at release, so a three decided
+    // from 122px out was released from 111 and scored two. That single bug
+    // cut three-point attempts from 1.07 a game to 0.43 the moment the
+    // wind-up was introduced, and nothing else in the suite noticed.
+    const w = createWorld(4141, 'Practice Dummy');
+    for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
+    w.phase = 'play'; w.phaseT = 0; w.clock = GAME_SECONDS; w.hitstop = 0; w.shotClock = 10;
+    const me = w.players[0];
+    const hoop = HOOPS[attackHoop(me.team)];
+    me.x = hoop.x + (hoop.x < 176 ? 120 : -120); me.z = hoop.z;
+    me.vx = 0; me.vz = 0; me.y = 0; me.vy = 0;
+    me.cool = 0; me.gather = -1; me.dunkT = 0; me.stumbleT = 0;
+    for (const q of w.players) if (q.id !== me.id) { q.x = 40; q.z = 0.05; q.vx = 0; q.vz = 0; q.cool = 2; }
+    w.possession = 0; w.ball.mode = 'held';
+
+    // Get him genuinely moving at the rim first — a standing shooter cannot
+    // drift, so a test that skips this proves nothing.
+    const drive = (): Cmd => {
+        const c = blankCmd();
+        if (hoop.x > me.x) c.right = true; else c.left = true;
+        c.c = true;
+        return c;
+    };
+    for (let i = 0; i < 20; i++) stepWorld(w, DT, drive());
+    assert.ok(Math.abs(me.vx) > 30, `the shooter is only moving at ${Math.abs(me.vx).toFixed(0)}px/s — he cannot drift`);
+
+    const shoot = drive(); shoot.a = true; shoot.aPress = true;
+    stepWorld(w, DT, shoot);
+    assert.ok(me.gather >= 0, 'the press did not start a jumper');
+    const atTakeoff = hoopDist(me, hoop);
+
+    // Still leaning on the stick the whole way up.
+    for (let i = 0; i < 40 && me.gather >= 0; i++) stepWorld(w, DT, drive());
+    const atRelease = hoopDist(me, hoop);
+
+    assert.ok(Math.abs(atRelease - atTakeoff) < 3,
+        `the shooter travelled ${(atTakeoff - atRelease).toFixed(1)}px toward the rim during his own wind-up`);
+});
+
+t('a shooter out-shoots a bricklayer from deep, in real games', () => {
+    // `touchMult` and `deepMult` both come off `range`, and until the meter
+    // went neither was read by the simulation at all: release timing decided
+    // the shot and the roster decided nothing. This is the check that the
+    // attribute now carries what the thumb used to.
+    const threesFor = (npcId: string) => {
+        let threes = 0, done = 0;
+        for (let i = 0; i < 60; i++) {
+            let x = ((i + 1) * 2654435761) >>> 0;
+            const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+            const prof = profileFor(npcId);
+            const w = createWorld(9000 + i, prof.name, prof);
+            let f = 0;
+            const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+            while (w.phase !== 'over' && f < cap) { stepWorld(w, DT, bot(w, rng, 1.2)); f++; }
+            if (w.phase !== 'over') continue;
+            done++; threes += w.stats.threes;
+        }
+        return threes / Math.max(1, done);
+    };
+    const shooter = threesFor('grandma-laces');     // range 0.97
+    const bricklayer = threesFor('yasser-abbasfat'); // range 0.05
+    assert.ok(shooter > 0.3, `the best shooter on the blacktop hits ${shooter.toFixed(2)} threes a game — the shot is not a weapon for anybody`);
+    assert.ok(shooter / bricklayer > 2,
+        `a 0.97-range shooter hits ${shooter.toFixed(2)} threes a game against a 0.05-range one's ${bricklayer.toFixed(2)} — only a ${(shooter / bricklayer).toFixed(1)}x gap`);
 });
 
 

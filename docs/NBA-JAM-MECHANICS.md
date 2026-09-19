@@ -20,12 +20,14 @@
 > mechanic: YES, timing exists"* and the item ranked #2 in *"what clones get
 > wrong"* should be read as describing **NBA Street / NBA 2K**, not Jam.
 >
-> This matters for implementation in a specific way: our Hoops game **already
-> has** a charge-and-release meter, and nobody outside this project asked for
-> one. Whether it stays is an open design decision — see the shooting section
-> below for what Jam does instead — but it must never be argued for as fidelity
-> to the source, and it must not crowd out the mechanics Jam actually leans on,
-> which are spatial (where you are, how fast you are moving, who is near you)
+> This mattered for implementation in a specific way, and has since been acted
+> on: our Hoops game **had** a charge-and-release meter, nobody outside this
+> project ever asked for one, and it has been removed. SHOOT is a plain press.
+> What the meter was really providing — a window in which a shot could be
+> contested on purpose — was kept as a wind-up: the shooter plants, goes up and
+> releases at the apex, which is the tell Jam itself uses. What the meter was
+> deciding, the shooter's touch now decides. The mechanics this game leans on
+> are spatial again — where you are, how fast you are moving, who is near you —
 > rather than rhythmic.
 >
 > Treat every other section as a **lead to sanity-check**, not a specification.
@@ -134,10 +136,19 @@ here, and none may be.
 So the tell a defender reads in Jam is the **jump**, not a meter: you are in
 the air, you are committed, and the defender's window is the flight of the ball.
 
-**Our game differs deliberately.** Hoops has a charge-and-release meter
-(`SHOT_CHARGE_TIME`, `SHOT_SWEET`, `SHOT_WINDOW`, `SHOT_COOK` in
-`HoopsGame.tsx`). That is ours, not Jam's. It is not fidelity to the source and
-should never be defended as such.
+**Our game used to differ, and no longer does.** Hoops had a charge-and-release
+meter (`SHOT_CHARGE_TIME`, `SHOT_SWEET`, `SHOT_WINDOW`, `SHOT_COOK`). Those
+constants are gone. `startShot` now plants the shooter and puts him in the air,
+`stepGather` releases at the apex, and `shotChance` reads distance, contest,
+the three-point situation and the shooter's own `touchMult`/`deepMult` — no
+timing term at all. Both sides go through it, so a CPU jumper has a tell for
+the first time.
+
+One thing worth keeping from Jam that we do **not** copy: its three pity rules
+(consecutive bricks forcing a make, an end-of-game floor when a team is down,
+a bigger floor when the shot would tie) are catch-up mechanics that only ever
+raise the percentage. Ours has the CPU rubber-banding elsewhere; adding these
+on top would be two catch-up systems fighting each other.
 
 **"On Fire" status:**
 - Grants ~95–99% shot accuracy from anywhere on court

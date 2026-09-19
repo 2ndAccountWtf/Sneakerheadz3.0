@@ -78,7 +78,7 @@ one of our durations is already a constant in `HoopsGame.tsx`:
 | alley-oop finish | 0.38s | `dunkDur` :1198 | 5 | **6** | 8 |
 | tip-in | 0.28s | `dunkDur` :1198 | 3 | **4** | 6 |
 | stagger / knocked down | 0.85s | `STUMBLE_TIME` :148 | 10 | **13** | 17 |
-| shot gather | 0.62s | `SHOT_CHARGE_TIME` :188 | 7 | **9** | 12 |
+| shot gather | 0.32s | apex of `SHOT_JUMP` off `jumpOf` | 4 | **5** | 6 |
 | jump, floor to floor | 0.77s | measured from `GRAVITY`/`JUMP_V` | 9 | **12** | 15 |
 | pivot | 0.12s | must stay fast | 1 | **3** | 2 |
 | landing | 0.12s | must stay fast | 1 | **3** | 2 |
@@ -218,13 +218,13 @@ exciting they are. Tier 1 is most of what a player ever looks at.
 
 | sequence | frames | why that number |
 |---|---:|---|
-| `hoops-gather@9` | 9 | `SHOT_CHARGE_TIME` is 0.62s — a long, readable wind-up the defender is meant to react to. It is currently a boolean. |
+| `hoops-gather@5` | 5 | The wind-up is 0.32s — plant, rise, ball over the head — and it ends at the apex, where `hoops-jumper` takes over. It was 9 frames against a 0.62s release meter; the meter is gone and the clock moved, so the frame count moves with it. It is currently a boolean. |
 | `hoops-jumper@9` | 9 | Rise, release, **follow-through with the wrist held**. The follow-through is not optional; it is what makes a shot feel shot. |
 | `hoops-pass@5` | 5 | ~0.3s. Chest, sharp, weight forward. |
 | `hoops-lob@5` | 5 | Two hands, up and over. Must read differently from `pass` at a glance. |
 | `hoops-layup@8` | 8 | ~0.5s. Off one foot, ball up off the glass. |
 
-**Subtotal: 36 frames.**
+**Subtotal: 32 frames.**
 
 ### Tier 3 — the spectacle
 
@@ -272,18 +272,25 @@ deals from a list, so a sixth dunk is a file drop, not a code change.
 | tier | frames |
 |---|---:|
 | 1 — locomotion | 43 |
-| 2 — the ball | 36 |
+| 2 — the ball | 32 |
 | 3 — spectacle | 67 |
 | 4 — contact | 43 |
 | 5 — flavour | 20 |
-| **total** | **209** |
+| **total** | **205** |
 
-209 frames against the 4 that exist today.
+205 frames against the 4 that exist today.
 
 Note what the duration rule did to the first draft of this table: the gather
 went from 4 frames to 9 and the stagger from 6 to 13, because both are long
 actions that were being under-drawn; the alley-oop came *down* from 10 to 6,
 because it is a 0.38s move that was being over-drawn. Frames follow the clock.
+
+And then the clock moved. The release meter was removed — it was ours, not
+Jam's — and the gather stopped being a 0.62s charge bar and became a 0.32s
+plant-and-rise that ends at the apex of the jump. So the gather went 9 → 5 and
+the total 209 → 205, by the same rule that had put it at 9 in the first place.
+That is the rule working: the frame count is a consequence of the duration, so
+when the duration changes the count is not renegotiated, it is recomputed.
 
 ### Batch order
 

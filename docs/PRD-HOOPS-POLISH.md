@@ -190,37 +190,14 @@ Passing still beats hoarding, which is the property that matters.
 **3.5 Two more modifiers wired.** `blockMult` — the one §3.4 called for, and
 exactly what NBA Jam scales its own 1–25% block chance by — and `accelMult`.
 Six of twelve now reach the simulation, up from four. Still unread:
-`dunkBias`, `shotWindowMult`, `deepMult`, `stealMult`, `turboCapMult`,
-`turboRegenMult`.
+`dunkBias`, `stealMult`, `turboCapMult`, `turboRegenMult`. (`shotWindowMult`
+became `touchMult` and `deepMult` was wired when the release meter came out —
+see §4.5. Eight of twelve.)
 
 **Still open in this section:**
 
-- **The CPU has no shot tell.** `aiThink` calls `launchShot` directly, so
-  `p.charge` is never set for a CPU shooter (0.086% of AI frames). A CPU jumper
-  therefore gives nothing away before the ball leaves, and cannot be blocked on
-  purpose — only swatted in flight. This is the other half of why blocking felt
-  arbitrary and it is untouched.
-
-  **Do not fix this by giving the CPU a release meter.** Checked against the
-  leaked NBA Jam source (design rules only; no code, data or art from it is used
-  here): Jam has no release-timing mechanic at all. The shoot button is a plain
-  press, the make/miss is a single 0-999 roll at launch against an accumulated
-  spatial percentage, and the only thing hold duration decides is whether the
-  quick-shot animation plays instead of the normal one. The tell a defender
-  reads there is **the jump** — you are airborne, you are committed, and the
-  window is the flight of the ball. See `docs/NBA-JAM-MECHANICS.md`.
-
-  So there are two separable questions, and they are the user's call, not a
-  polish task:
-
-  1. **Does our release meter stay?** `SHOT_CHARGE_TIME` / `SHOT_SWEET` /
-     `SHOT_WINDOW` / `SHOT_COOK` are ours — authored into this game, not
-     inherited. Removing them is a design change, not a fix, and it would make
-     the jumper a pure spatial roll the way Jam's is.
-  2. **Either way, the CPU needs a gather.** Even with the meter gone, a shooter
-     who launches on the same frame they decide to is unreadable. The fix is a
-     visible wind-up on the CPU — a gather pose and a few frames before release
-     — not a meter drawn over its head.
+- ~~**The CPU has no shot tell.**~~ **Fixed — see §4.5.** The release meter is
+  gone and both sides now shoot through the same wind-up.
 - **No persistent "this team has the ball" marker.** The `▼` marks who you are
   driving, not who is holding it.
 - **Three mutations still pass.** Removing the descending-ball condition,
@@ -328,6 +305,78 @@ claimed to guard it was vacuous and was deleted rather than kept as decoration.
 
 ---
 
+## 4.5 — the release meter, removed
+
+Asked for directly, after the question "who said there should be a release
+meter?" turned out to have the answer "we did, and nobody checked".
+
+**What it was.** `SHOT_CHARGE_TIME` / `SHOT_SWEET` / `SHOT_WINDOW` /
+`SHOT_COOK`: SHOOT opened a charge bar with a green sweet-spot band, and the
+release quality off that bar was the single largest term in `shotChance` —
+larger than the distance, larger than the hand in the shooter's face. It was
+authored here. NBA Jam has nothing like it and never did (verified in the
+source; see `docs/NBA-JAM-MECHANICS.md`): the button is a plain press, the make
+is one roll against a percentage built from range, defenders and the shooter's
+own rating, and the tell a defender reads is the jump.
+
+**What replaced it.** The half worth keeping was the window in which a shot
+could be contested on purpose. So the window stayed and the timing went:
+
+- `startShot` plants the shooter, puts him in the air and locks his facing.
+- `stepGather` releases at the apex — 19 frames, 0.32s. Nothing to time.
+- `shotChance` lost its release term and gained `touchMult` (every shot) and
+  `deepMult` (beyond the arc only). What the thumb used to decide, the
+  shooter's hands decide.
+- **Both sides call it.** This closes §3's last open item: the CPU used to call
+  `launchShot` straight out of `aiThink`, so a CPU jumper had no gather, no
+  pose and nothing to read. You could not block one on purpose, only swat one
+  already in the air.
+
+**Measured** (60 games, the committed season harness, per game):
+
+```
+                 before    after
+combined FG        70%      61%
+blocks            2.08     3.40
+dunks             8.15     7.05
+rebounds          3.93     5.03
+score         16.7-17.3  14.3-14.4
+win rate           48%      42%
+```
+
+Blocks up 63% is the change working — shots are contestable now. 61% combined
+shooting is closer to where this file already said arcade hoops lives than 70%
+was. Every balance property holds: competitive, passing still beats hoarding,
+every game finishes.
+
+**Two bugs found on the way, both invisible to the suite as it stood:**
+
+1. **The shooter drifted through his own wind-up.** `applyMove` still ran while
+   gathering, so a three decided from 122px out released from 111 and scored
+   two. Three-point attempts fell 1.07 → 0.43 a game. Fixed by having the
+   wind-up own the body the way a dunk does. Now guarded.
+2. **The three-point "open" bonus never fires.** `THREE_OPEN_R` is 46px and on
+   a 2-on-2 court nobody is ever that clear — sweeping the bonus from 1.3 to
+   1.7, and the radius from 46 down to 30, moved the measured three count by
+   0.02 a game. It is dead content. Recorded, not fixed: the honest fix is a
+   court/spacing question, not a constant.
+
+**Where the three went.** 0.75 a game with the meter, 0.23 without — but that
+is the shot moving from the thumb to the roster, not dying. The same season
+against the best shooter on the blacktop measures 0.49 against a bricklayer's
+0.15, a 3.3x gap where it used to be 1.6x. The bare `threes` floor was dropped
+to 0.1 (it was 0.2 against a measured 0.23 — the same too-tight-guard mistake
+§4 had to fix for `goaltends`) and the real signal moved to a roster check.
+
+**Teeth.** Seven new checks (hoops 42 → 47). Seven mutations run: no wind-up
+fails 3, ignoring `touchMult` fails 1, ignoring `deepMult` fails 1, the shooter
+steering through the gather fails 1, the CPU shooting without a tell fails 1,
+the CPU defender not reading the gather fails 1. One more — not planting the
+shooter's velocity at commit — fails nothing, because position is not
+integrated during the gather at all; it is kept for what the shooter does on
+landing and recorded as unguarded rather than claimed.
+
+
 ## 5. P2 — the animation delivery
 
 Fully specified in `docs/ASSETS-HOOPS-ANIMATION.md`. Summarised here because it
@@ -422,8 +471,9 @@ Listed so they are decisions rather than omissions.
 ```
 1. §1  test teeth            ← DONE
 2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
-3. §3  feedback              ← DONE except the CPU shot tell (needs a design call)
+3. §3  feedback              ← DONE
 4. §4  input buffering       ← DONE
+4b §4.5 release meter out    ← DONE
 5. §5  animation             ← as the art lands, tier by tier
 6. §6  small and true
 ```

@@ -215,10 +215,34 @@ const GOALTEND_MIN_T = 0.52;
  * shorten a cooldown but never to lengthen one.
  */
 const SHOT_COOL = 0.35;
-export const SHOT_CHARGE_TIME = 0.62;  // seconds for the release meter to fill
-export const SHOT_SWEET = 0.84;        // sweet spot near the top of the meter
-export const SHOT_WINDOW = 0.30;       // half-width of the window that still scores
-export const SHOT_COOK = 1.1;          // hold past this and the shot is "overcooked"
+/**
+ * The jump shot has no meter.
+ *
+ * It used to: SHOOT opened a charge bar, a green band marked a sweet spot, and
+ * release quality was the single biggest term in `shotChance` — bigger than
+ * distance, bigger than the defender in your face. That was ours, invented
+ * here. NBA Jam has nothing like it and never did: the shoot button is a plain
+ * press, the make/miss is one roll taken at release against a percentage built
+ * from the shooter's rating, the range, and where the two defenders are. The
+ * tell a defender reads there is the jump — you are in the air, you are
+ * committed, and the window is the flight of the ball.
+ *
+ * So that is what this is now. Press SHOOT out of dunk range and the shooter
+ * plants, leaves his feet, and lets it go at the top of the jump. There is
+ * nothing to time. What the thumb used to decide, `touchMult` decides — the
+ * shooter's own hands — which is also what finally makes the `range` attribute
+ * mean something at every distance instead of only beyond the arc.
+ *
+ * The wind-up is the point of the change, not a side effect: a shot that
+ * leaves instantly cannot be contested on purpose, only swatted by luck, and
+ * the CPU used to do exactly that (it called `launchShot` directly and had no
+ * tell at all). Both sides now go through `startShot` and both sides are
+ * readable.
+ */
+const SHOT_JUMP = 0.82;         // a jumper is not a max-effort leap
+/** Safety valve. The release is at the apex; this only fires if something
+ *  strange has happened to the shooter's vertical — never in normal play. */
+const SHOT_GATHER_MAX = 0.7;
 
 const AI_SKILL = 1;          // opponents are worse than a perfect release
 const MATE_SKILL = 0.84;        // your teammate is worse than that. He tries.
@@ -431,8 +455,14 @@ export interface Player {
     /** Height above the floor and its velocity — used for jumps and dunks. */
     y: number; vy: number;
     turbo: number;              // 0..1
-    /** Charge on the release meter; < 0 means "not shooting". */
-    charge: number;
+    /**
+     * Seconds into a jump-shot wind-up; < 0 means "not shooting". The shot
+     * leaves at the apex, so this is read for the pose and the tell rather
+     * than for timing — nothing about the outcome depends on its value.
+     */
+    gather: number;
+    /** The skill factor captured when the wind-up started, spent at release. */
+    shotSkill: number;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -906,7 +936,7 @@ const mkPlayer = (
     x, z, vx: 0, vz: 0,
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
-    turbo: 1, charge: -1, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    turbo: 1, gather: -1, shotSkill: 1, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -1019,18 +1049,16 @@ const giveBall = (w: World, id: number, keepClock = false) => {
     w.players[id].passChargeT = -1;
     // Two meters that outlive the possession they belong to.
     //
-    // `charge` is only advanced inside the `hasBall` branch, so losing the ball
-    // mid-gather froze it at whatever it had reached. `speedOf` halves you
-    // while `charge >= 0`, so the victim ran at 34px/s instead of 76 with no
-    // meter and no way to clear it — and the moment the ball came back,
-    // `humanControl` saw `!cmd.a` against a live charge and fired a shot
-    // nobody asked for. (`attemptShove` already cleared it; the asymmetry was
-    // the tell.)
+    // `gather` froze at whatever it had reached when the ball was taken.
+    // `speedOf` halves you while it is live, so the victim ran at 34px/s
+    // instead of 76 with nothing on screen saying why, and the moment the ball
+    // came back the stale wind-up released a shot nobody asked for.
+    // (`attemptShove` already cleared it; the asymmetry was the tell.)
     //
     // `cool` is set to 1.1s on *any* defensive press, before the game knows
     // whether the steal landed. Land one and you caught the ball with both
     // buttons dead for 66 frames and nothing on screen saying why.
-    w.players[id].charge = -1;
+    w.players[id].gather = -1;
     w.players[id].cool = Math.min(w.players[id].cool, SHOT_COOL);
     w.ball.mode = 'held';
     w.ball.pickCool = 0.25;
@@ -1077,7 +1105,7 @@ const inbound = (w: World, receivingTeam: 0 | 1) => {
 
     for (const p of w.players) {
         p.vx = 0; p.vz = 0; p.y = 0; p.vy = 0;
-        p.charge = -1; p.cool = 0; p.dunkT = 0;
+        p.gather = -1; p.cool = 0; p.dunkT = 0;
         p.stumbleT = 0; p.alleyCall = 0; p.passChargeT = -1; p.cutT = 0;
         p.facing = p.team === receivingTeam ? (inw as 1 | -1) : (-inw as 1 | -1);
     }
@@ -1111,10 +1139,6 @@ const contestFactor = (w: World, p: Player) => {
     return airborne ? base * 0.8 : base;
 };
 
-/** Release quality from the charge meter: 1 in the sweet spot, 0 at the edges. */
-export const releaseQuality = (charge: number) =>
-    clamp(1 - Math.abs(charge - SHOT_SWEET) / SHOT_WINDOW, 0, 1);
-
 /**
  * A three is barely a decision on its own: `baseFromDist` is a single line
  * all the way out, so a deep shot is just "a longer two" with worse odds —
@@ -1135,23 +1159,65 @@ const threeModifier = (w: World, p: Player, d: number) => {
     return 1;
 };
 
-const shotChance = (w: World, p: Player, q: number, skill: number) => {
+const shotChance = (w: World, p: Player, skill: number) => {
     const h = HOOPS[attackHoop(p.team)];
     const d = hoopDist(p, h);
-    // Release quality is the biggest lever the player actually controls.
-    const rel = 0.5 + 0.75 * q;
     const fire = p.onFire ? 1.42 : 1;
+    // What used to be the release meter is now the shooter's hands. `touchMult`
+    // applies everywhere; `deepMult` is the marquee three-point axis and only
+    // stacks beyond the arc, so a shooter is better everywhere and much better
+    // from deep, which is the difference the roster is meant to be about.
+    const touch = p.mods.touchMult * (d > THREE_DIST ? p.mods.deepMult : 1);
     return clamp(
-        baseFromDist(d) * contestFactor(w, p) * threeModifier(w, p, d) * rel * fire * skill,
+        baseFromDist(d) * contestFactor(w, p) * threeModifier(w, p, d) * touch * fire * skill,
         0.03, p.onFire ? 0.97 : 0.93,
     );
 };
 
-const launchShot = (w: World, p: Player, q: number, skill: number, heave = false) => {
+/**
+ * Commit to a jumper: plant, leave your feet, let it go at the top.
+ *
+ * Both sides call this — that is half its reason for existing. The CPU used to
+ * call `launchShot` straight out of `aiThink`, so a CPU jump shot had no
+ * wind-up, no pose, and nothing a defender could read; you could only swat it
+ * after it was already in the air.
+ */
+const startShot = (w: World, p: Player, skill: number) => {
+    const h = HOOPS[attackHoop(p.team)];
+    p.gather = 0;
+    p.shotSkill = skill;
+    p.facing = h.x > p.x ? 1 : -1;
+    // You plant to shoot, dead stop, and you land where you went up. This is
+    // not what stops the shooter drifting across the arc mid-shot — the main
+    // loop skipping his steering is, because `applyMove` is what integrates
+    // position and it no longer runs — it is what he does on the way back
+    // down. Without it a pull-up ends with the shooter rocketing off in
+    // whatever direction he was driving, which reads as a man being fired out
+    // of his own jump shot.
+    p.vx = 0; p.vz = 0;
+    if (p.y === 0) p.vy = jumpOf(p) * SHOT_JUMP;
+    // Committed the moment you press, not when the ball leaves: this is what
+    // stops a second press during the wind-up starting another shot, on either
+    // side. `launchShot` sets it again at release, which is harmless.
+    p.cool = SHOT_COOL;
+};
+
+/** Advance a wind-up and let it go at the apex. Called once per player per
+ *  frame from the main loop, after the vertical has been integrated. */
+const stepGather = (w: World, p: Player, dt: number) => {
+    if (p.gather < 0) return;
+    p.gather += dt;
+    if (p.vy <= 0 || p.gather > SHOT_GATHER_MAX) launchShot(w, p, p.shotSkill);
+};
+
+const launchShot = (w: World, p: Player, skill: number, heave = false) => {
     const b = w.ball;
     const h = HOOPS[attackHoop(p.team)];
     const d = hoopDist(p, h);
-    const chance = heave ? 0.08 : shotChance(w, p, q, skill);
+    // TEMP INSTRUMENTATION
+    const G = globalThis as unknown as { __shotLog?: Array<[number, boolean, boolean]> };
+    (G.__shotLog ??= []).push([d, p.human, heave]);
+    const chance = heave ? 0.08 : shotChance(w, p, skill);
     const made = rng(w) < chance;
     // A brick is decided off the exact same number the miss just rolled
     // against: a heave is always one (it is a prayer by definition), and
@@ -1160,7 +1226,7 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
     const brick = !made && (heave || chance < BRICK_CHANCE);
 
     w.stats.shots++;
-    p.charge = -1;
+    p.gather = -1;
     p.cool = SHOT_COOL;
     p.facing = h.x > p.x ? 1 : -1;
 
@@ -1307,7 +1373,7 @@ const startDunk = (w: World, p: Player, opts: { kind?: 'normal' | 'turbo' | 'all
     p.dunkHoop = hi;
     p.dunkSlammed = false;
     p.dunkKind = opts.kind ?? 'normal';
-    p.charge = -1;
+    p.gather = -1;
     p.alleyCall = 0;
     p.facing = HOOPS[hi].x > p.x ? 1 : -1;
     w.stats.shots++;
@@ -1332,7 +1398,7 @@ const attemptShove = (w: World, defender: Player, handler: Player) => {
     }
     w.stats.shovesLanded++;
     handler.stumbleT = STUMBLE_TIME;
-    handler.charge = -1;
+    handler.gather = -1;
     handler.passChargeT = -1;
     const dir = handler.x >= defender.x ? 1 : -1;
     handler.vx = dir * 130;
@@ -1544,7 +1610,7 @@ const speedOf = (p: Player, turbo: boolean) => {
     let s = BASE_SPEED * p.mods.speedMult;
     if (p.onFire) s *= FIRE_MULT;
     if (turbo) s *= TURBO_MULT;
-    if (p.charge >= 0) s *= 0.45;    // gathering for a shot slows you down
+    if (p.gather >= 0) s *= 0.45;    // gathering for a shot slows you down
     return s;
 };
 
@@ -1679,7 +1745,7 @@ export const collide = (w: World, a: Player, c: Player) => {
         : null;
     if (!loser) return;
     loser.stumbleT = STUMBLE_TIME * 0.6;      // shorter than a deliberate shove
-    loser.charge = -1;
+    loser.gather = -1;
     w.shake = Math.max(w.shake, 4);
     w.hitstop = Math.max(w.hitstop, 0.05);
     sfx('shove');
@@ -1801,28 +1867,39 @@ const aiThink = (w: World, p: Player, dt: number) => {
                 startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
             } else if (p.aiTimer <= 0) {
                 p.aiTimer = 0.18;
-                const q = 0.55 + rng(w) * 0.4;     // CPU release is decent, not perfect
-                const chance = shotChance(w, p, q, skill);
+                const chance = shotChance(w, p, skill);
                 const mateOpen = openness(w, mate);
-                const mateChance = shotChance(w, mate, q, skill) * 0.9;
+                const mateChance = shotChance(w, mate, skill) * 0.9;
                 // A defender glued to your hip caps `chance` around 0.45, so a
                 // 0.52 threshold made the CPU refuse to ever shoot and the game
                 // died on the shot clock. Take the contested look, and get
                 // greedier as the clock runs down.
-                const willing = w.shotClock < 6 ? 0.28 : 0.38;
+                // The jitter is deliberate and it used to be an accident. While
+                // the release meter existed, the CPU rolled a random release
+                // quality *before* testing this threshold, so a look sitting a
+                // hair under it got taken about half the time anyway. Take the
+                // meter away and the threshold becomes a hard wall: a position
+                // that grades 0.37 is never shot from, ever, by anyone. That
+                // alone cut three-point attempts from 1.07 a game to 0.43 —
+                // deep shots live closest to the line, so they died first. The
+                // willingness carries its own variance now, which is where it
+                // belonged.
+                const willing = (w.shotClock < 6 ? 0.28 : 0.38) * (0.85 + rng(w) * 0.3);
                 const pressured = open < 16;
                 // A man who just caught it has to look at the rim first. Without
                 // this floor the two of them relayed the ball back and forth and
                 // neither ever shot.
                 const canPass = p.touchT > 0.8;
                 if (w.shotClock < 2.4) {
-                    launchShot(w, p, q, skill, w.shotClock < 1);
+                    // Under a second is a prayer, and a prayer does not gather.
+                    if (w.shotClock < 1) launchShot(w, p, skill, true);
+                    else startShot(w, p, skill);
                 } else if (canPass && pressured && mateOpen > open + 14 && rng(w) < 0.25) {
                     launchPass(w, p, mate);
                 } else if (canPass && p.touchT > 3.4 && mateChance > chance && rng(w) < 0.22) {
                     launchPass(w, p, mate);
                 } else if (chance > willing && rng(w) < 0.5) {
-                    launchShot(w, p, q, skill);
+                    startShot(w, p, skill);
                 }
             }
         }
@@ -1886,7 +1963,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
             const dd = dist2d(p.x, p.z, handler.x, handler.z);
             // Contest: if he is gathering, jump. If he is just dribbling,
             // gamble on a poke at a cadence so it never feels like a wall.
-            if (handler.charge >= 0 && dd < BLOCK_R && p.y === 0 && rng(w) < 0.018 * gamble) {
+            if (handler.gather >= 0 && dd < BLOCK_R && p.y === 0 && rng(w) < 0.018 * gamble) {
                 p.vy = jumpOf(p);
             } else if (
                 dd < SHOVE_R && p.turbo > 0.35 && p.cool <= 0 && p.aiTimer <= 0
@@ -2082,19 +2159,7 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
             // in and you need to be underneath the rim, sprint in on TURBO and
             // the same button slams it from well outside that.
             if (d < dunkRangeFor(p)) startDunk(w, p, { kind: isPoweringIn(p) ? 'turbo' : 'normal' });
-            // A banked press whose button is already back up is a stale tap.
-            // The dunk above does not care — it is atomic — but opening the
-            // meter here would release it on this same frame, for a shot of
-            // zero quality nobody asked for. So the meter wants the button
-            // still down; a tap that outlived its own cooldown is dropped.
-            else if (cmd.a) p.charge = 0;          // start the release meter
-        }
-        if (p.charge >= 0) {
-            p.charge += dt / SHOT_CHARGE_TIME;
-            // Held too long: it leaves your hand anyway and it is ugly.
-            if (p.charge > SHOT_COOK || !cmd.a) {
-                launchShot(w, p, releaseQuality(Math.min(p.charge, SHOT_COOK)), 1);
-            }
+            else startShot(w, p, 1);
         }
         // PASS always passes — no openness gate. A lazy one across the whole
         // court is exactly the pass that gets read and picked off; a sharp
@@ -2103,9 +2168,12 @@ const humanControl = (w: World, p: Player, cmd: Cmd, dt: number) => {
         // Tap it and it is gone the instant you let go: a bullet. Hold it
         // and — once PASS_HOLD_TIME has passed — it becomes a lob instead,
         // released on the eventual let-go (or on PASS_MAX_HOLD, so a stuck
-        // button cannot hold the ball forever). Mirrors the shot-charge meter
-        // just above it: `cmd.b` read as a level, not the edge, is what lets
-        // this tell a tap from a hold at all.
+        // button cannot hold the ball forever). `cmd.b` read as a level, not
+        // the edge, is what lets this tell a tap from a hold at all — and it
+        // is now the only button in the game that is read that way. SHOOT used
+        // to work the same, against the release meter; that meter is gone and
+        // SHOOT is a plain press, so this is the sole survivor rather than one
+        // of a pair.
         if (pressB && p.cool <= 0 && p.passChargeT < 0) { tookB(); p.passChargeT = 0; }
         if (p.passChargeT >= 0) {
             p.passChargeT += dt;
@@ -2219,10 +2287,10 @@ const stepBall = (w: World, dt: number) => {
         const p = w.players[w.possession];
         // Ball rides at hip height on the lead side, and above the head while
         // gathering, so you can see a shot coming.
-        const up = p.charge >= 0 ? 30 : 16;
+        const up = p.gather >= 0 ? 30 : 16;
         b.x = p.x + p.facing * 6;
         b.z = p.z;
-        b.y = p.y + up + Math.sin(p.stride * Math.PI * 2) * (p.charge >= 0 ? 0 : 2);
+        b.y = p.y + up + Math.sin(p.stride * Math.PI * 2) * (p.gather >= 0 ? 0 : 2);
         return;
     }
 
@@ -2755,7 +2823,7 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             // goes up, it almost never falls, and the game keeps moving.
             const p = w.players[w.possession];
             say(w, 'Somebody yells "SHOT CLOCK" and he throws it at the rim.');
-            launchShot(w, p, 0.1, 1, true);
+            launchShot(w, p, 1, true);
         }
     }
 
@@ -2770,7 +2838,7 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
     for (const p of w.players) {
         p.cool = Math.max(0, p.cool - dt);
         p.swapCool = Math.max(0, p.swapCool - dt);
-        if (p.charge >= 0 && w.possession !== p.id) p.charge = -1;
+        if (p.gather >= 0 && w.possession !== p.id) p.gather = -1;
         p.alleyCall = Math.max(0, p.alleyCall - dt);
         p.cutT = Math.max(0, p.cutT - dt);
         p.touchT = w.possession === p.id ? p.touchT + dt : 0;
@@ -2800,7 +2868,11 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             continue;
         }
 
-        if (p.human) humanControl(w, p, cmd, simDt);
+        // A committed jumper owns the body, the same way a dunk does: you are
+        // off the floor with the ball over your head, and there is no steering
+        // out of it. `stepGather` below is what ends it.
+        if (p.gather >= 0) { /* committed */ }
+        else if (p.human) humanControl(w, p, cmd, simDt);
         else aiThink(w, p, simDt);
 
         // A burst worth spending TURBO on should be readable on screen, not
@@ -2822,6 +2894,9 @@ export const stepWorld = (w: World, dt: number, cmd: Cmd) => {
             p.y += p.vy * simDt;
             if (p.y <= 0) { p.y = 0; p.vy = 0; }
         }
+        // After the vertical, so "the apex" means the frame the rise actually
+        // stops rather than the frame before it.
+        stepGather(w, p, simDt);
         clampToCourt(p);
     }
 
@@ -3056,15 +3131,16 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
     const x = screenX(p.x, p.z);
     const feet = floorY(p.z) - p.y * sc(p.z);
     const h = 32 * sc(p.z);
-    const isShooting = p.charge >= 0 || p.dunkT > 0;
-    const armUp = p.dunkT > 0 ? 1.35 : p.charge >= 0 ? clamp(p.charge, 0, 1) : p.y > 6 ? 1 : 0;
+    // The wind-up IS the tell now, so the pose has to carry it on its own: the
+    // arm comes up over the length of the gather instead of tracking a meter.
+    const armUp = p.dunkT > 0 ? 1.35 : p.gather >= 0 ? clamp(p.gather / 0.22, 0, 1) : p.y > 6 ? 1 : 0;
     const down = p.stumbleT > 0;
 
     // Dunk range, made visible: a ring under the ball handler's feet that
     // shows exactly how close they need to be right now — which grows as they
     // pick up speed. Watching your own outline stretch is how the range is
     // meant to be learned, not a number in a manual.
-    if (w.possession === p.id && p.charge < 0 && p.dunkT === 0 && !down) {
+    if (w.possession === p.id && p.gather < 0 && p.dunkT === 0 && !down) {
         const hoop = HOOPS[attackHoop(p.team)];
         const inRange = hoopDist(p, hoop) < dunkRangeFor(p);
         const rr = (6 + dunkRangeFor(p) * 0.14) * sc(p.z);
@@ -3112,7 +3188,7 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
         swap: p.kit.swap,
         kit: p.kit,
         armUp,
-        crouch: down || (p.charge > 0.15 && p.charge < 0.6),
+        crouch: down || (p.gather >= 0 && p.gather < 0.06),
         hurt: down && p.stumbleT > STUMBLE_TIME * 0.6,
         // The heat haze / jump shadow above already handles the ground contact.
         shadow: p.y <= 2,
@@ -3142,16 +3218,6 @@ const drawPlayer = (ctx: CanvasRenderingContext2D, w: World, p: Player) => {
         ctx.fillStyle = p.onFire ? PAL.warn : PAL.accent;
         glyph(ctx, '▼', x, feet - h - 7 + bob, 9);
     }
-    if (isShooting && p.charge >= 0) {
-        // Release meter above the shooter: green band is the sweet spot.
-        const mx = x - 12;
-        const my = feet - h - 18;
-        bar(ctx, mx, my, 24, 3, Math.min(1, p.charge / SHOT_COOK), p.onFire ? PAL.warn : PAL.accent, PAL.panel);
-        const zs = ((SHOT_SWEET - SHOT_WINDOW * 0.45) / SHOT_COOK) * 24;
-        const ze = ((SHOT_SWEET + SHOT_WINDOW * 0.45) / SHOT_COOK) * 24;
-        rect(ctx, mx + zs, my - 2, ze - zs, 1.5, PAL.ok);
-    }
-
     // Pass wind-up tell: the whole reason a lob is a fair trade for a bullet
     // is that it is telegraphed — this pip is that tell. It fills at the same
     // rate PASS is being held and flips colour the instant it crosses
@@ -3598,7 +3664,7 @@ const HoopsGame: React.FC<{
                 )
             }
             help={
-                '◀ ▶ run the court, ▲ ▼ slide in and out. With the ball: SHOOT charges a jumper (release in the green — behind the arc, a "3" over your head, and it only pays off if you\'re actually open) or dunks if you\'re in range — hold TURBO while you drive and that range stretches way out. Tap PASS for a fast, flat bullet; hold it a beat for a lob that clears anyone standing in the way — and it\'s the only throw that finishes an alley-oop. Without the ball on offence: SHOOT cuts to the rim and calls for a lob — catch it in the air near the hoop for an alley-oop — PASS swaps which guy you\'re running. On defence: SHOOT jumps to block, goaltend a shot on its way down, or crash the boards for a rebound — grab an offensive one in the air near the rim and it tips straight back in — PASS pokes for a steal, and TURBO+PASS up close is the shove — no fouls, ball comes loose. Three straight buckets and you\'re ON FIRE until they score, and a fire dunk cracks the backboard.'
+                '◀ ▶ run the court, ▲ ▼ slide in and out. With the ball: SHOOT pulls up for a jumper — he plants, goes up, and lets it go at the top, so getting a hand in his face on the way up is how you stop one (behind the arc, a "3" over your head, and it only pays off if you\'re actually open) — or dunks if you\'re in range — hold TURBO while you drive and that range stretches way out. Tap PASS for a fast, flat bullet; hold it a beat for a lob that clears anyone standing in the way — and it\'s the only throw that finishes an alley-oop. Without the ball on offence: SHOOT cuts to the rim and calls for a lob — catch it in the air near the hoop for an alley-oop — PASS swaps which guy you\'re running. On defence: SHOOT jumps to block, goaltend a shot on its way down, or crash the boards for a rebound — grab an offensive one in the air near the rim and it tips straight back in — PASS pokes for a steal, and TURBO+PASS up close is the shove — no fouls, ball comes loose. Three straight buckets and you\'re ON FIRE until they score, and a fire dunk cracks the backboard.'
             }
         />
     );
