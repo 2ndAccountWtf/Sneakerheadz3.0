@@ -475,77 +475,125 @@ need every frame instead of assuming it.
 
 ---
 
-## 6.5 — P0, new: you cannot beat your man, and never could
+## 6.5 — the dribble game — DONE
 
 Reported as "it is still impossible to dribble and move around the computer
-defender". Measured, and true.
+defender". It was true, and it had never worked.
 
-**Scripted 1-on-1**, human with the ball, full turbo, driving 200px at the rim
-with one defender on him and everybody else parked:
+**What it was.** A scripted full-turbo 200px drive, one man on the handler:
 
 ```
-                frames   avg gap   peak gap   % of drive clear of a contest
-straight          240     11.0px    13.5px      0%
-diagonal          240     11.1px    14.3px      0%
-weave (lane cuts) 130     11.4px    13.5px      0%
+                frames   peak gap   avg gap   open   goalside
+straight          240      13.5px    11.0px    0%       0%     (never reached the rim)
+weave, per rhythm 8f..48f  13.5px    11.0-11.8 0%      69-84%
 ```
 
-Peak separation 14.3px, which is *inside* `STEAL_R`. The straight and diagonal
-drives did not reach the rim inside four seconds. **In real games, while the
-human holds the ball:** clear of a contest 16% of frames, inside a defender's
-reach **76%**.
+Peak separation **13.5px at every cut rhythm from 8 frames to 48** — a flat
+line. Nothing the player did with the stick changed anything, because `aiThink`
+re-read the handler's exact position every frame at the same top speed with
+perfect information. That is a mirror, not a defender: there is nothing for a
+change of direction to punish because he is never wrong. In real games the
+player was inside a defender's reach on 76% of the frames he held the ball.
 
-**Why.** `aiThink` re-targets `handler.x ± 8, handler.z` every single frame, at
-the same top speed, with the same turbo multiplier, with perfect information.
-The defender does not outrun you, he *mirrors* you — and there is nothing for a
-change of direction to punish, because he is never wrong. The player has no
-crossover, no juke, no spin and no first-step burst; his only tool is speed,
-against a man who has exactly as much.
+**The escape test was arithmetic.** `there is always a way out of a defender —
+sprinting is it` ended on
+`BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED`: a sprinter beating a
+*walking* defender. Ours never walks. Replaced, first, with the measurement
+above, so the change had a guard before it landed.
 
-**A test claimed otherwise and was arithmetic.** `there is always a way out of a
-defender — sprinting is it` asserts
-`BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED` — a sprinter beats a
-*walking* defender. Ours never walks. Green the whole time while the thing it
-names was impossible. It needs replacing with a measurement of actual
-separation, not a relation between constants.
+### The mechanism
 
-**How the original does it** — read from `DRONE.ASM`, design rules only, written
-up in full in `docs/NBA-JAM-MECHANICS.md`. Their defender is an interceptor with
-a reaction time, not a tracker:
+Read `DRONE.ASM` for the design rules only — written up in
+`docs/NBA-JAM-MECHANICS.md`. **No code, no data and no art from that repository
+is used here, and none may be.** What shipped is ours, and it is three things:
 
-1. **A re-decision interval.** The target is recomputed every N ticks, not every
-   frame; between seeks the defender walks to a stale one. ~1.3s of lag when
-   winning, 0.8s level, 0.25s when losing — the reaction time *is* the
-   difficulty knob and the catch-up AI both.
-2. **A standoff anchored to its own basket**, ~3/4 of the way out along the line
-   to the rim it defends. It plays the lane, not the shirt.
-3. **Velocity lead** — the seek point is the handler's position plus his
-   velocity 16 ticks forward. It commits to an interception.
-4. **Turbo only to recover goalside position**, not to stay attached.
-5. **Ball pressure as a timed state**, entered on a score-indexed roll that is
-   0% while comfortably ahead. In-your-face defence is an event.
+1. **A reaction time (`MARK_REACT`, 0.30s at a level score).** The on-ball
+   defender commits to one spot and drives to it; while the timer runs he is
+   driving to a spot that may already be wrong.
+2. **A velocity lead (`MARK_LEAD`, 0.34s).** The spot is not where you are, it
+   is where he thinks you are *going*. That is what makes him capable of being
+   wrong in the first place.
+3. **A backpedal penalty (`BACKPEDAL`, 0.84).** The piece without which neither
+   of the others mattered, and it took a measurement to see: the lane block
+   costs the man with the ball 7% of his speed, and costs the man guarding him
+   nothing, so **the defender's top speed was 8% higher than his man's,
+   permanently.** No reaction lag survives that — he simply reels you back in,
+   and the measured average gap sat at 15px whatever the handler did. A defender
+   staying goalside is retreating while squared up, so he pays for it. It is a
+   rule about bodies, not a handicap on the CPU; it never bites the human
+   because a human's facing follows his own movement.
 
-Plus a 10-unit dead zone on the seek (the same family as §6's lane dwell), and
-the drone drives itself through the same joystick bits a cabinet would — no
-privileged movement path.
+Two smaller pieces: his turbo is now for **recovering goalside position or
+getting back in transition**, not for staying attached (the old "sprint whenever
+the gap exceeds 20px" erased every cut the instant it happened), and the on-ball
+defender now **squares up to his man** rather than facing his own direction of
+travel, which is both why the backpedal applies and how it reads on screen.
 
-**Proposed order.** (1) and (3) together are the fix; the rest is shaping.
+### Measured
 
-1. **Reaction interval + velocity lead on the on-ball defender.** One timer, one
-   extrapolated target. This is the whole dribble game and it is maybe thirty
-   lines.
-2. **Replace the toothless escape test** with the scripted-drive measurement
-   above, asserting real separation. Do this first so (1) has a guard.
-3. **Standoff instead of shirt-marking**, so beating him means beating the lane.
-4. **Turbo as recovery only**, so his sprint is answerable.
-5. **A first-step burst** on a fresh turbo press, if (1)–(4) still leave the
-   drive feeling flat.
+```
+                    frames   peak gap   avg gap   open   goalside
+mashing      (8f)     180      20.6px    11.6px    0%       6%
+committed   (48f)     111      31.2px    20.7px   18%      84%
+straight              186      13.6px    11.0px    0%       0%
+```
 
-**Risk: high, and known.** The last time positional defence was loosened, a bot
-that simply drove won 92% of its games and passing became pointless — that is
-what `laneBlockFactor` and the `DUNK_RANGE_BASE` reduction exist to hold back.
-So this lands with the §0 balance table re-measured at every step, and dunk
-range is the knob that pays for it.
+**Rhythm matters now**, which is the whole point and the thing that fails
+hardest against a mirror. Committing to a direction long enough for him to buy
+it and then leaving is worth 20.7px of daylight and 84% of the drive spent
+goalside; rattling the stick is worth 11.6px and 6%, and takes 62% longer to
+reach the rim. A straight line still gets you nowhere — he holds that line 100%
+of the time, as he should.
+
+In real games the player is now clear of a contest on **20% of ball-holding
+frames (was 16%)** and inside a reach on **68% (was 76%)**.
+
+### What it cost, and what paid for it
+
+Loosening the defence moved the balance hard, exactly as this section warned:
+
+```
+                  before   after the defender   + dunk range 18+20, slope 0.05
+quiet  (pass 1/s)   54%           70%                        58%
+busy   (pass 2/s)   38%           52%                        58%
+clumsy (35% idle)   30%           52%                        44%
+```
+
+Two knobs paid for it, both of which the code was already waiting on:
+
+- **Dunk range 24+26 → 18+20.** The comment on `DUNK_RANGE_BASE` has said since
+  the overhaul that it "wants to go lower still — at 16+18 dunks drop to 52% of
+  scoring, which is about right — but the harness bot's entire game is
+  drive-and-finish, so it falls to a 15% win rate". That was true *because the
+  bot could not beat its man*. It can now, so the reduction is finally
+  affordable. Dunks 7.8 → 6.7 a game.
+- **The catch-up slope (`MARK_REACT_SLOPE`, 0.05/point).** The reaction time
+  scales with the scoreboard, so it is the difficulty knob and the rubber band
+  in one object: a defender who is ahead is slower, one who is behind is
+  sharper. That is a fairer band than inflating his shooting, because it is
+  something you can watch happening and play against.
+
+**Quiet and busy now sit on the same number**, which is the property this file
+has cared about all along: passing and driving are equally viable. The honest
+note is that the game is **easier than it was** — 58% against 54%, and a clumsy
+bot 44% against 30% — and the opponent roster, not this, is the difficulty axis
+(Yasser at 0.30 skill scores 5 a game; Grandma at 0.80 scores 15). If it needs
+tightening after a human has actually played it, `MARK_REACT` and the slope are
+the two dials, and neither of them re-glues the defender.
+
+### Teeth
+
+Four new checks (hoops 50 → 53). Four mutations, all caught: making him a mirror
+again fails 2, removing the reaction time fails 2, removing the velocity lead
+fails 1, removing the backpedal fails 1. Each of the three mechanisms is
+individually load-bearing.
+
+**And a third fragile fixture.** `park()` — shared by every movement check in
+the file — assumed frame 240 of a fixed seed was live play. Giving the defender
+a reaction time moved the whole simulation, that frame became a basket
+celebration, fifteen "frames" of held input became far fewer real ones, the
+acceleration ramp never finished, and a check about *diagonals* failed. The pin
+is in the shared helper now, which is where it should have gone the first time.
 
 ---
 
@@ -579,7 +627,7 @@ Listed so they are decisions rather than omissions.
 4. §4   input buffering       ← DONE
 5. §4.5 release meter out     ← DONE
 6. §6   small and true        ← DONE
-7. §6.5 the dribble game      ← P0, not started: the defender is a mirror
+7. §6.5 the dribble game      ← DONE
 8. §5   animation             ← as the art lands, tier by tier
 ```
 

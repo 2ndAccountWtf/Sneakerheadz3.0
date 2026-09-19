@@ -133,15 +133,23 @@ export const JUMP_V = 168;      // apex ~33px: enough to contest, not to fly
  * 63% of scoring and combined shooting to 56%, which is inside the range real
  * arcade hoops lives in.
  *
- * It wants to go lower still. At 16 + 18 dunks drop to 52% of scoring, which
- * is about right — but the harness bot's entire game is drive-and-finish, so
- * it falls to a 15% win rate and the balance checks fail. Getting there needs
- * the jump shot to be worth taking first, not just the dunk to be worth less.
+ * And then it went lower, because the reason it could not was removed.
+ *
+ * This used to end "it wants to go lower still — at 16 + 18 dunks drop to 52%
+ * of scoring, which is about right, but the harness bot's entire game is
+ * drive-and-finish, so it falls to a 15% win rate and the balance checks fail."
+ * That was true *because the bot could not beat its man*: the on-ball defender
+ * re-read the handler's position every frame at a higher top speed, so a drive
+ * that did not end in a dunk ended in nothing, and taking the dunk away left
+ * the offence with no play at all. `MARK_REACT` and `BACKPEDAL` fixed that, so
+ * at 18 + 20 dunks come down to 6.7 a game from 7.8 and the two strategies the
+ * balance table watches — one pass a second and two — land on the same win
+ * rate. This is the knob that paid for a beatable defender.
  */
-const DUNK_RANGE_BASE = 24;
-const DUNK_RANGE_BONUS = 26;
+const DUNK_RANGE_BASE = 18;
+const DUNK_RANGE_BONUS = 20;
 const DUNK_RANGE_FIRE_BONUS = 14;
-const CONTEST_R = 28;           // a defender this close starts hurting the shot
+export const CONTEST_R = 28;           // a defender this close starts hurting the shot
 const BLOCK_R = 16;             // airborne defender inside this can swat it
 export const STEAL_R = 14;
 export const SHOVE_R = 16;      // TURBO+PASS on defence inside this range knocks him down
@@ -269,6 +277,46 @@ const SHOT_GATHER_MIN = 6 / 60;
  * actually be felt.
  */
 const MATE_SKILL = 0.84;
+/**
+ * The on-ball defender's reaction time, and the three numbers that shape it.
+ *
+ * He used to re-read the handler's exact position every single frame, at the
+ * same top speed, with perfect information. That is not a defender, it is a
+ * mirror: there is nothing for a change of direction to punish because he is
+ * never wrong about where you are going. Measured, a full-turbo 200px drive
+ * never opened more than 14.3px of separation — inside `STEAL_R` — and the
+ * player was inside a defender's reach on 76% of the frames he held the ball.
+ * There is no crossover, no juke and no spin in this game, so if speed alone
+ * cannot beat him then nothing can.
+ *
+ * So he commits. Every `MARK_REACT` seconds he decides on one spot and drives
+ * to it; in between, he is driving to a spot that may already be wrong. The
+ * spot is not where you are, it is where he thinks you are **going**: your
+ * position plus your velocity extrapolated `MARK_LEAD` seconds forward, offset
+ * `MARK_STANDOFF` px to the goalside. Beating him is being right about what he
+ * bought.
+ *
+ * The reaction time scales with the score, which makes it the difficulty knob
+ * and the catch-up AI in one object: a defender who is ahead is slower to
+ * react, one who is behind is sharper. That is a fairer rubber band than
+ * inflating his shooting, because it is something you can see happening and
+ * play against.
+ */
+const MARK_REACT = 0.30;        // seconds per decision at a level score
+const MARK_REACT_SLOPE = 0.05;  // added per point of lead, subtracted per point behind
+const MARK_REACT_MIN = 0.12;
+const MARK_REACT_MAX = 0.55;
+/** How far ahead of the handler he aims. Zero would make him a mirror again. */
+const MARK_LEAD = 0.34;
+/** Goalside offset from the spot he committed to. */
+const MARK_STANDOFF = 8;
+/** How far past him, toward the rim he defends, the handler has to get before
+ *  chasing on turbo is worth it. */
+const MARK_CHASE_MARGIN = 8;
+/** ...and how far from his mark before this is transition rather than a duel,
+ *  where sprinting back is simply getting on defence. */
+const MARK_TRANSITION = 70;
+
 /**
  * How long the CPU ball-handler commits to a depth lane before looking again.
  *
@@ -505,6 +553,9 @@ export interface Player {
     /** CPU only: the depth lane currently being driven to, and how long is left
      *  on the commitment to it. See `LANE_DWELL`. */
     lane: number; laneT: number;
+    /** CPU only: the spot the on-ball defender has committed to guarding, and
+     *  what is left of the reaction time that bought it. See `MARK_REACT`. */
+    markX: number; markZ: number; markT: number;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -978,7 +1029,8 @@ const mkPlayer = (
     x, z, vx: 0, vz: 0,
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
-    turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0,
+    markX: 0, markZ: 0.5, markT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -1835,6 +1887,38 @@ const LANE_BLOCK_R = 22;
  *  behaviour — complete immunity to a defender standing in front of you. */
 const TURBO_ESCAPE = 0.72;
 
+/**
+ * Nobody runs backwards as fast as they run forwards.
+ *
+ * This is the piece without which none of the reaction-time work matters, and
+ * it took a measurement to see. The lane block costs the man with the ball 7%
+ * of his speed while a sprint is on; it costs the man guarding him nothing. So
+ * the defender's top speed was **8% higher than the top speed of the player he
+ * was chasing**, permanently. No amount of reaction lag survives that: he
+ * simply reels you back in, and the measured average gap sat at 15px whatever
+ * the handler did.
+ *
+ * A defender staying goalside of his man is retreating while squared up to
+ * him — running backwards. So he pays for it. It is a rule about bodies rather
+ * than a handicap on the CPU: it applies to the direction of travel against the
+ * direction you are facing, and the reason it never bites the human is that a
+ * human's facing follows his own movement (see `applyMove`), so he is never
+ * backpedalling. The man marking you is the one who has to stay square.
+ */
+const BACKPEDAL = 0.84;
+
+/**
+ * How long this defender lives with a decision, by the scoreboard.
+ *
+ * Ahead: slower, more beatable. Behind: sharper. Clamped at both ends so a
+ * blowout in either direction cannot produce a defender who is either a statue
+ * or a mirror again.
+ */
+const reactionTime = (w: World, p: Player): number => {
+    const lead = w.score[p.team] - w.score[1 - p.team];
+    return clamp(MARK_REACT + lead * MARK_REACT_SLOPE, MARK_REACT_MIN, MARK_REACT_MAX);
+};
+
 export const laneBlockFactor = (w: World, p: Player, turbo: boolean): number => {
     if (w.possession !== p.id) return 1;
     // Sprinting powers through *most* of it. The button has to be a real
@@ -1882,9 +1966,15 @@ const aiThink = (w: World, p: Player, dt: number) => {
     let tx = p.x;
     let tz = p.z;
     let turbo = false;
+    /** Extra speed factor, for the backpedal. 1 unless something says otherwise. */
+    let stride = 1;
+    /** Somebody this body should be squared up to, rather than facing its own
+     *  direction of travel. Only the on-ball defender sets it. */
+    let faceAt: number | null = null;
 
     p.aiTimer = Math.max(0, p.aiTimer - dt);
     p.laneT = Math.max(0, p.laneT - dt);
+    p.markT = Math.max(0, p.markT - dt);
 
     if (w.possession === p.id) {
         /* --- with the ball --------------------------------------------- */
@@ -2007,13 +2097,46 @@ const aiThink = (w: World, p: Player, dt: number) => {
 
         if (iAmCloser) {
             // On the ball: sit between the handler and the rim he wants.
-            // 8px, not 11: the mover stops within ~3px of its target, so a
-            // standoff at 11 sat exactly on STEAL_R and nobody ever reached in.
-            tx = handler.x + (ownHoop.x > handler.x ? 8 : -8);
-            tz = handler.z;
-            // Only sprint to recover. A defender who is always on turbo can
-            // never be beaten, which makes the player's turbo meaningless.
-            turbo = p.turbo > 0.2 && dist2d(p.x, p.z, tx, tz) > 20;
+            // On the ball, he commits to a spot rather than tracking a man.
+            // See `MARK_REACT`: this is the difference between a defender and a
+            // mirror, and it is the only thing in the game that makes a change
+            // of direction worth anything.
+            //
+            // The standoff is 8px, not 11: the mover stops within ~3px of its
+            // target, so a standoff at 11 sat exactly on STEAL_R and nobody
+            // ever reached in.
+            if (p.markT <= 0) {
+                p.markT = reactionTime(w, p);
+                // Where he thinks you are going, not where you are.
+                const aimX = handler.x + handler.vx * MARK_LEAD;
+                const aimZ = handler.z + handler.vz * MARK_LEAD;
+                p.markX = aimX + (ownHoop.x > aimX ? MARK_STANDOFF : -MARK_STANDOFF);
+                p.markZ = aimZ;
+            }
+            tx = p.markX;
+            tz = p.markZ;
+            // Sprint to recover goalside position, and to get back in transition
+            // — not merely to stay attached.
+            //
+            // The old rule was "sprint whenever you are more than 20px from
+            // where you want to be", which erased every cut the instant it
+            // happened: the escape lasted exactly one reaction time and then his
+            // 1.52x took it straight back. Measured, a beaten defender with that
+            // rule kept the average gap at 15px no matter what the handler did.
+            //
+            // Beaten goalside is the only thing worth burning the bar for. Cut
+            // sideways and he has to live with it; get between him and the rim
+            // he is defending and he is allowed to chase.
+            const myGoal = Math.abs(p.x - ownHoop.x);
+            const hisGoal = Math.abs(handler.x - ownHoop.x);
+            turbo = p.turbo > 0.2
+                && (hisGoal < myGoal + MARK_CHASE_MARGIN || dist2d(p.x, p.z, tx, tz) > MARK_TRANSITION);
+
+            // Squared up to his man, and paying for it whenever that means
+            // giving ground toward his own rim. See `BACKPEDAL`.
+            faceAt = handler.x;
+            if ((tx - p.x) * (ownHoop.x - p.x) > 0) stride = BACKPEDAL;
+
 
             const dd = dist2d(p.x, p.z, handler.x, handler.z);
             // Contest: if he is gathering, jump. If he is just dribbling,
@@ -2134,8 +2257,12 @@ const aiThink = (w: World, p: Player, dt: number) => {
     }
 
     const atTarget = Math.hypot(tx - p.x, (tz - p.z) * Z_PX) <= 3;
-    const speed = speedOf(p, turbo) * laneBlockFactor(w, p, turbo);
+    const speed = speedOf(p, turbo) * laneBlockFactor(w, p, turbo) * stride;
     applyMove(p, atTarget ? 0 : tx - p.x, atTarget ? 0 : tz - p.z, speed, dt, turbo);
+    // After the move, so it wins: `applyMove` points a body the way it is
+    // going, and a defender who turns his back on the ball to run to a spot
+    // reads as a man who has stopped defending.
+    if (faceAt !== null && Math.abs(faceAt - p.x) > 2) p.facing = faceAt > p.x ? 1 : -1;
 
     // Turbo costs the CPU exactly what it costs you.
     //

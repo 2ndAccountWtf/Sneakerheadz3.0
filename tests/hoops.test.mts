@@ -26,7 +26,7 @@ import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
     laneBlockFactor, TURBO_DRAIN, TURBO_REGEN, AI_TURBO_REGEN,
-    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME, collide,
+    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME, collide, CONTEST_R, dist2d,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
 import { profileFor } from '../systems/hoops/roster.ts';
@@ -646,19 +646,150 @@ t('the camera never loses a player or the rim it is attacking', () => {
 });
 
 
-t('there is always a way out of a defender — sprinting is it', () => {
-    // Reported as "the defender steals the ball from me every time", and it was
-    // not a steal-rate problem at all. The lane-block slowed whoever held the
-    // ball to 0.6x while a defender stood between them and the hoop, and it
-    // slowed nobody else. Sprinting, you moved at 69px/s. He chased at 116.
-    // There was no escape at any speed, so he simply stayed inside steal range
-    // until a roll went his way. Every possession.
+/**
+ * Can the player actually get away from the man in front of him?
+ *
+ * The check this replaces was called "there is always a way out of a defender —
+ * sprinting is it" and its final assertion was
+ * `BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED`: a sprinter beats a
+ * *walking* defender. Ours never walks. It was arithmetic about three constants
+ * dressed up as a gameplay guarantee, and it stayed green while the thing it
+ * named was impossible — a scripted full-turbo 200px drive never opened more
+ * than 14.3px of separation, which is inside `STEAL_R`, and the player was
+ * inside a defender's reach on 76% of the frames he held the ball.
+ *
+ * So this measures the drive instead of the constants.
+ */
+function driveRun(style: 'straight' | 'weave', period = 32) {
+    const w = createWorld(21, 'Test Guy');
+    for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
+    const me = w.players.find(p => p.human)!;
+    const mate = w.players.find(p => p.team === me.team && p.id !== me.id)!;
+    const foes = w.players.filter(p => p.team !== me.team);
+    const hoop = HOOPS[attackHoop(me.team)];
+    const startX = Math.max(COURT_L + 6, Math.min(COURT_R - 6, hoop.x + (hoop.x < 176 ? 200 : -200)));
+
+    w.clock = GAME_SECONDS;
+    me.x = startX; me.z = 0.5; me.vx = 0; me.vz = 0; me.y = 0; me.vy = 0;
+    me.gather = -1; me.dunkT = 0; me.stumbleT = 0; me.cool = 0; me.turbo = 1;
+    // One man on him, goalside, as close as the standoff puts him.
+    foes[0].x = me.x + (hoop.x > me.x ? 14 : -14); foes[0].z = 0.5;
+    foes[0].vx = 0; foes[0].vz = 0; foes[0].y = 0; foes[0].stumbleT = 0; foes[0].turbo = 1;
+    w.possession = me.id;
+    w.ball.mode = 'held';
+
+    let peak = 0, sum = 0, frames = 0, openFrames = 0, lost = false, reached = false, goalside = 0;
+    let lane = 0.5;
+    for (let f = 0; f < 240; f++) {
+        // The duel only. Everybody else parked, the phase pinned, every frame —
+        // a basket celebration or a stray teammate would decide this instead.
+        mate.x = COURT_L + 4; mate.z = 0.95; mate.vx = 0; mate.vz = 0;
+        foes[1].x = COURT_R - 4; foes[1].z = 0.05; foes[1].vx = 0; foes[1].vz = 0; foes[1].cool = 2;
+        w.phase = 'play'; w.phaseT = 0; w.hitstop = 0; w.shotClock = 14;
+
+        if (w.possession !== me.id) { lost = true; break; }
+
+        const c = blankCmd();
+        c.c = true;                                    // turbo the whole way
+        if (hoop.x > me.x) c.right = true; else c.left = true;
+        if (style === 'weave') {
+            // Change depth lane every `period` frames. Cutting across the
+            // depth lanes is the only "move" this game has — there is no
+            // crossover, no juke, no spin — so if this cannot beat a man then
+            // nothing the player does can.
+            if (f % period === 0) lane = lane > 0.5 ? 0.2 : 0.8;
+            if (lane > me.z + 0.02) c.down = true; else if (lane < me.z - 0.02) c.up = true;
+        }
+        stepWorld(w, DT, c);
+        frames++;
+
+        const gap = dist2d(me.x, me.z, foes[0].x, foes[0].z);
+        peak = Math.max(peak, gap);
+        sum += gap;
+        if (gap > CONTEST_R) openFrames++;
+        // Beaten: the handler is nearer the rim he is attacking than his man is.
+        if (hoopDist(me, hoop) < hoopDist(foes[0], hoop) - 2) goalside++;
+        if (hoopDist(me, hoop) < 26) { reached = true; break; }
+    }
+    return {
+        peak, frames, lost, reached,
+        avg: sum / Math.max(1, frames),
+        openShare: openFrames / Math.max(1, frames),
+        goalsideShare: goalside / Math.max(1, frames),
+    };
+}
+
+t('a drive can actually beat the man in front of you', () => {
+    const r = driveRun('weave');
+    assert.ok(!r.lost, 'the defender simply took the ball — the drive never happened');
+    assert.ok(
+        r.peak > CONTEST_R,
+        `the best separation a full-turbo cutting drive ever got was ${r.peak.toFixed(1)}px — inside a contest for the whole drive`,
+    );
+    assert.ok(
+        r.openShare > 0.05,
+        `only ${(r.openShare * 100).toFixed(0)}% of the drive was clear of a contest — there is no way past him`,
+    );
+    assert.ok(r.reached, 'a full-turbo drive never even reached the rim');
+});
+
+t('how you cut matters, which is the whole point', () => {
+    // The strongest guard on this, and the one that fails hardest against a
+    // mirror. A defender who re-reads your position every frame produces the
+    // *same* peak separation whatever you do with the stick — measured at
+    // 13.5px for cut rhythms from 10 frames to 44, a flat line. Against one who
+    // commits to a decision, committing to a direction long enough for him to
+    // buy it and then leaving is worth far more than mashing:
+    //
+    //   rhythm      8f   12f   20f   28f   40f   48f
+    //   avg gap   11.6  15.0  19.4  16.9  20.3  20.7
+    //   goalside     6%   81%   86%   86%   85%   84%
+    //   to the rim  180   139   128   126   124   111  frames
+    //
+    // Mashing is not merely no better, it is actively worse: 8-frame cuts live
+    // at 11.6px of daylight, get goalside on 6% of frames, and take 180 frames
+    // to reach the rim against 111 for a man who commits. Against the mirror
+    // every one of those columns was flat.
+    const mashing = driveRun('weave', 8);
+    const committed = driveRun('weave', 48);
+    assert.ok(
+        committed.avg > mashing.avg + 4,
+        `a committed cut lives at ${committed.avg.toFixed(1)}px of daylight against ${mashing.avg.toFixed(1)}px for mashing — the stick does not matter`,
+    );
+    assert.ok(
+        committed.goalsideShare > mashing.goalsideShare + 0.3,
+        `mashing gets goalside on ${(mashing.goalsideShare * 100).toFixed(0)}% of frames against a committed cut's ${(committed.goalsideShare * 100).toFixed(0)}% — there is nothing to read`,
+    );
+    assert.ok(
+        committed.frames < mashing.frames,
+        `mashing reached the rim in ${mashing.frames} frames and committing took ${committed.frames} — rattling the stick should not be the fast way`,
+    );
+});
+
+t('a straight-line drive still has to get through him', () => {
+    // The other side of it. A defender who can be walked past in a straight
+    // line is not a defender, and these are the assertions that break first if
+    // his reaction time is ever tuned into uselessness.
+    const r = driveRun('straight');
+    assert.ok(
+        r.avg < 46,
+        `a straight drive averaged ${r.avg.toFixed(1)}px of daylight — the defender is not in the picture at all`,
+    );
+    assert.equal(
+        r.goalsideShare, 0,
+        `a straight drive got goalside of him on ${(r.goalsideShare * 100).toFixed(0)}% of its frames — running in a straight line should not beat anybody`,
+    );
+});
+
+t('a defender in the lane costs you speed, and turbo is how you pay less', () => {
+    // What the old check was really protecting: the lane block has to be
+    // pressure rather than a cage, and turbo has to beat most of it without
+    // becoming immunity to position. Those three bounds were the sound part.
     const w = freshMovementWorld();
     const me = w.players[0];
     w.possession = 0;
     w.ball.mode = 'held';
     const hoop = HOOPS[attackHoop(me.team)];
-    // Park a defender right in the driving lane, as close as it gets.
     const foe = w.players[2];
     foe.x = me.x + (hoop.x > me.x ? 10 : -10);
     foe.z = me.z;
@@ -672,29 +803,14 @@ t('there is always a way out of a defender — sprinting is it', () => {
         walking > 0.7,
         `walking into a set defender costs ${((1 - walking) * 100).toFixed(0)}% of your speed — that is a cage, not pressure`,
     );
-    // Turbo beats most of the lane block, not all of it. It used to return 1
-    // outright, which made a sprinter immune to a man standing directly in his
-    // path — and since dunk range scales with speed, the button was paid for
-    // once and rewarded twice. A bot that simply drove won 92% of its games
-    // and passing was pointless. Leaving a small penalty in is what makes
-    // position count against a drive at all.
-    assert.ok(sprinting > walking, 'turbo must beat the lane block — it is the only escape the player has');
+    assert.ok(sprinting > walking, 'turbo must beat the lane block');
     assert.ok(
         sprinting > 0.93,
         `sprinting past a set defender costs ${((1 - sprinting) * 100).toFixed(0)}% — the escape has to stay worth pressing`,
     );
     assert.ok(sprinting < 1, 'turbo is immunity to position again, which is what made driving unbeatable');
-    // And the escape has to genuinely outrun him. This assertion used to read
-    // `BASE_SPEED * TURBO_MULT * sprinting >= BASE_SPEED * TURBO_MULT` with
-    // `sprinting` asserted to be exactly 1 three lines above — `x >= x`,
-    // constant-true, guarding nothing. What it was reaching for is that a
-    // sprinting handler with a body on him still beats a defender who is not
-    // sprinting.
-    assert.ok(
-        BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED,
-        'a sprinting handler no longer outruns a walking defender',
-    );
 });
+
 
 t('turbo costs the CPU exactly what it costs the player', () => {
     // The CPU used to drain turbo and then regenerate unconditionally in the
@@ -771,7 +887,21 @@ function soloWorld() {
     p.x = 150; p.z = 0.15; p.vx = 0; p.vz = 0; p.gather = -1; p.cool = 0;
     return { w, p };
 }
+/**
+ * Park everybody else, and pin the world into live play.
+ *
+ * The pinning is the part that matters and it is the third fixture in this file
+ * to need it. `score`, `tip` and `over` all return from `stepWorld` before the
+ * player loop, and so does a frozen hitstop frame, so a fixture that assumes
+ * frame 240 of a fixed seed is live play is really asserting something about
+ * that seed. Give the CPU defender a reaction time and the whole simulation
+ * moves: frame 240 of seed 7 became a basket celebration, fifteen "frames" of
+ * held input became far fewer real ones, the acceleration ramp never finished,
+ * and a check about diagonals failed for reasons that had nothing to do with
+ * diagonals.
+ */
 const park = (w: World, p: { id: number }) => {
+    w.phase = 'play'; w.phaseT = 0; w.hitstop = 0; w.clock = GAME_SECONDS;
     for (const q of w.players) if (q.id !== p.id) { q.x = 40; q.z = 0.1; q.vx = 0; q.vz = 0; }
 };
 /** Velocity after 15 frames of held input — past the accel ramp, before the
