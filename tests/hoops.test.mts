@@ -21,6 +21,7 @@
  * game can be played, not whether it can be built.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
@@ -1026,6 +1027,15 @@ t('a knockdown is a mismatch of bodies, not of momentum', () => {
     foe.x = p.x + 14; foe.z = p.z;
     let downs = 0;
     for (let i = 0; i < 120; i++) {
+        // Everybody else out of the way. Only the matched pair is being
+        // measured, and a third body with its own `stealResist` wandering into
+        // the collision is a different experiment — which is what this check
+        // was accidentally running until `accelMult` changed their closing
+        // speeds enough to make it show.
+        for (const q of w.players) {
+            if (q.id === p.id || q.id === foe.id) continue;
+            q.x = COURT_L + 2; q.z = 0.1; q.vx = 0; q.vz = 0;
+        }
         foe.vx = 0; foe.vz = 0; foe.stumbleT = 0;
         stepWorld(w, DT, { ...blankCmd(), right: true, c: true });
         if (p.stumbleT > 0) downs++;
@@ -1125,6 +1135,72 @@ t('the other team scoring puts your fire out', () => {
     for (let i = 0; i < 300 && w.score[foe.team] === before; i++) stepWorld(w, DT, blankCmd());
     assert.ok(w.score[foe.team] > before, 'the other team never scored; the check proves nothing');
     assert.equal(me.onFire, false, 'still on fire after the other team scored');
+});
+
+t('a goaltend is a chance, not a certainty', () => {
+    // Goaltending was 71% of all blocking, and the reason was mechanical rather
+    // than a rate being mistuned. This check and the block at release ask
+    // exactly the same question — an airborne defender inside BLOCK_R — and got
+    // wildly different numbers of chances to answer it: the block rolls once,
+    // on the frame the shot leaves the hand, while the goaltend rolled every
+    // frame the ball was in the window. A shot that enters the window stays
+    // there a mean of 18.8 frames, so at 0.5 a frame that was a 100.00% chance
+    // against the block's single 55% — roughly 19x the rolls for the same rule.
+    //
+    // It is now one roll per shot, only on a descending ball, scaled by the
+    // defender's `blockMult`.
+    const s = season(50, 1.2);
+    const goaltends = s.per('goaltends');
+    const blocks = s.per('blocks');
+    assert.ok(blocks > 0.5, `only ${blocks.toFixed(2)} blocks a game; the check proves nothing`);
+    const share = goaltends / blocks;
+    assert.ok(share < 0.6,
+        `goaltending is ${(share * 100).toFixed(0)}% of all blocking — it is a repeated roll against a single one again`);
+    assert.ok(goaltends > 0.3,
+        `goaltending happens ${goaltends.toFixed(2)} times a game — the mechanic is gone rather than tuned`);
+});
+
+t('the roster reaches the contest, not just the legs', () => {
+    // `blockMult` was one of eight modifiers `derive()` computed that nothing
+    // read. It is the one that turns a contest from a flat coin-flip into the
+    // difference between a good defender and a bad one — and it is exactly what
+    // NBA Jam scales its own 1-25% block chance by.
+    const src = readFileSync('components/minigames/HoopsGame.tsx', 'utf8');
+    for (const m of ['blockMult', 'accelMult']) {
+        assert.ok(src.includes(`mods.${m}`), `${m} is computed by derive() and read by nothing`);
+    }
+});
+
+t('reaching a streak of two is always announced', () => {
+    // The `scorer.streak === 2` branch sat after the alley / tip / dunk
+    // branches in the same else-if chain, and dunks are ~60% of all scoring —
+    // so the second bucket of a run was usually a dunk, took BOOMSHAKALAKA,
+    // and the streak went unsaid. Measured: 434 streak-reaches-2 events
+    // against 104 banners, so the iconic call was missing three times in four.
+    // The banner still belongs to the dunk; the ticker line underneath is the
+    // streak's.
+    let x = 53;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    const heat = new Set<string>(SAY.heat as readonly string[]);
+    let reached = 0, announced = 0;
+    for (let g = 0; g < 20; g++) {
+        const w = createWorld(5200 + g, 'Test Guy');
+        const was = new Map<number, number>();
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        while (w.phase !== 'over' && frames < cap) {
+            for (const p of w.players) was.set(p.id, p.streak);
+            stepWorld(w, DT, bot(w, rng, 1.2));
+            frames++;
+            const hit = w.players.some(p => p.streak === 2 && (was.get(p.id) ?? 0) < 2);
+            if (!hit) continue;
+            reached++;
+            if (heat.has(w.say) || /HEATING UP/.test(w.banner ?? '')) announced++;
+        }
+    }
+    assert.ok(reached > 15, `only ${reached} streaks reached two; the check proves nothing`);
+    assert.ok(announced / reached > 0.9,
+        `only ${(announced / reached * 100).toFixed(0)}% of streaks were announced — the dunk call is eating them again`);
 });
 
 console.log(`\n${pass} hoops checks passed.`);

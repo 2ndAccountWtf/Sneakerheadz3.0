@@ -146,6 +146,18 @@ const BLOCK_R = 16;             // airborne defender inside this can swat it
 export const STEAL_R = 14;
 export const SHOVE_R = 16;      // TURBO+PASS on defence inside this range knocks him down
 export const STUMBLE_TIME = 0.85;      // seconds a shoved player is down and out of control
+/**
+ * How long a ball has to be loose before picking it up is worth announcing.
+ *
+ * This was 0.4s, which fired about 0.7 times a game — and loose-ball recoveries
+ * are how most possessions actually turn over. Measured over 60 games: 2548
+ * team possession changes, 1652 of them (65%) with no banner, no ticker line
+ * and no score change. Steals, picks, blocks and shoves all announce
+ * themselves loudly; the commonest way the ball changes hands said nothing at
+ * all. Low enough now to catch a real scramble, high enough that a clean catch
+ * off a pass is not narrated.
+ */
+const LOOSE_CALL_T = 0.12;
 const SWAP_COOL = 0.4;          // debounce on PASS-to-swap-control so one tap isn't three
 export const ALLEY_HOOP_R = 80; // close enough to the rim that a jump here is a lob call
 const ALLEY_CALL_TIME = 0.5;    // how long the "I'm open, throw it here" cue shows
@@ -185,6 +197,14 @@ const LOB_CAMP_R = 15;
  * check in `stepBall`. Too early and a defender could swat a shot that just
  * left the shooter's hand from half the court away; this keeps it to what it
  * actually is: a save on the way down, near the hoop. */
+/**
+ * Chance a defender who has read a descending shot at the rim takes it away.
+ *
+ * Rolled once per shot rather than once per frame, and scaled by `blockMult`.
+ * Low on purpose: NBA Jam's own block chance runs 1% to 25% scaled by the
+ * defender's skill attribute, against the flat 0.5-a-frame this replaces.
+ */
+const GOALTEND_CHANCE = 0.3;
 const GOALTEND_R = 30;
 const GOALTEND_MIN_T = 0.52;
 
@@ -460,6 +480,8 @@ export interface Ball {
      * spot early enough to contest the catch — set once, mid-flight, by the
      * "camp" check in `stepBall`; null until (and unless) that happens. */
     camper: number | null;
+    /** Whether this shot's one goaltend roll has been spent. See `stepBall`. */
+    gtRolled: boolean;
     /** True while this loose ball is specifically a missed-shot rebound
      * (as opposed to one that came loose from a block, a shove or a steal) —
      * gates the rebound stat, the jump-contest weighting and tip-ins in the
@@ -855,7 +877,7 @@ const mkBall = (): Ball => ({
     t: 0, dur: 1, sx: 0, sz: 0, sy: 0, tx: 0, tz: 0, ty: 0, arc: 0,
     kind: 'pass', made: false, pts: 2, shooter: 0, target: 0,
     looseT: 0, pickCool: 0, brick: false,
-    lob: false, camper: null, rebound: false, missTeam: 0,
+    lob: false, camper: null, gtRolled: false, rebound: false, missTeam: 0,
 });
 
 /**
@@ -1104,7 +1126,7 @@ const launchShot = (w: World, p: Player, q: number, skill: number, heave = false
     // in a swat, which is spectacular twice and then just annoying. A defender
     // currently on the ground from a shove obviously cannot jump to block it.
     for (const o of activeOpponentsOf(w, p)) {
-        if (o.y > 10 && dist2d(o.x, o.z, p.x, p.z) < BLOCK_R && rng(w) < 0.55) {
+        if (o.y > 10 && dist2d(o.x, o.z, p.x, p.z) < BLOCK_R && rng(w) < 0.55 * o.mods.blockMult) {
             w.stats.blocks++;
             shout(w, 'REJECTED!', PAL.bad, 1.1);
             say(w, pick(w, SAY.block));
@@ -1190,6 +1212,7 @@ const launchPass = (w: World, from: Player, to: Player, opts: { lob?: boolean } 
     b.shooter = from.id;
     b.target = to.id;
     b.made = false;
+    b.gtRolled = false;
     b.t = 0;
     b.dur = dur;
     b.sx = from.x; b.sz = from.z; b.sy = 18 + from.y;
@@ -1357,13 +1380,20 @@ const score = (w: World, scorer: Player, pts: number, dunkKind: 'none' | 'normal
         // ('THREE!' over the top, a different line underneath); these are now
         // consistent with it.
         shout(w, BANNER.alley, PAL.legend, 1.6);
-        say(w, pick(w, SAY.alley));
+        say(w, scorer.streak === 2 ? pick(w, SAY.heat) : pick(w, SAY.alley));
     } else if (viaTip) {
         shout(w, BANNER.putback, PAL.ok, 1.2);
-        say(w, pick(w, SAY.putback));
+        say(w, scorer.streak === 2 ? pick(w, SAY.heat) : pick(w, SAY.putback));
     } else if (viaDunk) {
         shout(w, BANNER.dunk, PAL.legend, 1.5);
-        say(w, pick(w, SAY.dunk));
+        // Heating up rides along with the dunk call rather than losing to it.
+        // This branch chain is ordered by spectacle, and dunks are ~60% of all
+        // scoring — so the second bucket of a run was usually a dunk, took
+        // BOOMSHAKALAKA, and the streak went unannounced. Measured: 434
+        // streak-reaches-2 events against 104 banners, so the iconic call was
+        // missing three times out of four. The banner is the dunk's; the
+        // ticker line underneath is the streak's.
+        say(w, scorer.streak === 2 ? pick(w, SAY.heat) : pick(w, SAY.dunk));
     } else if (scorer.streak === 2) {
         // "Heating up" is the tension cue — it beats the plain three-point
         // call for the one shot where they'd otherwise collide, so it never
@@ -1537,7 +1567,9 @@ const applyMove = (p: Player, dx: number, dz: number, speed: number, dt: number,
     // No input (or already on target) coasts down under friction instead of
     // ramping toward zero at the accel rate — letting go should feel like
     // letting go, not like braking as hard as you were just sprinting.
-    const rate = (len > 0.001 ? MOVE_ACCEL * (turbo ? MOVE_ACCEL_TURBO : 1) : MOVE_FRICTION) * dt;
+    const rate = (len > 0.001
+        ? MOVE_ACCEL * (turbo ? MOVE_ACCEL_TURBO : 1) * p.mods.accelMult
+        : MOVE_FRICTION) * dt;
     const vzScaled = p.vz * Z_PX;
     p.vx = stepToward(p.vx, tvx, rate);
     p.vz = stepToward(vzScaled, tvzScaled, rate) / Z_PX;
@@ -2201,9 +2233,29 @@ const stepBall = (w: World, dt: number) => {
             const shooterP = w.players[b.shooter];
             const h = HOOPS[attackHoop(shooterP.team)];
             if (dist2d(b.x, b.z, h.x, h.z) < GOALTEND_R) {
+                // The ball on the way down, not on the way up. `b.y` is a
+                // parabola in `t`, so the slope is the linear term plus the
+                // arc's derivative; negative means descending.
+                const falling = (b.ty - b.sy) + b.arc * 4 * (1 - 2 * t) < 0;
                 for (const o of w.players) {
                     if (o.team === shooterP.team || o.stumbleT > 0) continue;
-                    if (o.y > 10 && dist2d(o.x, o.z, b.x, b.z) < BLOCK_R && rng(w) < 0.5) {
+                    if (!falling || o.y <= 10 || dist2d(o.x, o.z, b.x, b.z) >= BLOCK_R) continue;
+                    // One roll per shot, not one per frame.
+                    //
+                    // This check and the block at release ask exactly the same
+                    // question — an airborne defender inside BLOCK_R — and got
+                    // wildly different numbers of chances to answer it. The
+                    // block rolls once, on the single frame the shot leaves the
+                    // hand. This rolled every frame the ball was in the window,
+                    // and a shot that enters the window stays there a mean of
+                    // 18.8 frames: at 0.5 a frame that is a 100.00% chance
+                    // against the block's single 55%. Roughly 19x the rolls for
+                    // the same radius and the same rule, which is why
+                    // goaltending was 71% of all blocking and why 53% of them
+                    // erased a shot that had already resolved as a make.
+                    if (b.gtRolled) continue;
+                    b.gtRolled = true;
+                    if (rng(w) < GOALTEND_CHANCE * o.mods.blockMult) {
                         w.stats.goaltends++;
                         w.stats.blocks++;
                         shout(w, 'GOALTENDING!', PAL.bad, 1.1);
@@ -2378,7 +2430,7 @@ const stepBall = (w: World, dt: number) => {
             if (wasRebound && best.team === b.missTeam && best.y > 8 && hoopDist(best, hoop) < ALLEY_HOOP_R) {
                 sfx('tipin');
                 startDunk(w, best, { kind: 'tip' });
-            } else if (b.looseT > 0.4) {
+            } else if (b.looseT > LOOSE_CALL_T) {
                 say(w, `${best.name} comes up with it.`);
                 if (wasRebound) sfx('rebound');
             }

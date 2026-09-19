@@ -151,122 +151,61 @@ current 16x24, since the largest a body is ever rasterised is ~64 logical px.
 letterbox rule, and `shouldPromptRotate` is unit-tested, but nobody has held a
 phone. iOS Safari fullscreen in particular is the part most likely to disagree.
 
-## 3. P1 — feedback the player is owed
+## 3. ~~P1~~ MOSTLY DONE — feedback the player is owed
 
-Places where the game knows something and does not tell you, or tells you
-something it decided by a mechanism nobody would guess. 3.1 and 3.2 are cheap.
-3.3 to 3.5 are one connected problem with a shared fix.
+**3.1 Scramble recoveries now say so.** The "comes up with it" line was gated
+on `b.looseT > 0.4` and fired ~0.7 times a game, while 65% of all possession
+changes (1652 of 2548 over 60 games) happened with no banner, no ticker line
+and no score change. The gate is 0.12s now — low enough to catch a real
+scramble, high enough that a clean catch off a pass is not narrated.
 
-### 3.1 65% of possession changes happen in silence
+**3.2 "HEATING UP" now always lands. Measured 24% → 100%.** The
+`scorer.streak === 2` branch sat *after* the alley / tip / dunk branches in the
+same `else if` chain, and dunks are ~60% of scoring, so the second bucket of a
+run usually took BOOMSHAKALAKA instead. The banner still belongs to the dunk —
+it is the bigger moment — but the ticker line underneath is the streak's.
+Pinned by a check that fails at 72% when the dunk call takes it back.
 
-Measured: 2548 team possession flips over 60 games, **1652 with no banner, no
-ticker line and no score change**. Almost all are loose-ball recoveries — the
-"comes up with it" line is gated on `b.looseT > 0.4` (`:2381`) and fires ~0.7
-times a game. Steals, picks, blocks and shoves all announce themselves; the
-ball simply changing hands in a scramble — which is how most possessions
-actually turn over — says nothing.
+**3.3 Goaltending: 71% → 43% of all blocking**, 3.83 → 1.10 per game.
 
-There is also no persistent "this team has the ball" marker. The `▼` marks who
-you are driving, not who is holding it.
+The cause was mechanical, not a mistuned rate. The block at release and the
+goaltend in flight ask the same question — an airborne defender inside
+`BLOCK_R` — and got wildly different numbers of chances to answer it: the block
+rolls **once**, on the frame the shot leaves the hand; the goaltend rolled
+**every frame** the ball was in the window, and a shot that enters it stays
+~18.8 frames. At 0.5 a frame that is a 100.00% chance against a single 55% —
+roughly 19× the rolls for the same rule. It is now **one roll per shot, only on
+a descending ball, scaled by `blockMult`**, at a base chance of 0.3.
 
-**Done when:** a scramble recovery gets a line, and possession is readable from
-a still frame.
-
-### 3.2 "HE'S HEATING UP" is suppressed 76% of the time
-
-The `scorer.streak === 2` branch (`:1367`) sits *after* the alley / tip / dunk
-branches in the same `else if` chain, and dunks are ~60% of scoring — so a
-second straight bucket is usually a dunk and gets BOOMSHAKALAKA instead.
-Measured: **434 streak-reaches-2 events, 104 banners = 24%.**
-
-The iconic call, mostly missing. The streak pips in `drawPlayer` do carry the
-information, which is why this is a feedback gap rather than a bug.
-
-**Done when:** reaching a streak of 2 is announced regardless of how the bucket
-was scored.
-
-### 3.3 Goaltending is 71% of all blocking, and now we know why
-
-The first draft of this document said goaltending was "too common" without
-establishing a cause, which was not good enough. Measured, the reason is
-mechanical and has nothing to do with the rate being mistuned.
-
-**The two checks use the same conditions and get wildly different numbers of
-chances to fire.** Both require an airborne defender within `BLOCK_R` (16px):
-
-| | roll | when |
-|---|---|---|
-| block at release (`:1107`) | `rng < 0.55` | **once**, on the single frame the shot leaves the hand |
-| goaltend in flight (`:2206`) | `rng < 0.5` | **every frame** the ball is inside `GOALTEND_R` past `GOALTEND_MIN_T` |
-
-Measured over 25 games: a shot that enters the goaltend window stays there for
-a **mean of 18.8 frames** (max 57). At 0.5 per frame, that is:
+Balance after, 50 games per profile:
 
 ```
-goaltend   P(at least one hit) over 18.8 frames  =  100.00%
-block      P                                      =   55.00%,
-           and only if he is already airborne at that exact instant
+never passes   win 28%   8.7-11.1     goaltends 0.38/g
+passes ~1/s    win 44%  16.8-17.0     goaltends 1.10/g   (43% of blocking)
+clumsy         win 44%  16.8-17.0
 ```
 
-**The goaltend gets roughly 19× the rolls for the same radius and the same
-rule.** It is not more common because it is tuned high. It is more common
-because it is a repeated roll against a single one — so once a defender is up
-and near the ball, the save is certain. That also explains the other half of
-the complaint: the 53% of goaltends that erase an already-resolved make are not
-a separate bug, they are the same certainty applied to shots that were going in.
+Passing still beats hoarding, which is the property that matters.
 
-### 3.4 What NBA Jam does about the same problem
+**3.5 Two more modifiers wired.** `blockMult` — the one §3.4 called for, and
+exactly what NBA Jam scales its own 1–25% block chance by — and `accelMult`.
+Six of twelve now reach the simulation, up from four. Still unread:
+`dunkBias`, `shotWindowMult`, `deepMult`, `stealMult`, `turboCapMult`,
+`turboRegenMult`.
 
-Read as design rules only. **No code, data or art from that repository is used
-here, and none may be.** These came back as summaries of TMS34010 assembly
-rather than a line-by-line reading, so treat them as strong indications:
+**Still open in this section:**
 
-- **Block chance is 1% to 25%, scaled by the defender's skill attribute.**
-  Ours is 50% and 55%, scaled by nothing.
-- The percentage appears to gate whether the defender **tries** the block, not
-  whether a met condition succeeds — a meaningful difference from ours, where
-  the roll decides the outcome.
-- **Trajectory matters:** the code distinguishes a player still going up from
-  one coming down, and blocks are described as more effective on the descent.
-  We check height (`o.y > 10`) but never direction.
-- A blocked ball is deflected with velocity away from the hoop and possession
-  goes to the defender. That part we already do.
-
-So the shape of the fix is Jam's, not a number we invent: **a much lower
-chance, scaled by the attribute we already compute and do not read, with
-trajectory as a condition.**
-
-### 3.5 Six roster modifiers are still unread
-
-Directly relevant to the above, and an honest correction to what shipped
-earlier in the session. `derive()` is wired in now and four of its twelve
-multipliers reach the simulation. Eight do not:
-
-```
-speedMult       read        accelMult       UNREAD
-jumpMult        read        dunkBias        UNREAD
-dunkRangeMult   read        shotWindowMult  UNREAD
-stealResist     read        deepMult        UNREAD
-                            stealMult       UNREAD
-                            blockMult       UNREAD
-                            turboCapMult    UNREAD
-                            turboRegenMult  UNREAD
-```
-
-**`blockMult` is the one §3.4 wants.** Wiring it is what turns the block from a
-flat coin-flip into the attribute-scaled thing Jam describes, and it is the
-difference between a good defender and a bad one actually meaning something on
-a contest.
-
-**Done when:** the goaltend is a chance rather than a certainty — one roll per
-shot, or a per-frame chance low enough that a full window does not approach
-100% — scaled by `blockMult`; trajectory is a condition; a CPU jumper has a
-readable wind-up; and blocking a shot on purpose is possible. Re-measure the
-balance table in §0 afterwards, because this moves scoring.
-
-**Risk:** medium — 3.3 moves scoring. Re-measure the balance table in §0.
-
----
+- **The CPU's missing shot wind-up.** `aiThink` calls `launchShot` directly, so
+  `p.charge` is never set for a CPU shooter (0.086% of AI frames). The release
+  meter and gather pose only ever appear over you, so a CPU jumper has no tell
+  and cannot be blocked on purpose — only swatted in flight. This is the other
+  half of why blocking felt arbitrary and it is untouched.
+- **No persistent "this team has the ball" marker.** The `▼` marks who you are
+  driving, not who is holding it.
+- **Three mutations still pass.** Removing the descending-ball condition,
+  reading `blockMult` in one of its two sites, and one of the streak-call sites
+  all survive. The first two are refinements whose absence changes nothing a
+  player would notice; recorded rather than papered over.
 
 ## 4. P1 — input buffering, done properly
 
@@ -409,7 +348,7 @@ Listed so they are decisions rather than omissions.
 ```
 1. §1  test teeth            ← DONE
 2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
-3. §3  feedback              ← 3.1/3.2 cheap; 3.3-3.5 are one job
+3. §3  feedback              ← DONE except the CPU shot wind-up
 4. §4  input buffering       ← needs §1's guards to be safe
 5. §5  animation             ← as the art lands, tier by tier
 6. §6  small and true
