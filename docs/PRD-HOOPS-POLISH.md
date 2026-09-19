@@ -104,37 +104,52 @@ legitimately regenerating. Whether the CPU can outlast you is guarded
 statistically by "there is always a way out of a defender", which is the check
 that caught that regression when it was live.
 
-## 2. P0 — landscape and fullscreen
+## 2. ~~P0~~ DONE — landscape and fullscreen
 
-**Why:** it multiplies every other visual fix in this document, and it is the
-one the owner named directly.
+Most of this turned out to already exist, built for the street games:
+`useFullscreen`, `TouchZones` (thumb controls that float over the picture in
+the bottom corners rather than sitting in a row below it), and a fullscreen
+toggle in `ArcadeShell` that hoops already inherits. Three real gaps closed.
 
-At 352×198 in portrait the players are **26 logical pixels tall**. The
-follow-cam already exists and can punch to 2× (`FOLLOW_MAX_ZOOM`), but the
-whole court fits on screen at 1× (`COURT_L = 34` to `COURT_R = 318` inside
-`VW = 352`), so it rarely has anything to do.
+**A rotate prompt.** `screen.orientation.lock` is honoured by Chrome on Android
+and does not exist on iOS, so a phone cannot be made to turn — it has to be
+asked. `useOrientation` reports the aspect by comparing window dimensions
+rather than reading `screen.orientation`, which is absent on older iOS and
+reports the *device* rather than the window (wrong in a split view, wrong in a
+desktop browser being resized). The rule is a pure function, `shouldPromptRotate`,
+so it is testable without a browser: interrupt only when the player has already
+asked for fullscreen *and* is holding the phone upright. Portrait while the
+game is inline in the page is the player looking at the rest of the app, which
+is not a mistake. The game keeps running under the prompt — pausing a
+90-second game on a rotation is worse than a few lost seconds.
 
-Requirements:
+**`widen` was an undeclared prop.** `ArcadeShell` destructured it with a
+default and passed it to `GameCanvas`, but it was not in `ArcadeShellProps`.
+Now declared, with the reason hoops must never set it.
 
-1. Entering the mini-game asks for landscape and goes fullscreen.
-2. A clear prompt if the device is held in portrait — not a broken layout.
-3. Touch controls sized for thumbs at the screen edges, reusing
-   `engine/TouchZones.tsx` from the street games rather than a second system.
-4. Rotating back out, or leaving fullscreen, does not lose the game in
-   progress.
+**Why hoops does not widen.** The street games read their view width from the
+canvas every frame and genuinely gain road by filling a landscape box. Hoops
+pins everything to absolute coordinates — `COURT_L`/`COURT_R` and the two rims
+at x=30 and x=322 — so a wider view adds empty floor past the baselines rather
+than more court. Widening hoops means moving the rims, which is §7.
 
-**Deliberately not in scope:** widening the court in world units. That would
-give the follow-cam real work and make the sprites bigger, but it changes
-possession length, dunk range, defender rotation and the three-point line —
-every number this session measured. It is its own project, listed in §7.
+**What fullscreen is actually worth**, letterboxed at 352x198:
 
-**Done when:** the game runs fullscreen landscape on a phone, portrait shows a
-rotate prompt, and a run survives an orientation change.
+| | viewport | canvas | scale | player height (cam 1x / 2x) |
+|---|---|---|---|---|
+| inline in the page | 352 wide | 352x198 | 1.00x | 32px |
+| iPhone 14 portrait | 390x844 | 390x219 | 1.11x | 35px / 71px |
+| **iPhone 14 landscape** | 844x390 | 693x390 | **1.97x** | **63px / 126px** |
+| Pixel 7 landscape | 915x412 | 732x412 | 2.08x | 67px / 133px |
+| iPad landscape | 1180x820 | 1180x664 | 3.35x | 107px / 215px |
 
-**Risk:** medium. Layout and browser fullscreen APIs are fiddly on iOS Safari,
-and the game is embedded in a larger app whose chrome has to get out of the way.
+Turning the phone is worth **1.97x** on its own, before the camera does
+anything — and it is why the animation spec authors at 48x64 rather than the
+current 16x24, since the largest a body is ever rasterised is ~64 logical px.
 
----
+**Not verified on a real device.** The arithmetic above is computed from the
+letterbox rule, and `shouldPromptRotate` is unit-tested, but nobody has held a
+phone. iOS Safari fullscreen in particular is the part most likely to disagree.
 
 ## 3. P1 — feedback the player is owed
 
@@ -393,7 +408,7 @@ Listed so they are decisions rather than omissions.
 
 ```
 1. §1  test teeth            ← DONE
-2. §2  landscape/fullscreen  ← biggest felt change for the effort
+2. §2  landscape/fullscreen  ← DONE (unverified on a real device)
 3. §3  feedback              ← 3.1/3.2 cheap; 3.3-3.5 are one job
 4. §4  input buffering       ← needs §1's guards to be safe
 5. §5  animation             ← as the art lands, tier by tier

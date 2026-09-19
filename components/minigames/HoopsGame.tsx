@@ -3404,6 +3404,14 @@ const HoopsGame: React.FC<{
             onInput={set}
             actions={['SHOOT', 'PASS', 'TURBO']}
             vertical
+            // Deliberately not `widen`. The street games take their view width
+            // from the canvas every frame and genuinely gain court by filling a
+            // landscape box; hoops pins everything to absolute coordinates —
+            // COURT_L/COURT_R and the two rims at x=30 and x=322 — so a wider
+            // view would add empty floor past the baselines rather than more
+            // court. Fullscreen still pays: letterboxed on a 390-tall landscape
+            // phone the 198px picture scales about 2x, which is the whole
+            // reason the follow-cam has a 2x rung.
             onQuit={done === null ? onQuit : undefined}
             quitLabel="Forfeit"
             hud={

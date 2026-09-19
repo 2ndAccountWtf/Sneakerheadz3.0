@@ -4,6 +4,7 @@ import { GameCanvas } from './GameCanvas';
 import { TouchPad } from './TouchPad';
 import { TouchZones } from './TouchZones';
 import { useFullscreen } from './useFullscreen';
+import { useOrientation, shouldPromptRotate } from './useOrientation';
 import type { Btn } from './useInput';
 import type { Weapon } from '../../../systems/weapons';
 
@@ -17,6 +18,17 @@ interface ArcadeShellProps {
     onInput: (btn: Btn, down: boolean) => void;
     actions?: [string, string] | [string, string, string];
     vertical?: boolean;
+    /**
+     * Fill the fullscreen box by widening the world rather than letterboxing.
+     *
+     * Only safe for a game whose simulation never reads a fixed view width —
+     * the street games take theirs from `viewWidth(ctx)` every frame. Hoops
+     * does not and must not set this: its court is pinned to absolute
+     * coordinates (`COURT_L`/`COURT_R`, and the two rims at x=30 and x=322), so
+     * a wider view would add empty floor beyond the baselines rather than more
+     * court. Widening hoops means moving the rims, which is a different job.
+     */
+    widen?: boolean;
     onQuit?: () => void;
     quitLabel?: string;
     /** Weapons the player brought; rendered as a selectable rail. */
@@ -47,6 +59,10 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
     // a page underneath is worse than not going fullscreen at all.
     const cabinetRef = useRef<HTMLDivElement | null>(null);
     const fs = useFullscreen(cabinetRef);
+    const portrait = useOrientation();
+    // `screen.orientation.lock` is honoured by Chrome on Android and does not
+    // exist on iOS, so the phone cannot be made to turn — it has to be asked.
+    const askToRotate = shouldPromptRotate(fs.active, portrait);
 
     // When the game ends, bring the result into view. The board sits inline in
     // a long scrolling page (the Arcade lists a dozen games below it), so on a
@@ -116,8 +132,24 @@ export const ArcadeShell: React.FC<ArcadeShellProps> = ({
                     on an 844px phone the rider sits at about x=134, inside a
                     132px pad anchored bottom-left -- and asks a thumb to find a
                     target under its own hand. See `TouchZones`. */}
-                {fs.active && !overlay && (
+                {fs.active && !overlay && !askToRotate && (
                     <TouchZones onDown={onInput} actions={actions} vertical={vertical} />
+                )}
+                {/* Held upright in fullscreen, a 16:9 picture is a strip across
+                    the middle and the rest of the screen is black. Turned
+                    sideways the same phone gives it the full height, which is
+                    where the camera's 2x actually comes from. The game keeps
+                    running underneath — this covers the picture rather than
+                    pausing, because pausing a 90-second game on a rotation is
+                    worse than a few lost seconds. */}
+                {askToRotate && (
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/90 p-6 text-center">
+                        <div className="text-4xl" aria-hidden>📱</div>
+                        <div className="font-display text-sm uppercase text-white">Turn your phone sideways</div>
+                        <p className="text-xs text-[var(--ink-dim)] leading-snug max-w-[18rem]">
+                            The court is wider than it is tall. Landscape gives it the whole screen.
+                        </p>
+                    </div>
                 )}
                 {overlay && (
                     <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/70 backdrop-blur-[2px]">
