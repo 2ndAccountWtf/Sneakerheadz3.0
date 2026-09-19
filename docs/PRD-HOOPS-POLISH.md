@@ -475,6 +475,80 @@ need every frame instead of assuming it.
 
 ---
 
+## 6.5 — P0, new: you cannot beat your man, and never could
+
+Reported as "it is still impossible to dribble and move around the computer
+defender". Measured, and true.
+
+**Scripted 1-on-1**, human with the ball, full turbo, driving 200px at the rim
+with one defender on him and everybody else parked:
+
+```
+                frames   avg gap   peak gap   % of drive clear of a contest
+straight          240     11.0px    13.5px      0%
+diagonal          240     11.1px    14.3px      0%
+weave (lane cuts) 130     11.4px    13.5px      0%
+```
+
+Peak separation 14.3px, which is *inside* `STEAL_R`. The straight and diagonal
+drives did not reach the rim inside four seconds. **In real games, while the
+human holds the ball:** clear of a contest 16% of frames, inside a defender's
+reach **76%**.
+
+**Why.** `aiThink` re-targets `handler.x ± 8, handler.z` every single frame, at
+the same top speed, with the same turbo multiplier, with perfect information.
+The defender does not outrun you, he *mirrors* you — and there is nothing for a
+change of direction to punish, because he is never wrong. The player has no
+crossover, no juke, no spin and no first-step burst; his only tool is speed,
+against a man who has exactly as much.
+
+**A test claimed otherwise and was arithmetic.** `there is always a way out of a
+defender — sprinting is it` asserts
+`BASE_SPEED * TURBO_MULT * sprinting > BASE_SPEED` — a sprinter beats a
+*walking* defender. Ours never walks. Green the whole time while the thing it
+names was impossible. It needs replacing with a measurement of actual
+separation, not a relation between constants.
+
+**How the original does it** — read from `DRONE.ASM`, design rules only, written
+up in full in `docs/NBA-JAM-MECHANICS.md`. Their defender is an interceptor with
+a reaction time, not a tracker:
+
+1. **A re-decision interval.** The target is recomputed every N ticks, not every
+   frame; between seeks the defender walks to a stale one. ~1.3s of lag when
+   winning, 0.8s level, 0.25s when losing — the reaction time *is* the
+   difficulty knob and the catch-up AI both.
+2. **A standoff anchored to its own basket**, ~3/4 of the way out along the line
+   to the rim it defends. It plays the lane, not the shirt.
+3. **Velocity lead** — the seek point is the handler's position plus his
+   velocity 16 ticks forward. It commits to an interception.
+4. **Turbo only to recover goalside position**, not to stay attached.
+5. **Ball pressure as a timed state**, entered on a score-indexed roll that is
+   0% while comfortably ahead. In-your-face defence is an event.
+
+Plus a 10-unit dead zone on the seek (the same family as §6's lane dwell), and
+the drone drives itself through the same joystick bits a cabinet would — no
+privileged movement path.
+
+**Proposed order.** (1) and (3) together are the fix; the rest is shaping.
+
+1. **Reaction interval + velocity lead on the on-ball defender.** One timer, one
+   extrapolated target. This is the whole dribble game and it is maybe thirty
+   lines.
+2. **Replace the toothless escape test** with the scripted-drive measurement
+   above, asserting real separation. Do this first so (1) has a guard.
+3. **Standoff instead of shirt-marking**, so beating him means beating the lane.
+4. **Turbo as recovery only**, so his sprint is answerable.
+5. **A first-step burst** on a fresh turbo press, if (1)–(4) still leave the
+   drive feeling flat.
+
+**Risk: high, and known.** The last time positional defence was loosened, a bot
+that simply drove won 92% of its games and passing became pointless — that is
+what `laneBlockFactor` and the `DUNK_RANGE_BASE` reduction exist to hold back.
+So this lands with the §0 balance table re-measured at every step, and dunk
+range is the knob that pays for it.
+
+---
+
 ## 7. Explicitly out of scope
 
 Listed so they are decisions rather than omissions.
@@ -505,7 +579,8 @@ Listed so they are decisions rather than omissions.
 4. §4   input buffering       ← DONE
 5. §4.5 release meter out     ← DONE
 6. §6   small and true        ← DONE
-7. §5   animation             ← the only one left: as the art lands, tier by tier
+7. §6.5 the dribble game      ← P0, not started: the defender is a mirror
+8. §5   animation             ← as the art lands, tier by tier
 ```
 
 §5 runs in parallel with everything from the moment the illustrator starts.

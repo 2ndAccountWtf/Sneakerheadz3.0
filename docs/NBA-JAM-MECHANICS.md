@@ -37,6 +37,72 @@
 
 ---
 
+---
+
+## On-ball defence: how the original stops you, and how it lets you go
+
+Read from the source (`DRONE.ASM`, `drone_defense` / `drone_seekxy`), design rules
+only. No code, no data and no art from that repository is used here, and none
+may be. Added because our own defender was measured as unbeatable — a scripted
+full-turbo 200px drive never opened more than 14.3px of separation, which is
+inside steal range, and the player is inside a defender's reach 76% of the
+frames he holds the ball.
+
+**Our defender tracks. Theirs intercepts, and has a reaction time.** That is the
+whole difference, and it decomposes into five mechanisms we have none of.
+
+**1. A re-decision interval, not a per-frame target.** `plyr_d_seekcnt` counts
+down; only when it expires does the drone recompute where it is going. Between
+seeks it walks toward a **stale** target. The interval comes from a table
+indexed by the score margin — base 25 ticks, plus 55 when up by 15, plus 25 at
+an even score, minus 10 when down by 15. At 60Hz that is roughly **1.3s of lag
+when it is winning, 0.8s at level, 0.25s when it is losing.** The reaction time
+*is* the difficulty knob, and the catch-up AI is implemented by sharpening it.
+
+**2. A standoff anchored to its own basket, not to the man.** `pld_d_grddist` is
+re-rolled to 170–200 out of 256, and the guard point is computed as a fraction
+of the vector from **its own hoop** to the handler — so it sits roughly
+three-quarters of the way out, on the line to the rim it is defending. It is
+playing the lane, not your shirt. Ours targets `handler.x ± 8`, which is the
+shirt.
+
+**3. Velocity lead.** The seek point is the handler's position **plus his
+velocity extrapolated 16 ticks forward** — where he will be, not where he is.
+Combined with (1) this is the entire dribble game: the defender commits to an
+interception point, and a change of direction leaves him wrong about it for up
+to a second. Ours reads your current position every frame and is never wrong.
+
+**4. Turbo only to recover position.** It sprints when the man it is guarding is
+closer to its own basket than it is (with a 10-unit margin, and 60 units earlier
+if he is already close). Not to stay glued. Ours sprints whenever the gap
+exceeds 20px, which is a leash rather than a recovery.
+
+**5. Ball pressure is a timed state, not the default.** `pld_d_nastycnt` is a
+"nasty mode" window. Entered on a roll off a table indexed by score margin —
+**0% while up by 11 or more**, rising to 30% when down by 15 — or unconditionally
+when the game clock or the shot clock is low. Only in nasty mode does it skip
+the standoff and come straight at the handler. The reach itself is gated twice
+more: a max distance that runs 110 when winning big down to 50 at level, and a
+per-attempt percentage of 1% when up by 15 rising to the teens when losing.
+
+Two structural details worth copying the shape of:
+
+- **A dead zone.** `drone_seekxy` pushes nothing on an axis while it is within
+  10 units of the target. That is the same family of fix as the depth-lane dwell
+  in our own §6 — it stops a tracker vibrating around its mark.
+- **The drone plays through the joystick.** `drone_seekxy` computes direction
+  bits and writes them to the same control word a cabinet would. It has no
+  privileged movement path, no velocity it can set directly, and no acceleration
+  the human does not also get. Whatever we build should keep that property: the
+  CPU should be beatable because it is playing the same game, not because we
+  handicapped a number.
+
+**The reading for us.** Separation should come from being *right* about where the
+defender committed, and the defender has to be capable of committing wrongly.
+Speed alone cannot produce that against a mirror, which is why turbo has never
+felt like an escape here no matter what multiplier it carries.
+
+
 ## Confidence Note
 
 **Sources successfully loaded:**
