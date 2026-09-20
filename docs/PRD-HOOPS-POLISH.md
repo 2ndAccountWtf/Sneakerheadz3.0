@@ -815,6 +815,70 @@ buzzer beater at that frame before; giving the defender a reaction time changed
 which frame it was. It now only demands overtime if the scores are *still*
 level.
 
+### 6.6d — three things found by playing it, none of them shipped
+
+Reported from an actual game, which is worth more than the thousand headless
+ones behind everything above: *"sometimes the CPU teammate should handle the
+inbound. Teammate needs to pass the ball more. Defense is still on top of me all
+the time and I can't run past him, which is crazy."*
+
+All three are real. None of them shipped, because each one breaks the
+`passing is not a losing strategy` comparison, and weakening a check to land a
+change is the failure mode this whole document exists to avoid. What follows is
+the diagnosis so the next attempt does not start from zero.
+
+**1. You cannot run past him because bodies are solid, and this is the big one.**
+
+Every pair of players inside 11px is shoved apart every frame, and the on-ball
+defender's standoff is 8px — **he parks inside the radius at which he physically
+blocks you.** There is no gap to go through and none to go around. Measured on a
+straight-line full-turbo drive:
+
+```
+                    solid    not solid
+peak separation     13.6px     35.4px
+clear of a contest     0%        22%
+spent goalside         0%        65%
+frames to the rim      182         98
+```
+
+It is all or nothing: a push radius of **4px restores the wall completely**
+(13.6 / 0% / 0% again), and moving the standoff out to 13 or 16px does not help
+either — the blocker is in front of you and any separation at all keeps you
+behind him. The original does not make bodies solid; players run through each
+other and contact is an *action* (the shove, the push-off) rather than geometry.
+
+Removing it is the fix and it works. What it costs: driving becomes the best
+play, `busy` falls behind `quiet` (70% against 78%), and the read mechanic from
+§6.6 flattens — a committed cut stops being worth more than mashing, because
+separation now comes from speed rather than from the defender committing
+wrongly. Dunk range, the lane block, the reaction time and a steal bonus for
+running *through* a man were all tried as the counterweight; each moved the
+absolute level and none restored the ordering.
+
+**2. The inbound always goes to you.** Literally `recv[0]`, the lower id, every
+possession of every game — your partner has never once brought the ball in.
+Alternating it (a third of the time) is worth about **+20 points of win rate to
+the hoarding bot** and flips the passing comparison. It is not the forty pixels
+of court position between the two inbound spots; making the positions follow the
+ball rather than the slot changes nothing. Cause not yet understood.
+
+**3. Your partner already passes.** He feeds you **13.2 times a game and shoots
+1.4**. The complaint is not volume, it is *delay*: `canPass` makes him hold the
+ball 0.8s before he will give it up, which on a 3.6s possession is a fifth of it
+spent watching him dribble. Dropping it to 0.5s reads much better and
+**reintroduces the relay loop that floor exists to prevent** — 1 game in 120
+never ended. 0.6 and 0.7 are stall-free and both flip the passing comparison.
+
+**The meta-finding: the balance sits on a narrow ledge.** Three unrelated
+changes, all of them defensible, all of them tripping the same check. Either the
+game genuinely is that finely poised, or `season(50)` is too small a sample for a
+5-point threshold — the two seasons move 6–8 points between code variants and
+that is the same order as the margin being defended. **Before the next balance
+change, settle that question**, because right now it is not possible to tell a
+real regression from a resample. Raising both seasons to ~120 games is the
+cheap version.
+
 ---
 
 ## 7. Explicitly out of scope
