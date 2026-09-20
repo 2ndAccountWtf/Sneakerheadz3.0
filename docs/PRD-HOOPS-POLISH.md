@@ -680,7 +680,58 @@ reaction fails 2. The reaction check needed fixing first — flattening the roll
 left it green, because the score-based slope spreads the numbers on its own, so
 it now only counts decisions taken at a level score.
 
----
+### 6.6b — the double is a trigger, not a roll
+
+Pushback, and it was right: *"maybe that's the cost of double teaming. Again I
+recommend you check how the original deals with this."*
+
+The section above dialled the double down to 5% because at 38% it punished
+passing. That was treating a symptom. **Their off-ball defender does not roll
+for it at all** — it picks between its own man and the ball carrier on a chain
+of conditions (see `docs/NBA-JAM-MECHANICS.md`): ball too far from the basket it
+defends, stay home; partner on the floor, take the ball; partner no longer
+between the man with the ball and the basket, take the ball.
+
+Help defence with a trigger. It fires precisely when the offence has already won
+the on-ball matchup — which is what makes the contested pass out of it correct
+rather than a problem. A random double is something the defence *spends* and it
+lands on you as bad luck. A triggered one is something you **earned** by beating
+your man, and the price of having two defenders on you is that the pass out is
+hard and the reward is that one of theirs is alone.
+
+Same numbers, the other way up:
+
+```
+                  random @38%   random @5%   triggered
+quiet  (pass 1/s)     50%           58%         54%
+busy   (pass 2/s)     26%           54%         64%
+clumsy (35% idle)     24%           42%         46%
+```
+
+**Passing is now the better strategy, not the worse one** — which is the
+property this file has defended all session, and the roll had inverted it.
+
+**Two pieces of the first attempt did not survive measurement.**
+
+- **A perpendicular "how far has my partner drifted off the lane" test.**
+  Removing it moved offensive rebounds from 2.90 to 2.90 a game and all three
+  balance win rates by zero. Deleted rather than kept as unguarded machinery.
+  The "is he behind the ball" test and the distance check already cover it.
+- **"A shot going up ends the double"** was kept, but *for the wrong reason*. It
+  was justified by offensive rebounds, where it measures as nothing (2.90
+  against 2.75 without). What it actually does is the passing game: leave the
+  helper standing on the ball while a shot goes up and he is in the lane at the
+  moment the offence wants to move it. With it, busy 64% / quiet 54%; without,
+  54% / 60%. Load-bearing, now guarded by a comparison rather than a floor.
+
+**The balance check needed strengthening to see that.** `passing is not a losing
+strategy` asserted two absolute floors, and both of them survive passing being
+simply the worse of the two strategies. It now compares the two directly.
+
+**Teeth.** One new check (hoops 56 → 57, suite 1042). Four mutations: never
+doubling fails 3, always doubling fails 2, dropping the shot clause fails the
+new comparison, and dropping the lane test fails nothing — which is why the lane
+test is gone.
 
 ---
 

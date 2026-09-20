@@ -337,26 +337,59 @@ const MARK_REVERSE_SPEED = 90;    // px/s at which the whole cost applies
  * worth something if the double happens. He commits to the answer for a whole
  * reaction either way, which is the window.
  */
-const DOUBLE_CHANCE = 0.05;
-const DOUBLE_HOT_CHANCE = 0.14;
-/** Close enough to the rim (or lit up) that doubling is the obvious call. */
-const DOUBLE_THREAT_R = 90;
-/**
- * How long a double lasts once he has gone.
- *
- * It has to outlive the decision that started it or it is not a gamble, it is a
- * twitch. Re-rolled every reaction, the double measured as leaving the man he
- * abandoned all of 2.3px more open than staying home would have — he spent the
- * whole window travelling and never actually arrived. Committed for a second or
- * so, he gets there, and the man he left is genuinely alone.
- */
-const DOUBLE_TIME: readonly [number, number] = [0.8, 1.5];
+/** Beyond this from the basket he is defending, the ball is not yet a problem
+ *  and the second man stays home whatever his partner is doing. */
+const DOUBLE_CARE_R = 150;
+/** How far his partner can be from the handler and still count as guarding him. */
+const DOUBLE_LOST_R = 34;
 /** How far the man without the ball keeps off the man with it. See the spacing
  *  note in the off-ball offence branch — everything else depends on this. */
 const SPACING_MIN = 74;
 /** How tight he gets on the ball once he has committed to doubling it. Much
  *  closer than a normal mark: the point is two bodies on one. */
 const DOUBLE_STANDOFF = 5;
+
+/**
+ * Does the second defender leave his man and go to the ball?
+ *
+ * This was a dice roll, and dice rolls were the wrong shape for it. Rolled
+ * often it became a scheme that punished passing — a body standing on the ball
+ * stands in the lane out of it — and rolled rarely it was a coin that
+ * occasionally cost the defence a basket for no reason anyone could read.
+ *
+ * The original does not roll. Its second defender leaves when his partner has
+ * been **beaten**: knocked down, or no longer in front of the man with the
+ * ball. It is help defence with a trigger, not a gamble, and that changes who
+ * pays for it. The double is not something the defence chooses to spend, it is
+ * something the offence *earns* by winning the on-ball matchup — which is why
+ * the pass out of one being contested is correct rather than a problem. You
+ * beat your man, so now there are two on you and one of theirs is alone. That
+ * is the trade, and it is the same trade real basketball makes.
+ */
+const shouldDouble = (w: World, p: Player, mate: Player, handler: Player, ownHoop: Hoop): boolean => {
+    // Not yet a problem: the ball is nowhere near the basket he is defending.
+    if (hoopDist(handler, ownHoop) > DOUBLE_CARE_R) return false;
+    // His partner is on the floor. Nobody else is going to do it.
+    if (mate.stumbleT > 0) return true;
+    // His partner is nowhere near the man with the ball.
+    const gap = dist2d(mate.x, mate.z, handler.x, handler.z);
+    if (gap > DOUBLE_LOST_R) return true;
+    // Or he is near him but behind him. Beaten is a question about position,
+    // not about distance: a man glued to your hip and on the wrong side of you
+    // is not guarding you, he is following you to the rim.
+    //
+    // A perpendicular test lived here too — how far the partner had drifted off
+    // the line to the basket — and it is gone, because it did nothing. Removing
+    // it moved offensive rebounds from 2.90 to 2.90 a game and the three
+    // balance win rates by 0. The two tests above already cover it, and
+    // unguarded machinery that changes no measurement is not worth keeping.
+    const hx = ownHoop.x - handler.x;
+    const hz = (ownHoop.z - handler.z) * Z_PX;
+    const len = Math.hypot(hx, hz);
+    if (len < 1) return false;
+    const along = ((mate.x - handler.x) * hx + (mate.z - handler.z) * Z_PX * hz) / len;
+    return along <= 0;
+};
 /** Goalside offset from the spot he committed to. */
 const MARK_STANDOFF = 8;
 /** How far past him, toward the rim he defends, the handler has to get before
@@ -605,9 +638,9 @@ export interface Player {
     /** CPU only: the spot this defender has committed to guarding, and what is
      *  left of the reaction time that bought it. See `MARK_REACT`. */
     markX: number; markZ: number; markT: number;
-    /** CPU only, off the ball: whether he has left his man to go at the ball,
-     *  and what is left of that commitment. See `DOUBLE_CHANCE`. */
-    helping: boolean; helpT: number;
+    /** CPU only, off the ball: whether he has left his man to go at the ball.
+     *  See `shouldDouble`. */
+    helping: boolean;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -1082,7 +1115,7 @@ const mkPlayer = (
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
     turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0,
-    markX: 0, markZ: 0.5, markT: 0, helping: false, helpT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    markX: 0, markZ: 0.5, markT: 0, helping: false, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -2066,7 +2099,6 @@ const aiThink = (w: World, p: Player, dt: number) => {
     p.aiTimer = Math.max(0, p.aiTimer - dt);
     p.laneT = Math.max(0, p.laneT - dt);
     p.markT = Math.max(0, p.markT - dt);
-    p.helpT = Math.max(0, p.helpT - dt);
 
     if (w.possession === p.id) {
         /* --- with the ball --------------------------------------------- */
@@ -2323,23 +2355,30 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // offence took 66% of its own misses with 2.8 tip-ins a game. The
             // wind-up is what makes this readable: he is reacting to a gather
             // he can see, not to a shot that has already left.
-            if (p.helping && (p.helpT <= 0 || handler.gather >= 0 || handler.dunkT > 0)) {
+            // A shot going up ends the double, immediately. He turns and
+            // finds a body.
+            //
+            // This one is load-bearing and not for the reason first written
+            // down. It was justified by offensive rebounds, and on the boards
+            // it measures as nothing (2.90 a game against 2.75 without it).
+            // What it actually does is the passing game: leave the helper
+            // standing on the ball while a shot goes up and he is sitting in
+            // the lane at exactly the moment the offence wants to move it.
+            // With the clause, a bot passing twice a second wins 64% against
+            // 54% for one that hoards; without it, 54% against 60% — passing
+            // flips from the better strategy to the worse one. The wind-up
+            // from the release-meter work is what makes it readable: he is
+            // reacting to a gather he can see, not to a shot already gone.
+            if (p.helping && (handler.gather >= 0 || handler.dunkT > 0)) {
                 p.helping = false;
-                p.helpT = 0;
                 p.markT = 0;
             }
 
             if (p.markT <= 0) {
-                // The choice is only made when he is not already committed to
-                // one. Re-rolling it every reaction is what turned the double
-                // into a twitch he never followed through on.
-                if (!p.helping) {
-                    const threat = handler.onFire || hoopDist(handler, ownHoop) < DOUBLE_THREAT_R;
-                    if (beaten || rng(w) < (threat ? DOUBLE_HOT_CHANCE : DOUBLE_CHANCE)) {
-                        p.helping = true;
-                        p.helpT = DOUBLE_TIME[0] + rng(w) * (DOUBLE_TIME[1] - DOUBLE_TIME[0]);
-                    }
-                }
+                // Re-asked every reaction, because it is a condition rather
+                // than a roll: while his partner is still beaten it stays true
+                // on its own, so he actually arrives instead of twitching at it.
+                p.helping = shouldDouble(w, p, mate, handler, ownHoop);
                 if (beaten) {
                     // Protect the rim rather than chase the man who is past you.
                     p.markX = ownHoop.x + ownHoop.inward * 24;

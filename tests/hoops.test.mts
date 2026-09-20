@@ -120,6 +120,17 @@ t('passing is not a losing strategy', () => {
         busy.winRate > 0.15,
         `a bot passing twice a second wins only ${(busy.winRate * 100).toFixed(0)}% — passing is punished`,
     );
+    // Two absolute floors are not enough, because both of them survive passing
+    // being simply the *worse* of the two strategies. This is the comparison,
+    // and it is load-bearing: dropping the clause that makes a helping defender
+    // let go of the ball when a shot goes up flips these two — 54% against 60%
+    // for the hoarder, instead of 64% against 54%. A body standing on the ball
+    // stands in the lane out of it, and a defence that never lets go of that
+    // position quietly makes the pass the mistake.
+    assert.ok(
+        busy.winRate > quiet.winRate - 0.05,
+        `moving the ball wins ${(busy.winRate * 100).toFixed(0)}% against ${(quiet.winRate * 100).toFixed(0)}% for holding it — the pass is the worse play`,
+    );
 });
 
 t('most passes arrive', () => {
@@ -719,18 +730,39 @@ function driveRun(style: 'straight' | 'weave', period = 32, seed = 21) {
     };
 }
 
+/**
+ * Six drives, averaged. Both the defender's reaction and how far ahead he reads
+ * are rolls, and his partner may or may not have rotated over — a single drive
+ * can come out either way and only the shape across a handful means anything.
+ */
+const DRIVE_SEEDS = [21, 34, 55, 89, 144, 233];
+function driveAvg(period: number) {
+    const runs = DRIVE_SEEDS.map(s => driveRun('weave', period, s));
+    const mean = (pick: (r: typeof runs[0]) => number) =>
+        runs.reduce((n, r) => n + pick(r), 0) / runs.length;
+    return {
+        peak: mean(r => r.peak),
+        avg: mean(r => r.avg),
+        open: mean(r => r.openShare),
+        goalside: mean(r => r.goalsideShare),
+        frames: mean(r => r.frames),
+        lost: runs.filter(r => r.lost).length,
+        reached: runs.filter(r => r.reached).length,
+    };
+}
+
 t('a drive can actually beat the man in front of you', () => {
-    const r = driveRun('weave');
-    assert.ok(!r.lost, 'the defender simply took the ball — the drive never happened');
+    const r = driveAvg(32);
+    assert.ok(r.lost < 3, `the defence took the ball on ${r.lost} of ${DRIVE_SEEDS.length} drives — they never happened`);
     assert.ok(
         r.peak > CONTEST_R,
-        `the best separation a full-turbo cutting drive ever got was ${r.peak.toFixed(1)}px — inside a contest for the whole drive`,
+        `the best separation a full-turbo cutting drive gets is ${r.peak.toFixed(1)}px — inside a contest for the whole drive`,
     );
     assert.ok(
-        r.openShare > 0.05,
-        `only ${(r.openShare * 100).toFixed(0)}% of the drive was clear of a contest — there is no way past him`,
+        r.open > 0.05,
+        `only ${(r.open * 100).toFixed(0)}% of the drive is clear of a contest — there is no way past him`,
     );
-    assert.ok(r.reached, 'a full-turbo drive never even reached the rim');
+    assert.ok(r.reached >= 4, `only ${r.reached} of ${DRIVE_SEEDS.length} full-turbo drives reached the rim`);
 });
 
 t('how you cut matters, which is the whole point', () => {
@@ -742,32 +774,18 @@ t('how you cut matters, which is the whole point', () => {
     // buy it and then leaving is worth far more than mashing:
     //
     //   rhythm      8f   16f   24f   32f   40f   48f
-    //   peak gap  28.8  29.4  32.9  34.7  32.9  39.2
-    //   open       18%    7%   20%   28%   37%   33%
-    //   to the rim  118   108   105   107   104    98  frames
+    //   peak gap  24.1  31.6  33.7  28.9  37.8  37.7
+    //   open        4%   18%   18%   21%   43%   43%
+    //   to the rim  108   109   109   107   104    98  frames
     //
     // Mashing is not merely no better, it is actively worse, and slower with
     // it. Against the mirror every one of those columns was flat: 13.5px of
     // peak separation and 0% open at every rhythm from 8 frames to 48.
-    // Averaged over six seeds, because the defender's reaction and his read are
-    // both rolls now — a single drive can come out either way and the shape only
-    // shows across a handful.
-    const SEEDS = [21, 34, 55, 89, 144, 233];
-    const over = (period: number) => {
-        const runs = SEEDS.map(s => driveRun('weave', period, s));
-        const mean = (pick: (r: typeof runs[0]) => number) =>
-            runs.reduce((n, r) => n + pick(r), 0) / runs.length;
-        return {
-            peak: mean(r => r.peak),
-            open: mean(r => r.openShare),
-            frames: mean(r => r.frames),
-        };
-    };
-    const mashing = over(8);
-    const committed = over(48);
+    const mashing = driveAvg(8);
+    const committed = driveAvg(48);
 
     assert.ok(
-        committed.open > mashing.open + 0.08,
+        committed.open > mashing.open + 0.12,
         `a committed cut is clear of a contest for ${(committed.open * 100).toFixed(0)}% of the drive against ${(mashing.open * 100).toFixed(0)}% for mashing — the stick does not matter`,
     );
     assert.ok(
@@ -1944,14 +1962,23 @@ t('turning a sprint around costs him more than turning from a standstill', () =>
     void pin;
 });
 
-t('the second defender sometimes leaves his man to double the ball', () => {
-    // He has a choice off the ball and it has to be a real one: a defence that
-    // never doubles is two men playing solitaire, and one that doubles on a
-    // third of its frames is a scheme rather than a gamble. At 38% it measured
-    // as punishing the pass — a body standing on the ball is standing in the
-    // passing lane out of it — and the bot that passed twice a second dropped
-    // to a 26% win rate against 50% for the one that hardly passed at all.
-    // At 13% of off-ball frames the two sit level again.
+t('the second defender leaves his man when his partner is beaten, and not before', () => {
+    // Whether the double happens is a *condition*, not a roll, and that turned
+    // out to be the whole thing. Rolled often it was a scheme that punished
+    // passing — a body standing on the ball stands in the lane out of it, and
+    // the bot passing twice a second fell to a 26% win rate against 50% for the
+    // one that hardly passed. Rolled rarely it was a coin that cost the defence
+    // a basket for no reason anyone could read.
+    //
+    // Triggered by his partner being beaten, the same numbers come out the
+    // other way up: passing 64%, hoarding 54%. The double stops being something
+    // the defence spends and becomes something the offence *earns*, which is
+    // also why the pass out of one being contested is correct rather than a
+    // problem. You beat your man, so there are two on you and one of theirs is
+    // alone.
+    //
+    // The constructed half of this is below; this half is the shape in real
+    // games.
     let x = 4321;
     const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
     let offBall = 0, doubling = 0, homeGap = 0, doubleGap = 0;
@@ -1981,8 +2008,8 @@ t('the second defender sometimes leaves his man to double the ball', () => {
     }
     assert.ok(offBall > 2000, `only ${offBall} off-ball frames — the check proves nothing`);
     const rate = doubling / offBall;
-    assert.ok(rate > 0.03, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — the choice does not exist`);
-    assert.ok(rate < 0.30, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — that is a scheme, not a gamble`);
+    assert.ok(rate > 0.05, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — the rotation does not exist`);
+    assert.ok(rate < 0.45, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — nobody is guarding anybody`);
     // And he has to actually get there, or it is not a gamble either. This is
     // the assertion that caught the first version: committed for only one
     // reaction he never arrived, and ended up 26.2px from his own man while
@@ -1996,5 +2023,35 @@ t('the second defender sometimes leaves his man to double the ball', () => {
     );
 });
 
+
+t('the double is triggered by his partner losing the man, not by a dice roll', () => {
+    // Constructed, because the trigger is the point and real games only show
+    // you the aggregate. Same frame, same everybody, one difference: whether
+    // the on-ball defender is still in front of the man with the ball.
+    const decide = (partnerBeaten: boolean) => {
+        const { w, p } = offenceWorld();          // the human has it, near the rim
+        const foes = w.players.filter(q => q.team !== p.team);
+        const theirHoop = HOOPS[attackHoop(foes[0].team === p.team ? p.team : foes[0].team)];
+        // The basket they are defending is the one the human is attacking.
+        const ownHoop = HOOPS[attackHoop(p.team)];
+        void theirHoop;
+        for (const q of foes) {
+            q.y = 0; q.vy = 0; q.vx = 0; q.vz = 0; q.stumbleT = 0; q.dunkT = 0;
+            q.cool = 0; q.markT = 0; q.helping = false;
+        }
+        // On-ball man: goalside and tight, or beaten and trailing.
+        const inward = ownHoop.x > p.x ? 1 : -1;
+        foes[0].x = partnerBeaten ? p.x - inward * 26 : p.x + inward * 9;
+        foes[0].z = p.z;
+        // Second man: parked on his own assignment, well away from the ball.
+        foes[1].x = p.x - inward * 70;
+        foes[1].z = p.z > 0.5 ? 0.2 : 0.8;
+        stepWorld(w, DT, blankCmd());
+        return foes[1].helping;
+    };
+
+    assert.equal(decide(false), false, 'he abandoned his man while his partner was still in front of the ball');
+    assert.equal(decide(true), true, 'his partner was beaten and nobody rotated over');
+});
 
 console.log(`\n${pass} hoops checks passed.`);

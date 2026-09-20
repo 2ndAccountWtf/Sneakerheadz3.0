@@ -97,6 +97,35 @@ Two structural details worth copying the shape of:
   CPU should be beatable because it is playing the same game, not because we
   handicapped a number.
 
+### The second defender: when does he leave his man?
+
+Read from the same routine, and it is the answer to a question we had got
+wrong. Their off-ball drone does **not** roll dice for it. It picks between its
+own assignment and the ball carrier on a chain of conditions, re-asked each time
+its seek counter expires:
+
+- **Is the ball far from the basket I am defending?** Then stay, whatever else
+  is happening. Not yet a problem.
+- **Is my partner on the floor?** (a stagger or knockdown sequence) Then take
+  the ball. Nobody else is going to.
+- **Is my partner still between the man with the ball and our basket?** They
+  test this as an angle — the direction from the partner to his man against the
+  direction from the partner to the hoop — plus a distance check on how far the
+  partner is from him. Fail either and the drone takes the ball carrier.
+
+So the double is **help defence with a trigger**, not a gamble. It happens
+precisely when the offence has already won the on-ball matchup.
+
+**That changes who pays for it, and it is the thing we had backwards.** A double
+that fires at random is something the defence spends, and it lands on the
+offence as bad luck — which is why ours punished passing when we rolled for it:
+a body standing on the ball is standing in the lane out of it, and if it got
+there for no reason then the pass being harder is a tax on nothing. A double
+that fires because you beat your man is something you *earned*, and then the
+contested pass out of it is the correct price of a situation you created: two
+on you, one of theirs alone. Measured here, that is the difference between a bot
+that passes twice a second winning 26% and winning 64%.
+
 **The reading for us.** Separation should come from being *right* about where the
 defender committed, and the defender has to be capable of committing wrongly.
 Speed alone cannot produce that against a mirror, which is why turbo has never
