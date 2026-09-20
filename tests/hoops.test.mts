@@ -660,8 +660,8 @@ t('the camera never loses a player or the rim it is attacking', () => {
  *
  * So this measures the drive instead of the constants.
  */
-function driveRun(style: 'straight' | 'weave', period = 32) {
-    const w = createWorld(21, 'Test Guy');
+function driveRun(style: 'straight' | 'weave', period = 32, seed = 21) {
+    const w = createWorld(seed, 'Test Guy');
     for (let i = 0; i < 200 && w.phase === 'tip'; i++) stepWorld(w, DT, blankCmd());
     const me = w.players.find(p => p.human)!;
     const mate = w.players.find(p => p.team === me.team && p.id !== me.id)!;
@@ -741,28 +741,42 @@ t('how you cut matters, which is the whole point', () => {
     // commits to a decision, committing to a direction long enough for him to
     // buy it and then leaving is worth far more than mashing:
     //
-    //   rhythm      8f   12f   20f   28f   40f   48f
-    //   avg gap   11.6  15.0  19.4  16.9  20.3  20.7
-    //   goalside     6%   81%   86%   86%   85%   84%
-    //   to the rim  180   139   128   126   124   111  frames
+    //   rhythm      8f   16f   24f   32f   40f   48f
+    //   peak gap  28.8  29.4  32.9  34.7  32.9  39.2
+    //   open       18%    7%   20%   28%   37%   33%
+    //   to the rim  118   108   105   107   104    98  frames
     //
-    // Mashing is not merely no better, it is actively worse: 8-frame cuts live
-    // at 11.6px of daylight, get goalside on 6% of frames, and take 180 frames
-    // to reach the rim against 111 for a man who commits. Against the mirror
-    // every one of those columns was flat.
-    const mashing = driveRun('weave', 8);
-    const committed = driveRun('weave', 48);
+    // Mashing is not merely no better, it is actively worse, and slower with
+    // it. Against the mirror every one of those columns was flat: 13.5px of
+    // peak separation and 0% open at every rhythm from 8 frames to 48.
+    // Averaged over six seeds, because the defender's reaction and his read are
+    // both rolls now — a single drive can come out either way and the shape only
+    // shows across a handful.
+    const SEEDS = [21, 34, 55, 89, 144, 233];
+    const over = (period: number) => {
+        const runs = SEEDS.map(s => driveRun('weave', period, s));
+        const mean = (pick: (r: typeof runs[0]) => number) =>
+            runs.reduce((n, r) => n + pick(r), 0) / runs.length;
+        return {
+            peak: mean(r => r.peak),
+            open: mean(r => r.openShare),
+            frames: mean(r => r.frames),
+        };
+    };
+    const mashing = over(8);
+    const committed = over(48);
+
     assert.ok(
-        committed.avg > mashing.avg + 4,
-        `a committed cut lives at ${committed.avg.toFixed(1)}px of daylight against ${mashing.avg.toFixed(1)}px for mashing — the stick does not matter`,
+        committed.open > mashing.open + 0.08,
+        `a committed cut is clear of a contest for ${(committed.open * 100).toFixed(0)}% of the drive against ${(mashing.open * 100).toFixed(0)}% for mashing — the stick does not matter`,
     );
     assert.ok(
-        committed.goalsideShare > mashing.goalsideShare + 0.3,
-        `mashing gets goalside on ${(mashing.goalsideShare * 100).toFixed(0)}% of frames against a committed cut's ${(committed.goalsideShare * 100).toFixed(0)}% — there is nothing to read`,
+        committed.peak > mashing.peak + 5,
+        `a committed cut opens ${committed.peak.toFixed(1)}px against ${mashing.peak.toFixed(1)}px for mashing`,
     );
     assert.ok(
         committed.frames < mashing.frames,
-        `mashing reached the rim in ${mashing.frames} frames and committing took ${committed.frames} — rattling the stick should not be the fast way`,
+        `mashing reached the rim in ${mashing.frames.toFixed(0)} frames and committing took ${committed.frames.toFixed(0)} — rattling the stick should not be the fast way`,
     );
 });
 
@@ -1853,6 +1867,133 @@ t('the CPU handler picks a depth lane instead of shaking between two', () => {
         `${((jittery / poss) * 100).toFixed(0)}% of CPU possessions cross the mid-line twice or more`);
     assert.ok(per > 0.15,
         `the CPU handler changes lanes ${per.toFixed(2)} times a possession — the drift has been dwelled out of existence`);
+});
+
+
+t('the guard is not wrong by the same amount every time', () => {
+    // A flat reaction is still a defender you can learn once and then stop
+    // thinking about. Both his reaction and how far ahead he reads you are
+    // rolls, so the same cut is not worth the same thing twice — which is the
+    // difference between a defender and a pattern.
+    //
+    // Measured off `markT` as the world actually sets it, across real games,
+    // rather than restated from the constants.
+    let x = 1234;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    const seen: number[] = [];
+    for (let g = 0; g < 6; g++) {
+        const w = createWorld(8800 + g, 'Test Guy');
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        const was = w.players.map(q => q.markT);
+        while (w.phase !== 'over' && frames < cap) {
+            stepWorld(w, DT, bot(w, rng, 1.2));
+            frames++;
+            // Only decisions taken at a level score. The reaction also scales
+            // with the margin, and that alone spreads the numbers enough to
+            // pass a naive check — measured: flattening the roll to a constant
+            // left this test green, because a tied game and a six-point game
+            // produce different reactions whether or not he rolls for it.
+            const level = w.score[0] === w.score[1];
+            for (const q of w.players) {
+                // A fresh commitment: the timer jumped up rather than ticking down.
+                if (level && q.markT > was[q.id] + 0.001) seen.push(q.markT);
+                was[q.id] = q.markT;
+            }
+        }
+    }
+    assert.ok(seen.length > 300, `only ${seen.length} level-score decisions observed — the check proves nothing`);
+    const lo = Math.min(...seen);
+    const hi = Math.max(...seen);
+    const mean = seen.reduce((n, v) => n + v, 0) / seen.length;
+    assert.ok(hi > lo * 2.5, `his reaction runs ${lo.toFixed(2)}s to ${hi.toFixed(2)}s — near enough flat to time with a metronome`);
+    assert.ok(hi > 0.45, `his slowest reaction is ${hi.toFixed(2)}s — he is never properly out of the play`);
+    assert.ok(lo < 0.25, `his sharpest reaction is ${lo.toFixed(2)}s — he is never properly on you`);
+    assert.ok(mean > 0.15 && mean < 0.6, `his average reaction is ${mean.toFixed(2)}s, which is not a defender`);
+});
+
+t('turning a sprint around costs him more than turning from a standstill', () => {
+    // The reason the best move in the game is a bait. A body already moving has
+    // to stop being a body already moving first, and the faster it was going the
+    // longer that takes — so getting him running and then going back the other
+    // way buys more than cutting from a walk.
+    const { w, p, pin } = defenceWorld();
+    const foe = w.players.find(q => q.team !== p.team)!;
+
+    const commitFrom = (vx: number) => {
+        // Park him goalside of the handler, moving at `vx`, and make him decide.
+        foe.x = p.x + 20; foe.z = p.z; foe.vx = vx; foe.vz = 0;
+        foe.markT = 0;
+        foe.y = 0; foe.vy = 0; foe.stumbleT = 0; foe.dunkT = 0;
+        w.possession = p.id;
+        w.ball.mode = 'held';
+        p.vx = -60; p.vz = 0;          // handler running the other way
+        stepWorld(w, DT, blankCmd());
+        return foe.markT;
+    };
+
+    // Same decision, same direction to turn to — the only difference is how
+    // fast he was already going the wrong way.
+    const still = commitFrom(0);
+    const sprinting = commitFrom(110);
+    assert.ok(still > 0, 'he never committed to anything — the check proves nothing');
+    assert.ok(
+        sprinting > still,
+        `reversing at 110px/s cost him ${sprinting.toFixed(2)}s against ${still.toFixed(2)}s from a standstill — momentum is free`,
+    );
+    void pin;
+});
+
+t('the second defender sometimes leaves his man to double the ball', () => {
+    // He has a choice off the ball and it has to be a real one: a defence that
+    // never doubles is two men playing solitaire, and one that doubles on a
+    // third of its frames is a scheme rather than a gamble. At 38% it measured
+    // as punishing the pass — a body standing on the ball is standing in the
+    // passing lane out of it — and the bot that passed twice a second dropped
+    // to a 26% win rate against 50% for the one that hardly passed at all.
+    // At 13% of off-ball frames the two sit level again.
+    let x = 4321;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    let offBall = 0, doubling = 0, homeGap = 0, doubleGap = 0;
+    for (let g = 0; g < 5; g++) {
+        const w = createWorld(8900 + g, 'Test Guy');
+        let frames = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        while (w.phase !== 'over' && frames < cap) {
+            stepWorld(w, DT, bot(w, rng, 1.2));
+            frames++;
+            if (w.possession === null) continue;
+            const handler = w.players[w.possession];
+            for (const q of w.players) {
+                if (q.team === handler.team || q.human) continue;
+                const mate = w.players.find(o => o.team === q.team && o.id !== q.id)!;
+                const iAmCloser = dist2d(q.x, q.z, handler.x, handler.z)
+                    <= dist2d(mate.x, mate.z, handler.x, handler.z);
+                if (iAmCloser) continue;                    // he is the on-ball man
+                offBall++;
+                // Measured against the ball rather than against his man: "he
+                // went" is the thing being checked, and it does not depend on
+                // this test re-deriving which attacker he was supposed to be on.
+                const toBall = dist2d(q.x, q.z, handler.x, handler.z);
+                if (q.helping) { doubling++; doubleGap += toBall; } else { homeGap += toBall; }
+            }
+        }
+    }
+    assert.ok(offBall > 2000, `only ${offBall} off-ball frames — the check proves nothing`);
+    const rate = doubling / offBall;
+    assert.ok(rate > 0.03, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — the choice does not exist`);
+    assert.ok(rate < 0.30, `he doubles on ${(rate * 100).toFixed(0)}% of off-ball frames — that is a scheme, not a gamble`);
+    // And he has to actually get there, or it is not a gamble either. This is
+    // the assertion that caught the first version: committed for only one
+    // reaction he never arrived, and ended up 26.2px from his own man while
+    // "doubling" against 26.9px at home — identical, which is to say no choice
+    // was being made at all.
+    const home = homeGap / Math.max(1, offBall - doubling);
+    const away = doubleGap / Math.max(1, doubling);
+    assert.ok(
+        away < home - 8,
+        `he sits ${away.toFixed(1)}px off the ball while doubling and ${home.toFixed(1)}px when he stays home — he never actually goes`,
+    );
 });
 
 

@@ -595,6 +595,93 @@ celebration, fifteen "frames" of held input became far fewer real ones, the
 acceleration ramp never finished, and a check about *diagonals* failed. The pin
 is in the shared helper now, which is where it should have gone the first time.
 
+## 6.6 — the guard is not always right
+
+Follow-up, asked for directly: "the guard can't always be right. Nor should his
+reaction or reverse direction time always be flat — if he was moving in turbo
+the reversal time should be higher. And the reversal and the velocity lead
+should not be flat, make them ranges that can get even worse. The defender also
+needs to decide if he wants to guard a player without the ball or double team on
+the ball — that can put him even further out of position."
+
+Also, correctly: **the game being easier than it was is the fix, not a cost.**
+Before, a drive was impossible. §6.5 hedged about that and should not have.
+
+**Four things.**
+
+1. **The reaction is a roll, not a constant.** 0.6x to 1.9x the score-scaled
+   base, so at a level score it runs 0.18s to 0.57s. A flat reaction is a
+   defender you learn once and then stop thinking about.
+2. **The read is a roll too.** 0.45x to 1.85x of `MARK_LEAD`. Under 1 he
+   under-reads your speed and trails; over 1 he has bought a stride more than
+   you are giving him, and can be stopped dead and watched running past.
+3. **Reversing a sprint costs extra**, on top of the reaction: up to 0.26s for a
+   dead-180 at full speed, scaled by both how sharply he has to turn and how
+   fast he was going when he decided to. This is what makes the best move in the
+   game a bait — get him running, then go back the other way. A body at a
+   standstill pays nothing.
+4. **The second defender chooses**: stay home, or leave his man and go
+   two-on-one at the ball, committed for 0.8–1.5s.
+
+**The double took three attempts and two of them were measurably wrong.**
+
+- *Re-rolled every reaction.* He spent the whole window travelling and never
+  arrived: **26.2px from his own man while "doubling" against 26.9px at home** —
+  identical. Not a choice, a twitch. Fixed with a commitment window.
+- *At 38% of off-ball frames.* Now it worked — worth about 18 points of win rate
+  — but it **punished passing**, because a body standing on the ball is standing
+  in the lane out of it. The bot that passed twice a second fell to 26% against
+  50% for the one that hardly passed. That inverts the one property this file
+  has defended all session.
+- *At 13%* (5% base, 14% when the ball is a threat) the two sit level again, and
+  leaving genuinely costs him: **17.8px off his man at home, 27.6px while
+  doubling.**
+
+**A shot going up ends the double** whatever is left on the commitment — he
+turns and finds a body. Without it the helper was still standing on the ball
+when the miss came off the rim and the offence took 66% of its own boards with
+2.8 tip-ins a game. The wind-up from §4.5 is what makes this readable: he reacts
+to a gather he can *see*.
+
+**Measured**, six seeds per rhythm (the rolls mean a single drive can come out
+either way):
+
+```
+rhythm        8f   16f   24f   32f   40f   48f
+peak gap    28.8  29.4  32.9  34.7  32.9  39.2
+open         18%    7%   20%   28%   37%   33%
+to the rim   118   108   105   107   104    98  frames
+```
+
+Balance holds and the level is where §6.5 left it: **quiet 58%, busy 54%, clumsy
+42%.** In real games the player is now clear of a contest on **23% of
+ball-holding frames** (16% before any of this) and inside a reach on **63%**
+(76%).
+
+**Two things found on the way.**
+
+- **The offence has no spacing.** The two attackers stand **33.7px apart on
+  average** on a 284px court. A spacing rule that pushes the off-ball man 74px
+  clear of the ball changed that number by 0.3px — he never arrives inside a
+  2.5s possession. It is left in because it costs nothing and helps the boards
+  slightly, but the real fix is an off-ball offence that establishes position,
+  and until that exists the double-team is a weaker mechanic than it should be.
+  **This is the next real piece of work on this game.**
+- **A gather could outlive its possession by a frame.** `giveBall` cleared the
+  wind-up on the receiver but not on the man it was taken *from*, and the player
+  loop had already passed him. Harmless until the second defender started
+  doubling, at which point steals during a gather got common enough to trip the
+  invariant. Cleared in `giveBall` and `looseBall` now.
+
+**Teeth.** Three new checks (hoops 53 → 56). Five mutations, all caught:
+flattening the reaction fails 1, flattening the read fails 2, making reversal
+free fails 2, never doubling fails 1, and a double committed for a single
+reaction fails 2. The reaction check needed fixing first — flattening the roll
+left it green, because the score-based slope spreads the numbers on its own, so
+it now only counts decisions taken at a level score.
+
+---
+
 ---
 
 ## 7. Explicitly out of scope
@@ -628,7 +715,9 @@ Listed so they are decisions rather than omissions.
 5. §4.5 release meter out     ← DONE
 6. §6   small and true        ← DONE
 7. §6.5 the dribble game      ← DONE
-8. §5   animation             ← as the art lands, tier by tier
+8. §6.6 the guard is human    ← DONE
+9. §5   animation             ← as the art lands, tier by tier
+10. spacing                   ← NOT STARTED, and the next real piece: see §6.6
 ```
 
 §5 runs in parallel with everything from the moment the illustrator starts.

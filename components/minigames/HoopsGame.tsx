@@ -306,8 +306,57 @@ const MARK_REACT = 0.30;        // seconds per decision at a level score
 const MARK_REACT_SLOPE = 0.05;  // added per point of lead, subtracted per point behind
 const MARK_REACT_MIN = 0.12;
 const MARK_REACT_MAX = 0.55;
+/**
+ * A flat reaction time is still a defender who is wrong by exactly the same
+ * amount every time, which is a pattern you learn once and then stop thinking
+ * about. These are the ends of the roll he makes on each decision, as a
+ * multiple of the scaled base — so at a level score his reaction runs anywhere
+ * from 0.18s to 0.57s, and the long ones are the openings.
+ */
+const MARK_REACT_SPREAD: readonly [number, number] = [0.6, 1.9];
 /** How far ahead of the handler he aims. Zero would make him a mirror again. */
 const MARK_LEAD = 0.34;
+/**
+ * And the read is a roll too. Under 1 he under-reads your speed and trails the
+ * play; over 1 he over-reads it, which is the one that matters — a defender who
+ * has bought a full stride more than you are actually giving him can be stopped
+ * dead and watched running past.
+ */
+const MARK_LEAD_SPREAD: readonly [number, number] = [0.45, 1.85];
+/**
+ * Turning a sprint around costs real time, and the faster he was going the more
+ * it costs. This is what makes the best move in the game a bait: get him
+ * running, then go back the other way. A body at a standstill pays nothing.
+ */
+const MARK_REVERSE_COST = 0.26;   // seconds for a full reversal at full speed
+const MARK_REVERSE_SPEED = 90;    // px/s at which the whole cost applies
+/**
+ * Off the ball he has an actual choice: stay home on his man, or leave him and
+ * go two-on-one at the ball. Making it is the point — a defence that never
+ * doubles is four men playing solitaire, and the pass out of a double is only
+ * worth something if the double happens. He commits to the answer for a whole
+ * reaction either way, which is the window.
+ */
+const DOUBLE_CHANCE = 0.05;
+const DOUBLE_HOT_CHANCE = 0.14;
+/** Close enough to the rim (or lit up) that doubling is the obvious call. */
+const DOUBLE_THREAT_R = 90;
+/**
+ * How long a double lasts once he has gone.
+ *
+ * It has to outlive the decision that started it or it is not a gamble, it is a
+ * twitch. Re-rolled every reaction, the double measured as leaving the man he
+ * abandoned all of 2.3px more open than staying home would have — he spent the
+ * whole window travelling and never actually arrived. Committed for a second or
+ * so, he gets there, and the man he left is genuinely alone.
+ */
+const DOUBLE_TIME: readonly [number, number] = [0.8, 1.5];
+/** How far the man without the ball keeps off the man with it. See the spacing
+ *  note in the off-ball offence branch — everything else depends on this. */
+const SPACING_MIN = 74;
+/** How tight he gets on the ball once he has committed to doubling it. Much
+ *  closer than a normal mark: the point is two bodies on one. */
+const DOUBLE_STANDOFF = 5;
 /** Goalside offset from the spot he committed to. */
 const MARK_STANDOFF = 8;
 /** How far past him, toward the rim he defends, the handler has to get before
@@ -553,9 +602,12 @@ export interface Player {
     /** CPU only: the depth lane currently being driven to, and how long is left
      *  on the commitment to it. See `LANE_DWELL`. */
     lane: number; laneT: number;
-    /** CPU only: the spot the on-ball defender has committed to guarding, and
-     *  what is left of the reaction time that bought it. See `MARK_REACT`. */
+    /** CPU only: the spot this defender has committed to guarding, and what is
+     *  left of the reaction time that bought it. See `MARK_REACT`. */
     markX: number; markZ: number; markT: number;
+    /** CPU only, off the ball: whether he has left his man to go at the ball,
+     *  and what is left of that commitment. See `DOUBLE_CHANCE`. */
+    helping: boolean; helpT: number;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -1030,7 +1082,7 @@ const mkPlayer = (
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
     turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0,
-    markX: 0, markZ: 0.5, markT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    markX: 0, markZ: 0.5, markT: 0, helping: false, helpT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -1138,6 +1190,13 @@ export const createWorld = (seed: number, opponent: string, foe: HoopsProfile = 
 /* ------------------------------------------------------------------ */
 
 const giveBall = (w: World, id: number, keepClock = false) => {
+    // Whoever was winding up a shot is not any more. Clearing it only on the
+    // receiver left the man it was taken *from* holding a live gather for the
+    // rest of the frame, because the player loop had already passed him — and
+    // `stepGather` only catches that on the frame after, which is a frame too
+    // late. Steals during a gather got common the moment the second defender
+    // started doubling the ball, and the invariant started failing.
+    if (w.possession !== null) w.players[w.possession].gather = -1;
     w.possession = id;
     w.players[id].touchT = 0;
     w.players[id].passChargeT = -1;
@@ -1166,6 +1225,8 @@ const giveBall = (w: World, id: number, keepClock = false) => {
 
 const looseBall = (w: World, x: number, z: number, y: number, vx: number, vy: number, vz = 0) => {
     const b = w.ball;
+    // Same reason as `giveBall`: the ball is gone, so the wind-up is gone.
+    if (w.possession !== null) w.players[w.possession].gather = -1;
     w.possession = null;
     b.mode = 'loose';
     b.x = x; b.z = z; b.y = y;
@@ -1916,7 +1977,37 @@ const BACKPEDAL = 0.84;
  */
 const reactionTime = (w: World, p: Player): number => {
     const lead = w.score[p.team] - w.score[1 - p.team];
-    return clamp(MARK_REACT + lead * MARK_REACT_SLOPE, MARK_REACT_MIN, MARK_REACT_MAX);
+    const base = clamp(MARK_REACT + lead * MARK_REACT_SLOPE, MARK_REACT_MIN, MARK_REACT_MAX);
+    const [lo, hi] = MARK_REACT_SPREAD;
+    return base * (lo + rng(w) * (hi - lo));
+};
+
+/** How far ahead he reads you on this particular decision. See `MARK_LEAD`. */
+const leadOf = (w: World): number => {
+    const [lo, hi] = MARK_LEAD_SPREAD;
+    return MARK_LEAD * (lo + rng(w) * (hi - lo));
+};
+
+/**
+ * Extra lag for turning a body around, on top of the reaction.
+ *
+ * Nothing at a standstill; the full `MARK_REVERSE_COST` for a dead-180 at a
+ * sprint, scaled by both how sharply he has to turn and how fast he was going
+ * when he decided to. A defender who has been baited into a full-speed
+ * commitment and then has to come back the other way is out of the play for
+ * most of a second, which is the whole idea.
+ */
+const reverseCost = (p: Player, toX: number, toZ: number): number => {
+    const speed = Math.hypot(p.vx, p.vz * Z_PX);
+    if (speed < 12) return 0;
+    const dx = toX - p.x;
+    const dz = (toZ - p.z) * Z_PX;
+    const len = Math.hypot(dx, dz);
+    if (len < 1) return 0;
+    // -1 is straight back the way he came, +1 is carry straight on.
+    const along = (p.vx * dx + p.vz * Z_PX * dz) / (speed * len);
+    if (along >= 0) return 0;
+    return MARK_REVERSE_COST * -along * clamp(speed / MARK_REVERSE_SPEED, 0, 1);
 };
 
 export const laneBlockFactor = (w: World, p: Player, turbo: boolean): number => {
@@ -1975,6 +2066,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
     p.aiTimer = Math.max(0, p.aiTimer - dt);
     p.laneT = Math.max(0, p.laneT - dt);
     p.markT = Math.max(0, p.markT - dt);
+    p.helpT = Math.max(0, p.helpT - dt);
 
     if (w.possession === p.id) {
         /* --- with the ball --------------------------------------------- */
@@ -2070,6 +2162,23 @@ const aiThink = (w: World, p: Player, dt: number) => {
             tz = side;
             tx = hoop.x + hoop.inward * (58 + Math.sin(w.t * 0.7 + p.id) * 26);
             if (dist2d(guard.x, guard.z, p.x, p.z) < 22) tx += (p.x - guard.x) * 1.4;
+            // Spacing, which this game had none of.
+            //
+            // Measured: the two attackers stood **32.6px apart** on average, on
+            // a 284px court. That is a huddle, not an offence, and it quietly
+            // caps everything built on top of it. Two defenders can cover two
+            // men from one spot, so no pass beats anybody; a man leaving his
+            // mark to double the ball travels thirty pixels, so the double
+            // costs him nothing (26.9px from his man when home, 26.2px while
+            // doubling — identical); and nobody is ever standing far enough
+            // out for a three to be the shot that is available.
+            //
+            // The spot-up is computed off the rim, which is right, but nothing
+            // pushed it away from the *ball*. This does.
+            if (Math.abs(tx - handler.x) < SPACING_MIN) {
+                tx = handler.x + (tx >= handler.x ? SPACING_MIN : -SPACING_MIN);
+            }
+            tx = clamp(tx, COURT_L + 10, COURT_R - 10);
 
             turbo = p.turbo > 0.4 && dist2d(p.x, p.z, tx, tz) > 70;
         }
@@ -2106,12 +2215,15 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // target, so a standoff at 11 sat exactly on STEAL_R and nobody
             // ever reached in.
             if (p.markT <= 0) {
-                p.markT = reactionTime(w, p);
-                // Where he thinks you are going, not where you are.
-                const aimX = handler.x + handler.vx * MARK_LEAD;
-                const aimZ = handler.z + handler.vz * MARK_LEAD;
+                // Where he thinks you are going, not where you are — and how
+                // far ahead is a roll, so the same cut is not worth the same
+                // thing twice.
+                const read = leadOf(w);
+                const aimX = handler.x + handler.vx * read;
+                const aimZ = handler.z + handler.vz * read;
                 p.markX = aimX + (ownHoop.x > aimX ? MARK_STANDOFF : -MARK_STANDOFF);
                 p.markZ = aimZ;
+                p.markT = reactionTime(w, p) + reverseCost(p, p.markX, p.markZ);
             }
             tx = p.markX;
             tz = p.markZ;
@@ -2195,14 +2307,77 @@ const aiThink = (w: World, p: Player, dt: number) => {
             // his own mark constantly, which just traded one open man for
             // another instead of actually shoring up the defence.
             const beaten = dist2d(mate.x, mate.z, handler.x, handler.z) > 40 && hoopDist(handler, ownHoop) < 140;
-            if (beaten) {
-                tx = ownHoop.x + ownHoop.inward * 24;
-                tz = handler.z;
-                turbo = p.turbo > 0.3 && dist2d(p.x, p.z, tx, tz) > 30;
+
+            // The second man has a choice, and he commits to it for a whole
+            // reaction: stay home on his mark, or leave him and go at the ball.
+            // Leaving is what puts him out of position, and being out of
+            // position is the point — a pass out of a double is only worth
+            // throwing if the double actually happens. See `DOUBLE_CHANCE`.
+            //
+            // A partner who has genuinely been beaten overrides the roll: that
+            // is not a gamble, it is the basket needing a body in front of it.
+            // A shot going up ends the double, immediately, whatever is left on
+            // the commitment. He turns and finds a body. Without this the
+            // helper was still standing on the ball when the miss came off the
+            // rim, nobody was between the other man and the basket, and the
+            // offence took 66% of its own misses with 2.8 tip-ins a game. The
+            // wind-up is what makes this readable: he is reacting to a gather
+            // he can see, not to a shot that has already left.
+            if (p.helping && (p.helpT <= 0 || handler.gather >= 0 || handler.dunkT > 0)) {
+                p.helping = false;
+                p.helpT = 0;
+                p.markT = 0;
+            }
+
+            if (p.markT <= 0) {
+                // The choice is only made when he is not already committed to
+                // one. Re-rolling it every reaction is what turned the double
+                // into a twitch he never followed through on.
+                if (!p.helping) {
+                    const threat = handler.onFire || hoopDist(handler, ownHoop) < DOUBLE_THREAT_R;
+                    if (beaten || rng(w) < (threat ? DOUBLE_HOT_CHANCE : DOUBLE_CHANCE)) {
+                        p.helping = true;
+                        p.helpT = DOUBLE_TIME[0] + rng(w) * (DOUBLE_TIME[1] - DOUBLE_TIME[0]);
+                    }
+                }
+                if (beaten) {
+                    // Protect the rim rather than chase the man who is past you.
+                    p.markX = ownHoop.x + ownHoop.inward * 24;
+                    p.markZ = handler.z;
+                } else {
+                    const target = p.helping ? handler : mark;
+                    const read = leadOf(w);
+                    const aimX = target.x + target.vx * read;
+                    const aimZ = target.z + target.vz * read;
+                    const off = p.helping ? DOUBLE_STANDOFF : 14;
+                    p.markX = aimX + (ownHoop.x > aimX ? off : -off);
+                    p.markZ = p.helping ? aimZ : aimZ + (aimZ > 0.5 ? -0.08 : 0.08);
+                }
+                p.markT = reactionTime(w, p) + reverseCost(p, p.markX, p.markZ);
+            }
+            {
+                const G = globalThis as unknown as { __dt?: number[] };
+                G.__dt ??= [0, 0, 0, 0, 0, 0];
+                const toMine = dist2d(p.x, p.z, mark.x, mark.z);
+                const markOpen = openness(w, mark);
+                if (p.helping) { G.__dt[1]++; G.__dt[3] += markOpen; G.__dt[5] += toMine; }
+                else { G.__dt[0]++; G.__dt[2] += markOpen; G.__dt[4] += toMine; }
+            }
+            tx = p.markX;
+            tz = p.markZ;
+            if (p.helping) {
+                // Committed: he goes and he burns the bar getting there.
+                faceAt = handler.x;
+                turbo = p.turbo > 0.15 && dist2d(p.x, p.z, tx, tz) > 14;
             } else {
-                tx = mark.x + (ownHoop.x > mark.x ? 14 : -14);
-                tz = mark.z + (mark.z > 0.5 ? -0.08 : 0.08);
-                turbo = p.turbo > 0.5 && dist2d(p.x, p.z, tx, tz) > 60;
+                // Staying home has to mean something or leaving cannot cost
+                // anything. At `> 0.5 && > 60` he never sprinted to recover and
+                // his man's spot-up drifts +-26px on its own, so he was 30.9px
+                // from the man he was supposedly denying — further than
+                // CONTEST_R, which is to say not guarding him at all. Measured
+                // against a double at 31.6px: leaving made no difference
+                // because he had never arrived in the first place.
+                turbo = p.turbo > 0.35 && dist2d(p.x, p.z, tx, tz) > 22;
             }
         }
     } else {
