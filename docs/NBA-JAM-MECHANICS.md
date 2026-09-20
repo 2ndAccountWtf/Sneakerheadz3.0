@@ -126,6 +126,33 @@ contested pass out of it is the correct price of a situation you created: two
 on you, one of theirs alone. Measured here, that is the difference between a bot
 that passes twice a second winning 26% and winning 64%.
 
+### Off the ball on offence: a table of places to stand
+
+The third time this document has had to record that they did not compute
+something we assumed was computed.
+
+Their off-ball attacker does not derive a position. `DRONE.ASM` holds
+`#seek_t`, a table of **sixteen hand-placed spots** as offsets from the rim
+being attacked (mirrored by which end it is) and an absolute depth. They are
+laid out in three groups — seven behind the arc, seven at jump-shot range, two
+at the rim — and the drone picks one, walks to it, and **stands there for half a
+second to two seconds** before picking again. Once it arrives it loiters, with a
+small per-frame chance of deciding to be somewhere else.
+
+Two details that carry the whole idea:
+
+- **On fire, it rolls only over the first seven** — the three-point spots. That
+  is the entirety of "the hot man spaces out behind the arc". Nothing else in
+  the game needs to know that is what it means.
+- The spots are **far apart**, spanning the full depth of the court and out past
+  their three-point range. Spacing is not emergent there; it is authored.
+
+Two more things the same routine does, for the record: it **pushes off** a
+defender who is within range and in front of it (the same shove button a player
+has, at a score-scaled 1%–50%), and it **jumps at the backboard** for an
+alley-oop when it is 65–180 out, at a chance that runs from 1% when comfortably
+ahead to 99% when losing badly.
+
 **The reading for us.** Separation should come from being *right* about where the
 defender committed, and the defender has to be capable of committing wrongly.
 Speed alone cannot produce that against a mirror, which is why turbo has never

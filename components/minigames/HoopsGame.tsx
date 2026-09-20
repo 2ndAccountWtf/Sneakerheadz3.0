@@ -342,9 +342,38 @@ const MARK_REVERSE_SPEED = 90;    // px/s at which the whole cost applies
 const DOUBLE_CARE_R = 150;
 /** How far his partner can be from the handler and still count as guarding him. */
 const DOUBLE_LOST_R = 34;
-/** How far the man without the ball keeps off the man with it. See the spacing
- *  note in the off-ball offence branch — everything else depends on this. */
-const SPACING_MIN = 74;
+/**
+ * Where the man without the ball goes: an authored list of places to stand.
+ *
+ * This was one formula — a spot a fixed distance off the rim, on the depth lane
+ * the ball was not on, oscillating a little — and it is why the two attackers
+ * stood **33.7px apart on a 284px court**. There was nowhere else to be. A
+ * rule that shoved the spot 74px clear of the ball changed that number by
+ * 0.3px, because a computed target he never reaches is not a position.
+ *
+ * The original does not compute it. It holds a table of hand-placed spots on
+ * the floor, picks one, and stands there for up to two seconds — and when the
+ * man is on fire it picks only from the deep ones, which is how a hot shooter
+ * ends up behind the arc without anything needing to "decide" that.
+ *
+ * So: twelve spots, as offsets from the rim being attacked (mirrored by
+ * `inward`) and an absolute depth. Deep first, because `SPOT_DEEP` is how many
+ * of them count as behind the arc — `THREE_DIST` is 118 and the court only runs
+ * ~146 from a rim to midcourt, so the deep five are genuinely long looks and
+ * the last two are cutting positions at the rim.
+ */
+const SPOT_TABLE: readonly (readonly [number, number])[] = [
+    [124, 0.16], [128, 0.34], [130, 0.50], [128, 0.66], [124, 0.84],   // behind the arc
+    [80, 0.14], [88, 0.32], [72, 0.50], [88, 0.62], [80, 0.86],        // jump-shot range
+    [38, 0.22], [38, 0.72],                                            // at the rim
+];
+/** How many entries at the top of the table are three-point looks. */
+export const SPOT_DEEP = 5;
+/** How long he stands there before picking somewhere else. */
+const SPOT_DWELL: readonly [number, number] = [0.5, 2.0];
+/** Once he has arrived, the per-frame chance he decides to go somewhere else
+ *  anyway. Stops two players ever settling into a fixed picture. */
+const SPOT_RELOCATE = 0.03;
 /** How tight he gets on the ball once he has committed to doubling it. Much
  *  closer than a normal mark: the point is two bodies on one. */
 const DOUBLE_STANDOFF = 5;
@@ -641,6 +670,9 @@ export interface Player {
     /** CPU only, off the ball: whether he has left his man to go at the ball.
      *  See `shouldDouble`. */
     helping: boolean;
+    /** CPU only, off the ball on offence: which entry of `SPOT_TABLE` he is
+     *  standing on, and how long he has left there. */
+    spot: number; spotT: number;
     /** Counts consecutive made buckets; FIRE_STREAK of them lights you up. */
     streak: number;
     onFire: boolean;
@@ -1115,7 +1147,7 @@ const mkPlayer = (
     facing: team === 0 ? 1 : -1,
     stride: 0, y: 0, vy: 0,
     turbo: 1, gather: -1, shotSkill: 1, lane: 0.5, laneT: 0,
-    markX: 0, markZ: 0.5, markT: 0, helping: false, streak: 0, onFire: false, fireT: 0, touchT: 0,
+    markX: 0, markZ: 0.5, markT: 0, helping: false, spot: 0, spotT: 0, streak: 0, onFire: false, fireT: 0, touchT: 0,
     cool: 0, dunkT: 0, dunkDur: 0, dunkFrom: { x, z }, dunkHoop: 0, dunkSlammed: false,
     dunkKind: 'normal', aiTimer: 0, stumbleT: 0, alleyCall: 0, swapCool: 0,
     passChargeT: -1, cutT: 0,
@@ -2099,6 +2131,7 @@ const aiThink = (w: World, p: Player, dt: number) => {
     p.aiTimer = Math.max(0, p.aiTimer - dt);
     p.laneT = Math.max(0, p.laneT - dt);
     p.markT = Math.max(0, p.markT - dt);
+    p.spotT = Math.max(0, p.spotT - dt);
 
     if (w.possession === p.id) {
         /* --- with the ball --------------------------------------------- */
@@ -2188,31 +2221,26 @@ const aiThink = (w: World, p: Player, dt: number) => {
             tz = handler.z > 0.5 ? 0.3 : 0.7;
             turbo = p.turbo > 0.35;
         } else {
-            // Spot up on the opposite depth lane, a comfortable jumper away
-            // from the rim, and slide away from whoever is guarding you.
-            const side = handler.z > 0.5 ? 0.24 : 0.76;
-            tz = side;
-            tx = hoop.x + hoop.inward * (58 + Math.sin(w.t * 0.7 + p.id) * 26);
-            if (dist2d(guard.x, guard.z, p.x, p.z) < 22) tx += (p.x - guard.x) * 1.4;
-            // Spacing, which this game had none of.
-            //
-            // Measured: the two attackers stood **32.6px apart** on average, on
-            // a 284px court. That is a huddle, not an offence, and it quietly
-            // caps everything built on top of it. Two defenders can cover two
-            // men from one spot, so no pass beats anybody; a man leaving his
-            // mark to double the ball travels thirty pixels, so the double
-            // costs him nothing (26.9px from his man when home, 26.2px while
-            // doubling — identical); and nobody is ever standing far enough
-            // out for a three to be the shot that is available.
-            //
-            // The spot-up is computed off the rim, which is right, but nothing
-            // pushed it away from the *ball*. This does.
-            if (Math.abs(tx - handler.x) < SPACING_MIN) {
-                tx = handler.x + (tx >= handler.x ? SPACING_MIN : -SPACING_MIN);
+            // Go and stand somewhere. See `SPOT_TABLE`.
+            if (p.spotT <= 0) {
+                // On fire, only the deep spots — which is the whole of "the hot
+                // man goes and stands behind the arc", with nothing anywhere
+                // needing to know that is what it means.
+                const choices = p.onFire ? SPOT_DEEP : SPOT_TABLE.length;
+                p.spot = Math.floor(rng(w) * choices) % choices;
+                p.spotT = SPOT_DWELL[0] + rng(w) * (SPOT_DWELL[1] - SPOT_DWELL[0]);
             }
-            tx = clamp(tx, COURT_L + 10, COURT_R - 10);
-
-            turbo = p.turbo > 0.4 && dist2d(p.x, p.z, tx, tz) > 70;
+            const spot = SPOT_TABLE[p.spot];
+            tx = clamp(hoop.x + hoop.inward * spot[0], COURT_L + 8, COURT_R - 8);
+            tz = spot[1];
+            // Arrived: loiter, and occasionally decide to be somewhere else.
+            if (dist2d(p.x, p.z, tx, tz) < 10 && rng(w) < SPOT_RELOCATE) p.spotT = 0;
+            // And he has to sprint to get there. A possession here lasts about
+            // two seconds and the far spots are 130px away — at a walk that is
+            // the whole possession spent travelling, which is exactly what the
+            // first version of this measured as: he picked a spot 81% of the
+            // time and arrived at none of them.
+            turbo = p.turbo > 0.3 && dist2d(p.x, p.z, tx, tz) > 40;
         }
 
         // Alley-oop cut: slip backdoor and go up for the lob when the rim is

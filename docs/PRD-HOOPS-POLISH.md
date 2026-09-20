@@ -733,6 +733,88 @@ doubling fails 3, always doubling fails 2, dropping the shot clause fails the
 new comparison, and dropping the lane test fails nothing — which is why the lane
 test is gone.
 
+### 6.6c — spacing: a table of spots, and the thing that caps it
+
+*"You're probably not going to outsmart the original. What you could do is think
+you're smarter and design a worse game. How does the original deal with this?"*
+
+Fair. §6.6 ended by naming spacing as the blocker and inventing a rule for it —
+push the off-ball man 74px clear of the ball — which moved the measured spacing
+by **0.3px**. So: go and read.
+
+**They do not compute a position.** `DRONE.ASM` holds a table of **sixteen
+hand-placed spots** as offsets from the rim being attacked, in three groups —
+seven behind the arc, seven at jump-shot range, two at the rim. The drone picks
+one, walks to it, and stands there for **half a second to two seconds**. **On
+fire, it rolls only over the first seven**, which is the whole of "the hot man
+spaces out behind the arc" in one line. Spacing there is authored, not emergent.
+
+Ours was a single formula: a fixed distance off the rim, on the depth lane the
+ball was not on, oscillating a little. One place to be, and both attackers
+always in it.
+
+**Ported** — twelve spots, ours, scaled to a court where `THREE_DIST` is 118 and
+a rim is only ~146 from midcourt:
+
+```
+                       before   after
+three-point attempts     1.03    1.38
+quiet  (pass 1/s)         54%     58%
+busy   (pass 2/s)         64%     65%
+clumsy (35% idle)         46%     60%
+```
+
+Passing still beats hoarding, and the three-point game is up a third. The table
+is load-bearing for both: pinning everyone to a single spot flips passing back
+to the worse play (56% against 62%) as well as failing the spot checks.
+
+**Their exact sprint rule does not port.** Their drone only burns turbo getting
+to a spot when it is on fire. Ours has to sprint whenever it is far, because —
+see below — it otherwise never arrives: with their rule the numbers come out
+quiet 74% / busy 58%, which is passing punished again.
+
+**And now the real finding, which is bigger than the table.**
+
+The spot table did **not** fix spacing. Two attackers still stand 33.8px apart
+on a 284px court, and measured directly:
+
+```
+he is 69.2px from the spot he chose
+he is standing on it        14% of frames
+his distance from the rim he is attacking   149.9px
+```
+
+That last number is past the deepest spot in the table — he is in his own half.
+**The offence never gets set, because almost all of it is transition.** The
+court is 284px, players move at 76–116px/s so crossing it takes 2.5–3.7s, and a
+possession here lasts about 2s. The whistle goes before anybody arrives
+anywhere. That is why the 74px spacing rule did nothing, why the double-team is
+a weaker mechanic than it should be, and why the three-point shot is thin no
+matter how the spots are placed.
+
+**It is not fixable by choosing better targets, and the next person should not
+try.** The candidates are structural, and all three are real work:
+
+1. **A shorter court.** Everything gets closer in fewer seconds. Cheapest, and
+   it changes every distance constant in the file.
+2. **Longer possessions** — the AI shoots fast and possessions average ~2s
+   against a 15s shot clock. Slower decisions give the offence time to set.
+3. **Set-up on the inbound**: put the attackers on their spots when a
+   possession starts, instead of making them run there. Least faithful, but the
+   only one that does not re-tune the whole game.
+
+**Teeth.** Two new checks (hoops 57 → 59). Three mutations, all caught: one spot
+for everybody fails 3 (including the passing comparison), letting a man on fire
+pick from the whole table fails 1, and removing the dwell fails 2.
+
+**A fourth fragile fixture, and this one was a genuine test bug.** `a tie is
+played out` demanded overtime unconditionally once the clock hit zero level —
+but the clock can hit zero with a shot already in the air, and `buzzerLive`
+exists precisely so that attempt resolves. Seed 7 had simply never produced a
+buzzer beater at that frame before; giving the defender a reaction time changed
+which frame it was. It now only demands overtime if the scores are *still*
+level.
+
 ---
 
 ## 7. Explicitly out of scope

@@ -26,7 +26,7 @@ import {
     createWorld, stepWorld, blankCmd, GAME_SECONDS, HOOPS, attackHoop,
     TURBO_MULT, SAY, BANNER, screenX, VW, hoopDist,
     laneBlockFactor, TURBO_DRAIN, TURBO_REGEN, AI_TURBO_REGEN,
-    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME, collide, CONTEST_R, dist2d,
+    COURT_L, COURT_R, BASE_SPEED, STUMBLE_TIME, collide, CONTEST_R, dist2d, SPOT_DEEP,
     type Cmd, type World,
 } from '../components/minigames/HoopsGame.tsx';
 import { profileFor } from '../systems/hoops/roster.ts';
@@ -1062,10 +1062,19 @@ t('a tie is played out, not handed to the CPU', () => {
     for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
     w.clock = 0.001;
     w.score[0] = 14; w.score[1] = 14;
-    for (let i = 0; i < 120; i++) stepWorld(w, DT, blankCmd());
+    for (let i = 0; i < 240; i++) stepWorld(w, DT, blankCmd());
     assert.ok(w.phase !== 'over' || w.score[0] !== w.score[1],
         'the game ended level — somebody was given a win they did not earn');
-    if (w.phase !== 'over') assert.ok(w.overtime, 'past the buzzer and level, but not in overtime');
+    // Only if it is *still* level. The clock can hit zero with a shot already
+    // in the air — `buzzerLive` exists precisely so that attempt gets to
+    // resolve — and if it drops, the game is no longer tied and overtime is not
+    // what should happen. This used to demand overtime unconditionally, which
+    // was fine only for as long as seed 7 happened not to produce a buzzer
+    // beater at that exact frame. Giving the CPU a reaction time was enough to
+    // change which frame that was.
+    if (w.phase !== 'over' && w.score[0] === w.score[1]) {
+        assert.ok(w.overtime, 'past the buzzer and level, but not in overtime');
+    }
 });
 
 t('overtime ends on the next basket, and cannot run forever', () => {
@@ -2053,5 +2062,67 @@ t('the double is triggered by his partner losing the man, not by a dice roll', (
     assert.equal(decide(false), false, 'he abandoned his man while his partner was still in front of the ball');
     assert.equal(decide(true), true, 'his partner was beaten and nobody rotated over');
 });
+
+t('the man without the ball goes and stands somewhere, and not always the same somewhere', () => {
+    // This used to be one formula — a fixed distance off the rim, on the depth
+    // lane the ball was not on, oscillating slightly — so there was exactly one
+    // place to be and both attackers were always in it. The original holds a
+    // table of hand-placed spots and picks one; that is what this checks.
+    let x = 606;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+    const used = new Set<number>();
+    let frames = 0;
+    for (let g = 0; g < 4; g++) {
+        const w = createWorld(9100 + g, 'Test Guy');
+        let f = 0;
+        const cap = Math.ceil((GAME_SECONDS + 40) / DT);
+        while (w.phase !== 'over' && f < cap) {
+            stepWorld(w, DT, bot(w, rng, 1.2));
+            f++;
+            if (w.possession === null) continue;
+            const handler = w.players[w.possession];
+            for (const q of w.players) {
+                if (q.human || q.id === handler.id || q.team !== handler.team) continue;
+                used.add(q.spot);
+                frames++;
+            }
+        }
+    }
+    assert.ok(frames > 2000, `only ${frames} off-ball offence frames — the check proves nothing`);
+    assert.ok(used.size >= 6, `he only ever stood on ${used.size} of the spots — that is a formula with extra steps`);
+});
+
+t('a man who is on fire goes and stands behind the arc', () => {
+    // The whole of "the hot shooter spaces out to three-point range", and it
+    // costs one line: on fire, he picks only from the deep end of the table.
+    // Nothing anywhere else has to know that is what it means.
+    const pickWhileLit = (lit: boolean) => {
+        const deep: number[] = [];
+        for (let i = 0; i < 40; i++) {
+            const { w, p } = offenceWorld();          // the human holds it
+            const mate = w.players.find(q => q.team === p.team && q.id !== p.id)!;
+            mate.onFire = lit;
+            mate.fireT = lit ? 20 : 0;
+            mate.spotT = 0;
+            mate.cutT = 0;
+            mate.stumbleT = 0; mate.dunkT = 0;
+            stepWorld(w, DT, blankCmd());
+            deep.push(mate.spot);
+        }
+        return deep;
+    };
+    const lit = pickWhileLit(true);
+    const cold = pickWhileLit(false);
+    assert.ok(lit.length === 40 && cold.length === 40, 'the check proves nothing');
+    assert.ok(
+        lit.every(s => s < SPOT_DEEP),
+        `a man on fire stood on spots ${[...new Set(lit)].sort((a, b) => a - b).join(',')} — some of them are not behind the arc`,
+    );
+    assert.ok(
+        cold.some(s => s >= SPOT_DEEP),
+        'a cold man only ever picked deep spots, so being on fire changes nothing',
+    );
+});
+
 
 console.log(`\n${pass} hoops checks passed.`);
