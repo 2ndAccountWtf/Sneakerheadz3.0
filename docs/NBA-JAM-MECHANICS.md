@@ -126,6 +126,32 @@ contested pass out of it is the correct price of a situation you created: two
 on you, one of theirs alone. Measured here, that is the difference between a bot
 that passes twice a second winning 26% and winning 64%.
 
+### Pass, off the ball: a steal, and nothing else
+
+Checked because it was asked directly — *should pressing PASS without the ball
+make your CPU partner give it up?*
+
+**No.** In `PLYR.ASM` the pass button branches on whether you own the ball, and
+if you do not it goes straight to `#steal`: it plays the steal reach, or with
+Turbo held, the push. That is the whole behaviour, and it does not care whether
+the ball is in an opponent's hands or your own teammate's.
+
+Two things follow that are worth knowing before anyone "restores" them:
+
+- **There is no player switching.** `PSTATUS` records who joined at coin-up and
+  is never reassigned in game. You are locked to your man for the whole match —
+  no taking over whoever has the ball.
+- **There is no call-for-the-ball button at all.** Your CPU partner decides when
+  to give it up, on his own, in `drone_pass`. You cannot demand it. Their answer
+  to "my teammate will not pass" is the tuning of that routine, not an input.
+
+**Ours is more generous and the bindings are different**, deliberately. Off the
+ball on offence, SHOOT asks for the ball (out on the floor he simply hands it
+over; in close you cut and call for the lob) and PASS swaps which man you are
+driving. Neither of those exists in the original. Measured, both end with you
+holding the ball, which is exactly why the two can be confused for each other —
+but only one of them is a pass.
+
 ### Off the ball on offence: a table of places to stand
 
 The third time this document has had to record that they did not compute
