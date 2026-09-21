@@ -594,6 +594,103 @@ Sizes are estimates against a 2,279-line file.
 
 ---
 
+### The dependency graph
+
+Read top to bottom; an arrow means *cannot start until*.
+
+```
+  1  input + animation contract
+     ├── 1b  controls: stick + four buttons  (needs press timing)
+     │    └── 8  block is a roll             (opened by block-on-a-button)
+     ├── 2  grapple                          (needs tap/hold + press timing)
+     │    ├── 2a move list
+     │    └── 10 dirty fighting              (headbutt lives in the clinch)
+     ├── 3  impact / counter hit             (independent, could go first)
+     └── 5  ground game                      (needs typed frame properties)
+              └── 10 stomp                   (same typed-property mechanism)
+
+  4  air game        — needs 1b (crouch off the stick) and 3 (reactions)
+  6  opponent records — needs 2, 3, 5, 8, 10; the AI learns them all at once
+  7  corner + camera  — independent
+  9  the fight is an event — independent of all of it; pure integration
+```
+
+**Three things fall out of that graph:**
+
+- **Phase 1 gates almost everything.** Frame-stamped input and the animation
+  contract are underneath the controls, the grapple, the sprawl, the instant
+  block and the block roll.
+- **Phase 9 is independent.** The RPG integration touches `onFinish` and the
+  systems around it, not the simulation. It could be built at any time by
+  anyone, in parallel.
+- **Phase 6 must come last among the mechanical phases**, because the AI has to
+  learn every mechanic in one change or we recreate the bug where correct play
+  beat the opponent 100–0.
+
+### Per-phase engineering detail
+
+What each phase actually touches. Near phases in detail, later ones in outline.
+
+**Phase 1 — input and animation contract**
+- `StreetFighter.tsx`: `FightState` gains `frame: number`; the four `buf.*`
+  countdowns are replaced by a press history; `Fighter` gains `anim: AnimState`
+  and `animT`.
+- `bufferPresses` / `decayBuffer` / `canAct` / `tryLight` / `tryHeavy` all read
+  the history instead of the counters.
+- `drawFighter` switches on `anim` rather than inferring a pose from `move`
+  plus `armUp`.
+- New: `pressedWithin(action, start, end)`, `heldFor(action)`.
+- Tests: every existing buffer and focus check passes unchanged; every
+  reachable fighter state maps to a declared `AnimState` with no fallback;
+  `pressedWithin` answers correctly across a frame boundary.
+
+**Phase 1b — controls**
+- `components/minigames/engine/`: the floating stick, the four-button layout,
+  layout persistence. Shared, not fighter-local.
+- `FightInput` gains `block`; `blockHeld` stops deriving from `wantBack`.
+- Pair detection (BLOCK+PUNCH) lives in the fighter, not the engine, because
+  only the fighter has that meaning.
+- Tests: pair detection across a spread of press offsets; no false positives;
+  reachability at the smallest supported screen.
+
+**Phase 2 — grapple**
+- `Fighter` gains `stamina`, and the clinch state machine.
+- `MoveDef` gains the clinch outcome table.
+- `resolveContact` grows a clinch branch; `resolveHold` becomes rung-aware.
+- The eight open decisions in §Phase 2a must be answered **before** this starts.
+- Tests: each clinch outcome reachable and distinct; the sprawl beats a grab
+  and only inside its window; the break cannot be mashed; stamina gates entry.
+
+**Phase 8 — block roll**
+- `blockSucceeds` returns a quality rather than a boolean; `applyHit` grows a
+  glancing branch; `Fighter` gains `guardHeld`.
+- `MoveDef` gains `pierce`.
+- Tests: fresh correct guard is near-certain clean; a long-held guard leaks; a
+  permanently-guarding bot loses harder than today; a short correct guard is
+  still rewarded.
+
+**Phase 3 — impact** · `applyHit` splits shake from knockback; `MoveDef` gains
+separate attacker/defender freeze and a reaction type.
+
+**Phase 10 — dirty fighting** · four moves, the `blinded` status, and the typed
+frame property that lets the stomp hit a downed fighter.
+
+**Phase 5 — ground game** · tech, wake-up attack, typed throw invulnerability,
+gravity and same-move proration replacing both hard caps.
+
+**Phase 4 — air game** · `separate()` learns about `y`; jump gains startup and
+landing states; air guard.
+
+**Phase 6 — opponent records** · the four AI constants become a per-NPC record
+with a budget and a validator; the AI learns phases 2, 3, 5, 8 and 10.
+
+**Phase 7 — corner and camera** · corner push authored per move; corner damage
+scaling; auto-zoom.
+
+**Phase 9 — the fight is an event** · `onFinish` returns a result object;
+wiring to `systems/hospital`, `systems/police`, `banking.ts`,
+`systems/opponents.ts`.
+
 ### Phase 1 — frame-accurate input and the animation contract · ~M
 
 The foundation both the grapple and the defence game sit on.
@@ -1170,10 +1267,41 @@ its own read:
 Guard fatigue needs a tell too — the guard arm visibly drops as it degrades,
 which is also an `AnimState` the artist can key against.
 
+#### A starting model
+
+Concrete so it can be argued with and measured, not because these numbers are
+right. Wrong stance is still a clean hit and never reaches the roll at all.
+
+```
+quality = BASE                        75
+        + stance                     +30   correct height
+        + stamina/100 * 15           0..15
+        + focusTerm                 -5..+10
+        - guardHeldFrames / 6         0..-50   capped
+        - move.pierce                 jab 0, sweep 10, heavy 15, elbow 20, special 25
+        clamped 0..95
+
+roll 0..99     >= quality  ->  breach below 25, glancing below 55, else clean
+```
+
+Sanity, at the three cases that matter:
+
+| situation | quality | reads as |
+|---|---|---|
+| fresh guard, right stance, full stamina, vs jab | 95 | near-certain clean |
+| guard held ~3s, vs heavy, 40 stamina | ~66 | mostly clean, a third glancing, rare breach |
+| guard held ~6s, vs heavy, low stamina | ~42 | leaks badly — turtling stops working |
+
+The shape to defend is that **the first three seconds of a correct guard are
+almost free, and the sixth second is not.**
+
 #### Determinism
 
 The roll goes through the existing seeded RNG, so the headless harness and the
-"same seed fights the same fight twice" check keep working unchanged.
+"same seed fights the same fight twice" check keep working unchanged. Add a
+draw counter (§12.7) in the same change — this is the first mechanic that
+consumes RNG every time a hit connects, and without a counter a tuning change
+will silently shift every measurement in the balance matrix.
 
 *Gate:* a bot that walks forward permanently guarding must lose to a mixed bot,
 and lose harder than it does today. A bot that guards **correctly and briefly**
@@ -1214,25 +1342,65 @@ hands, whether you are high, whether you have eaten.
 circumstances — a clean win with fists versus a win with a crowbar in front of
 witnesses — produce materially different consequences in the world.
 
-### Phase 10 — street-fight texture · ~M · **lowest priority**
+### Phase 10 — dirty fighting and street texture · ~M
 
-Marked *could be interesting* rather than agreed. The mechanics specced so far
-would suit a tournament and this is a car park, but none of what remains here
-is load-bearing.
+Restored 2026-09-21. The cheap shots stay; only the *social* price was wrong.
+Nothing in this fighter should punish the player for fighting like it is a
+street fight. Dirty moves are ordinary moves, balanced on frames and damage.
 
-- ~~**Dirty fighting with a social price.**~~ **CUT 2026-09-21.** A cheap shot
-  that costs street cred was rejected: it is a street fight, and punishing the
-  player for fighting like it is the wrong instinct. Nothing in the fighter
-  should price a move socially. If cheap shots ever return they are ordinary
-  moves balanced on frames and damage like everything else.
-- **The weapon on the floor.** Phase 2 already drops a melee weapon when you
-  grapple. Leaving it there makes it a scramble — either fighter can dive for
-  it, and that is a genuine decision mid-fight.
-- **The crowd does something.** Currently ten drawn figures doing nothing. Def
-  Jam's crowd shoves you back in; ours could at minimum react, and at best make
-  the stage edges live.
+#### The price, and why it is not moralising
+
+Every dirty move **builds the opponent's hype** on top of the usual gain. You
+rake his eyes, he gets angrier and gets to his special sooner. That is a real,
+mechanical, reversible cost with no judgement attached — and it is thematically
+exactly right.
+
+They are also all **badly punishable on whiff**, in the grab's range of −18 to
+−22. A cheap shot that misses is the worst position in the game.
+
+#### The moves
+
+These introduce a **sixth mechanical role: debuff.** Nothing else in the
+fighter applies a status, which is what makes these worth adding rather than
+being reskinned jabs.
+
+| move | input | frames | role | effect |
+|---|---|---|---|---|
+| **Eye rake** | back + PUNCH | 3 startup — the fastest thing in the game | debuff | ~2 damage, applies **blinded** for ~1.5s: their block roll takes a heavy penalty (§Phase 8) and the AI's reaction slows. Their hype +25. −18 on whiff |
+| **Groin kick** | back + KICK | 6 startup | burst | ~9 damage and a counter-hit-sized stun, but **whiffs entirely against a crouching opponent** — you have to catch them standing. A high/low mixup running the opposite way to the sweep. Their hype +20. −20 on whiff |
+| **Headbutt** | in the clinch, up + PUNCH | — | exit | ~8 to them, ~3 to **you**, and it breaks the clinch with you at advantage. Distinct from *stand up*: that exit is clean, this one costs blood |
+| **Stomp** | on a downed opponent, down + KICK | 9 startup | position | low damage, but it **delays their getup and denies the tech** (§Phase 5). The wake-up pressure tool. −22 on whiff, so a missed stomp hands them a free getup punish |
+
+#### The stomp needs a rule change
+
+`hittable()` currently excludes `down` outright — *"You cannot hit someone who
+is already on the floor."* The stomp is a deliberate exception and the only
+one: a single move that may strike a downed fighter, gated on its own long
+recovery. Everything else still cannot.
+
+This wants a typed frame property rather than a special case, which is the same
+mechanism Phase 5 needs for throw invulnerability on wake-up. Build once.
+
+#### Blinded — the first status effect
+
+- Duration ~90 frames, ticking down, visible as a tell on the fighter.
+- **Block roll penalty** — the single biggest reason it is worth doing.
+- **AI reaction slows** — its `react` window widens for the duration.
+- Does not stack; a second rake refreshes rather than doubles.
+
+It needs its own `AnimState` and its own HUD read, because an invisible status
+is indistinguishable from the game misbehaving — the same rule as the block
+roll.
+
+#### The rest of the texture
+
+Lower priority than the moves above, and not load-bearing:
+
+- **The weapon on the floor.** Phase 2 drops a melee weapon when you grapple.
+  Leaving it lying there makes it a scramble either fighter can win.
+- **The crowd does something.** Ten drawn figures currently doing nothing.
 - **Getting jumped.** Two on one exists in this world and the fighter cannot
-  express it. Large, and worth naming rather than discovering later.
+  express it. Large; named so it is not discovered late.
 
 ### ~~Phase 11 — how a fight ends~~ · **CUT 2026-09-21**
 
