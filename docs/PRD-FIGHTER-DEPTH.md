@@ -891,7 +891,7 @@ carries `hype` (the special meter) and nothing else, so the contest needs a
 real resource. See *Stamina* below.
 
 **The rule for what gets in.** A grapple move earns its place only by doing
-something no other move does. Five mechanical roles, and everything below fills
+something no other move does. Six mechanical roles, and everything below fills
 exactly one:
 
 | role | what it is for |
@@ -901,6 +901,7 @@ exactly one:
 | **position** | no damage, better options next — the rung up, or a side switch |
 | **drain** | damage over time while both are locked — a contest, not an outcome |
 | **exit** | leave on your terms with advantage — stops the ground being all-in |
+| **debuff** | a status rather than damage — the role Phase 10's dirty moves add |
 
 ---
 
@@ -1435,6 +1436,9 @@ after the mechanics are in, because there is no point teaching a grapple system
 we have not built. It is not a phase in front of the engine work.
 
 ---
+
+**The build order, flattened:** 1 → 1b → 8 → 2 (+2a) → 3 → 10 → 5 → 4 → 7 → 6,
+with 9 slotted in wherever there is room, because nothing gates it.
 
 **If only two phases happen, make them 1 and 2.** One is the foundation
 everything else needs; the other is the grapple system, which is the largest
