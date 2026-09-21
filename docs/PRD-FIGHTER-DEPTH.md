@@ -50,19 +50,26 @@ them, fifteen caught; the survivor is an equivalent mutant.
 
 ## 1. The references
 
-Two engines have been read. They are from different eras and they are useful for
-different things, so they are kept apart below rather than merged into one list.
+Three engines have been read. They are from different eras and schools and are
+useful for different things, so they are kept apart below rather than merged.
 
-| | Ikemen GO | Sakuga Engine |
-|---|---|---|
-| what | Go rewrite of a M.U.G.E.N-compatible engine | one person's Godot 4 / C# anime fighter framework |
-| lineage | 1999 arcade-era, Mugen data formats | 2024, Guilty Gear / BlazBlue school |
-| size | ~420k lines | ~25k, of which ~12k is the engine |
-| licence | MIT | MIT |
-| best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality |
-| read | 2026-09-21 | 2026-09-21 |
+| | Ikemen GO | Sakuga Engine | Schwarzerblitz |
+|---|---|---|---|
+| what | Go rewrite of a M.U.G.E.N-compatible engine | one person's Godot 4 / C# anime fighter framework | one person's C++/Irrlicht 3D arena fighter, shipped |
+| lineage | 1999 arcade-era, Mugen data formats | 2024, Guilty Gear / BlazBlue school | 2016–2020, **Tekken / Virtua Fighter school** |
+| size | ~420k lines | ~25k, of which ~12k is the engine | ~82k lines |
+| licence | MIT | MIT | **BSD-3 for code; assets explicitly all-rights-reserved** |
+| best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality | move *strings*, throw escapes you have to read, and teaching the player |
+| read | 2026-09-21 | 2026-09-21 | 2026-09-21 |
 
-**Standing rule for both.** No code, no data and no art from either repository, or
+**Diminishing returns, stated honestly.** Three engines in, the mechanic space is
+well covered and each new reference adds less than the last. Ikemen gave five
+structural holes; Sakuga gave three plus the AI idea; Schwarzerblitz gave two
+that matter and a pile of confirmations. **The bottleneck is no longer knowing
+what to build — it is that none of it has been built or measured.** A fourth
+engine is not the next move.
+
+**Standing rule for all three.** No code, no data and no art from either repository, or
 from the M.U.G.E.N content ecosystem, is used here, and none may be. The Mugen
 character/stage ecosystem in particular is overwhelmingly ripped commercial
 sprites — `FIGHTER-RESEARCH.md` §"The ripped-sprite problem" already flags this.
@@ -94,13 +101,33 @@ fighter considers table stakes — and several of those we do not have at all. I
 vocabulary check than the whole of `HitDef`, and its `GlobalVariables.cs` is a
 single screen of every tunable a fighting game needs.
 
+### 1c. Schwarzerblitz
+
+`https://github.com/AndreaJens/SchwarzerblitzEngine` — Andrea "Jens" Demetrio,
+2016–2022. C++ on a custom Irrlicht fork, SFML for audio, **Windows-only, 3D**.
+The author's own README calls the code ugly and says there is no netcode.
+
+**Licence needs care, unlike the other two.** `LICENSE.md` is BSD-3 for the
+source — permissive, fine to read — but the bundled assets are stated as *"all
+rights reserved ... cannot be redistributed without the owner's consent",*
+covering character designs, 3D models, music, sound effects, illustrations,
+stages, icons and menu art. Our standing no-assets rule already covers this; it
+is recorded because this is the first of the three to draw the line explicitly.
+
+Architecturally useless to us: it is a 3D arena fighter, so most of the move
+record is tracking angles, sidestep and throw cameras. **But it is the only
+reference in the Tekken school**, which is what was actually asked for, and two
+of its ideas are things neither 2D engine has.
+
 ---
 
 ## 2. Structural gaps — things our game cannot express
 
 These are not tuning. The mechanic does not exist and cannot be reached from the
-current model. Each one names which reference it came from, because the two
-references found different holes and it matters which is which.
+current model. Each one names which reference it came from, because the three
+references found different holes and it matters which is which. §2.8 is the odd
+one out: it is not a missing mechanic but a missing way to find the mechanics,
+and it is the one most likely to be worth doing first.
 
 ### 2.1 You cannot jump over your opponent
 
@@ -194,7 +221,27 @@ grab. Wake-up is currently a flat 12 invulnerable frames against everything;
 without a typed version there is no way to say "getting up is safe from grabs
 but not from strikes", which is the standard answer to a grab-spamming opponent.
 
-### 2.8 There is no superpause
+### 2.8 The player has no way to learn any of this
+
+Schwarzerblitz ships a numbered tutorial — `FK_TutorialPhase` in
+`FK_SceneGameTutorial.h` runs to 23+ phases, one mechanic each: MovementForward,
+Crouching, StandingGuard, Punch, Kick, TechThrow, FlowCombo, GroundRecovery,
+Backstep, **ThrowEscape**, CrouchedGuard, JumpAttacks, Projectiles… Each phase
+carries its own message, required input and pass condition. It also ships
+`FK_MoveListPanel` — the game shows you your own moves.
+
+We have **one paragraph of help text**, and we just added three mechanics
+(grab, break, juggle) plus a whole triangle that the player has no way to
+discover. A player who never presses GRAB never learns that a guard is
+beatable, and nothing in the game tells them.
+
+This is arguably the highest-value finding in the whole document *for our
+situation specifically*, because our problem stopped being "not enough
+mechanics" on 2026-09-21. It is now "the mechanics are invisible". A move list
+and four or five 15-second drills would do more for how the fighter feels than
+Stages 4 and 5 combined.
+
+### 2.9 There is no superpause
 
 `setSuperPauseTime(pausetime, movetime, unhittable, p2defmul)`
 (`src/char.go:9393`). The world freezes when a super starts; the attacker gets a
@@ -237,6 +284,23 @@ And from Sakuga, which is closer to how we would actually build it:
 | block on reaction | `InstantBlockWindow = 3` — guarding within 3 frames of impact is a just-defend | nothing |
 | buffer length | `MoveBufferLength = 10` | 4–10, focus-scaled, baseline 7 — **independent confirmation we are in the right range** |
 | block freeze | `DefaultBlockHitstop = 6` against `DefaultBaseHitstop = 10` | `hitstop * 0.6` — **exactly the same ratio, arrived at independently** |
+
+And from Schwarzerblitz, the Tekken-school items neither 2D engine has
+(`FK_Move.h`, `FK_MoveListMove.h`):
+
+| concern | Schwarzerblitz | ours |
+|---|---|---|
+| move strings | `followupMoves` **and** `cancelIntoMoves` as two separate lists, plus `followupOnly` (a move that exists only as a string continuation) and `isMultiChainable`. `FK_MoveListMove` is a trie node | seven flat moves and one `cancel` number. **This is the Tekken texture that was originally asked for** — see §7 for why it is still parked |
+| breaking a throw | `escapeInput` is **per throw** (`FK_ThrowMove`), so which button breaks it depends on which throw it is — you have to *read* the animation | one GRAB button, so our break is a reaction test and never a read |
+| minimum range | `moveMinRange` as well as `moveMaxRange` — some moves whiff if you are too close | max reach only |
+| properties over time | `attackTypeAtFrame` — a vector, so a move's attack type changes frame by frame; `invincibilityType` and `armorType` are vectors of attack type, so a move can be invincible to lows but not mids | one `invuln` counter |
+| keeping a launcher worth it | `maximumDamageScaling` **per move** — a move can cap how far its own combo scales | global proration only |
+| AI hints on the move | `AIflag_onlyDuringOpponentAttack` — the move record tells the AI when it is appropriate | four global constants |
+| trade | `movePriority` | symmetric trade |
+| targeting | `antiAirOnlyFlag`, `vsGroundedOpponentFlag` | nothing |
+| execution as a skill | `requiresPreciseInputFlag` — just-frame moves | nothing |
+
+Ignored as 3D-only: tracking angles, sidestep, throw cameras, ring-out.
 
 ---
 
@@ -336,6 +400,24 @@ per animation frame, and Sakuga's whole Godot resource/editor layer.
 Each stage ships with its AI half, its measurement, and its mutation test.
 Stages are ordered by feel-per-risk, not by size.
 
+### Stage 0 — make what we already built visible
+
+Added after the Schwarzerblitz read, and **promoted above everything else**,
+because the fighter's problem stopped being "not enough mechanics" on
+2026-09-21 and became "nobody can find the mechanics".
+
+- A move list the player can open — seven moves, their inputs, one line each.
+  Schwarzerblitz has `FK_MoveListPanel`; every fighting game has one; we have a
+  paragraph of help text.
+- Three or four 15-second drills, in the shape of `FK_TutorialPhase`: block a
+  kick and punish it, grab a guard, break a grab, land the combo.
+- The hit callouts from Stage 2 belong here too if they are cheap enough —
+  "PUNISH", "BREAK", "COUNTER" is the game teaching its own rules for free.
+
+*Gate:* this one is not measurable with the headless harness, which is exactly
+why it keeps getting skipped. It needs a human playing on a phone. That is the
+same open item as §8.2 and it should be closed at the same time.
+
 ### Stage 1 — make the jump a real option
 
 - Airborne bodies pass through each other; cross-ups become possible.
@@ -422,9 +504,16 @@ rapper, which is currently impossible even in principle.
 shapes — hits taken, block rate, match length — against the same player policy.
 If they do not, the record is not doing anything.
 
-**Scope honesty.** Six stages is a lot for one of twelve mini-games. Stop after
-Stage 2 and look at it before committing to the rest. If only two stages ever
-happen, Stage 1 and Stage 2 are the two.
+**Scope honesty, revised.** Seven stages is far too many for one of twelve
+mini-games, and the list has now grown twice from reading rather than from
+playing. Three engines have been read and nothing has been built.
+
+If only two stages ever happen they should be **Stage 0 and Stage 2** — make the
+existing mechanics visible, and make hits feel like hits. Stage 1 (the cross-up)
+is the most interesting change here and it is still gated on §8.1, which nobody
+has answered.
+
+**Do not read a fourth engine before shipping Stage 0.**
 
 ---
 
@@ -461,9 +550,26 @@ and most add a HUD element, on a phone, in a mini-game.
 - **Proximity block boxes** (`HitboxType.PROXIMITY_BLOCK`). Fixes "holding back
   at full screen counts as blocking". Ours is a cosmetic wrinkle at most, since
   blocking at range costs nothing now that chip is gone.
-- **More attacks.** Tekken's texture comes from strings per limb. A phone D-pad
-  cannot express that and should not try; high / low / overhead / throw is what
-  two buttons can carry.
+- **More attacks, and move strings.** Tekken's texture comes from strings per
+  limb, and Schwarzerblitz shows the data shape exactly: `followupMoves` and
+  `cancelIntoMoves` as separate lists, with a trie of follow-ups hanging off each
+  move. This is the closest thing in any of the three references to what was
+  originally asked for.
+
+  Still parked, and the reason is the thumb, not the model. A string means
+  pressing the same button again on a rhythm you learned; with two attack
+  buttons the vocabulary is A-A, A-B, B-A, B-B and little else before it stops
+  being legible on a 320×180 phone screen. **Revisit only after Stage 0**: if a
+  move list exists and players do learn the seven moves we have, a second tier
+  of strings becomes a reasonable ask. Before that it is more depth nobody can
+  see.
+- **Reading a throw to break it.** Schwarzerblitz gives every throw its own
+  `escapeInput`, so breaking one is a read, not a reaction. Ours cannot be:
+  there is one grab, so there is nothing to read. Needs at least two grabs with
+  visibly different animations before it means anything.
+- **Per-move damage-scaling caps, minimum range, frame-varying attack types,
+  just-frame inputs.** All real, all from `FK_Move.h`, all refinements of
+  systems we have not built yet. Recorded so they are not rediscovered.
 
 ---
 
@@ -505,9 +611,14 @@ The part of this document that keeps it alive. Nothing below has been verified.
     configurable?
 11. **What does `hitshaketime` vs `hittime` vs `slidetime` buy** that a single
     stun number does not? Stage 2 assumes the split is worth it. Verify first.
-12. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
+12. **Does a move list and a drill actually change how it feels?** Stage 0 is
+    built on the claim that invisibility is now the bottleneck. That claim is
+    reasoning, not measurement, and the headless harness cannot test it — a bot
+    always knows every mechanic. Needs a human.
+13. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
     design writing; the Street Fighter III parry literature; anything on throw
-    tech windows on touchscreens.
+    tech windows on touchscreens. **None of these should be read before Stage 0
+    ships** — see the scope note in §6.
 
 ---
 
@@ -587,6 +698,38 @@ test suite), `Components/FighterCamera.cs`.
 
 ---
 
+### 2026-09-21 — Schwarzerblitz
+
+BSD-3 code, all-rights-reserved assets, ~82k lines of C++/Irrlicht, Windows,
+3D. A shipped game rather than a framework, from the Tekken/Virtua Fighter
+school — the only one of the three in that lineage, and therefore the only one
+aimed at what was originally asked for. Read: `FK_Move.h`,
+`FK_MoveListMove.h`, `FK_SceneGameTutorial.h`, `FK_AIManager.h`, `LICENSE.md`.
+
+Two finds that matter:
+
+- **The player cannot learn our game.** Their tutorial is a numbered curriculum
+  of 23+ phases, one mechanic each, and they ship a move list panel. We have a
+  paragraph of help text and three mechanics added last week that nothing
+  announces. Promoted to Stage 0, above every other stage (§2.8).
+- **Move strings as a trie** — `followupMoves` and `cancelIntoMoves` as two
+  distinct lists, `followupOnly` moves, `isMultiChainable`. This is the Tekken
+  texture, specified. Still parked, on thumb grounds rather than model grounds
+  (§7).
+
+Smaller finds, all logged in §3: per-throw escape inputs, `moveMinRange`,
+`attackTypeAtFrame`, per-move `maximumDamageScaling`, per-move AI hints,
+`movePriority`, just-frame inputs.
+
+Confirmations rather than finds: their AI is likelihood knobs per behaviour
+(`getGuardLikelihood`, `getThrowEscapeLikelihood`, `getChainLikelihood`,
+`getJumpLikelihood`, `getAfterMoveCooldown`), which is the same family as
+Sakuga's and validates the Stage 6 shape without adding to it.
+
+**Returns are clearly diminishing.** Ikemen gave five structural holes, Sakuga
+three plus the AI idea, this one two. Three engines read, nothing built. The
+next move is Stage 0, not a fourth repository.
+
 ## 10. Standing rules
 
 1. **Measure, do not reason.** Every claim in this document that is not a
@@ -613,3 +756,7 @@ The fighter is done when, over a stable seeded sample:
 - Live play is above 70% of running time.
 - Every mechanic in the help text is one a bot can be written to use, and that
   bot beats one that ignores it.
+- And — the one the harness cannot check — a person who has never played it can
+  find the grab, the break and the combo without being told by us. Three engines
+  were read to decide what to build next; none of that matters if the thing we
+  already built stays invisible.
