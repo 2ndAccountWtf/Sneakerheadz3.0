@@ -48,37 +48,59 @@ them, fifteen caught; the survivor is an equivalent mutant.
 
 ---
 
-## 1. The reference: Ikemen GO
+## 1. The references
 
-`https://github.com/ikemen-engine/Ikemen-GO` — a Go rewrite of Ikemen, itself a
-M.U.G.E.N-compatible engine. Read on 2026-09-21 at a shallow clone of `main`.
+Two engines have been read. They are from different eras and they are useful for
+different things, so they are kept apart below rather than merged into one list.
 
-**Licence: MIT** (`LICENCE.txt`, Suehiro + contributors 2016–2026). So copying
-would be legally fine. We are not going to, for two reasons that have nothing to
-do with licensing:
+| | Ikemen GO | Sakuga Engine |
+|---|---|---|
+| what | Go rewrite of a M.U.G.E.N-compatible engine | one person's Godot 4 / C# anime fighter framework |
+| lineage | 1999 arcade-era, Mugen data formats | 2024, Guilty Gear / BlazBlue school |
+| size | ~420k lines | ~25k, of which ~12k is the engine |
+| licence | MIT | MIT |
+| best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality |
+| read | 2026-09-21 | 2026-09-21 |
 
-1. It is ~420k lines of Go driving OpenGL/Vulkan, with netplay, Lua scripting
-   and the SFF/AIR sprite formats. We are a 320×180 canvas in a React modal
-   with procedurally-drawn fighters and three buttons. Nothing transliterates.
-2. The value is the **data model**, not the implementation. `HitDef`
-   (`src/char.go:589`) is a 130-field struct that is the most complete
-   open-source specification of "what a hit is" that exists, and
-   `data/common1.cns.zss` is a design document in disguise — it enumerates every
-   state a fighter needs.
+**Standing rule for both.** No code, no data and no art from either repository, or
+from the M.U.G.E.N content ecosystem, is used here, and none may be. The Mugen
+character/stage ecosystem in particular is overwhelmingly ripped commercial
+sprites — `FIGHTER-RESEARCH.md` §"The ripped-sprite problem" already flags this.
+We read them for rules. Citations are `file:line` so a later session can re-find
+the thing rather than trust this summary.
 
-**Standing rule for this document.** No code, no data and no art from that
-repository, or from the M.U.G.E.N content ecosystem around it, is used here, and
-none may be. The Mugen character/stage ecosystem in particular is overwhelmingly
-ripped commercial sprites — `FIGHTER-RESEARCH.md` §"The ripped-sprite problem"
-already flags this. We read it for rules. Citations below are `file:line` so a
-later session can re-find the thing rather than trust this summary.
+### 1a. Ikemen GO
+
+`https://github.com/ikemen-engine/Ikemen-GO` (`LICENCE.txt`, MIT, Suehiro +
+contributors 2016–2026).
+
+Not transliterable: 420k lines of Go driving OpenGL/Vulkan, with netplay, Lua
+scripting and the SFF/AIR sprite formats, against our 320×180 canvas in a React
+modal. The value is the data model. `HitDef` (`src/char.go:589`) is a 130-field
+struct — the most complete open-source specification of "what a hit is" that
+exists — and `data/common1.cns.zss` is a design document in disguise, enumerating
+every state a fighter needs.
+
+### 1b. Sakuga Engine
+
+`https://github.com/NoisyChain/Sakuga-Engine` (`LICENSE`, MIT, NoisyChain 2024).
+C# on Godot 4, rollback netcode, deterministic fixed-point (`SimulationScale =
+10000`), explicitly "2D 1v1 anime-style".
+
+Small enough to read end to end, and **much closer to our problem than Ikemen**.
+Where Ikemen tells us what a 1999 engine needed, Sakuga tells us what a modern
+fighter considers table stakes — and several of those we do not have at all. Its
+`Globals/GlobalEnums.cs` and `Globals/GlobalFlags.cs` are together a better
+vocabulary check than the whole of `HitDef`, and its `GlobalVariables.cs` is a
+single screen of every tunable a fighting game needs.
 
 ---
 
 ## 2. Structural gaps — things our game cannot express
 
 These are not tuning. The mechanic does not exist and cannot be reached from the
-current model.
+current model. Each one names which reference it came from, because the two
+references found different holes and it matters which is which.
 
 ### 2.1 You cannot jump over your opponent
 
@@ -102,7 +124,7 @@ arrive from the front, which is exactly why the opponent reads it trivially.
 
 *Biggest single finding in this pass. Cheap to fix.*
 
-### 2.2 A hit has one reaction; theirs has eight
+### 2.2 A hit has one reaction; Ikemen's has eight
 
 From `data/common1.cns.zss`:
 
@@ -136,7 +158,43 @@ Same for the backdash: theirs is a distinct airborne state (105 hop-back) with
 its own landing state (106). Ours is a reverse walk at `WALK_BACK`, symmetric
 with walking forward.
 
-### 2.5 There is no superpause
+### 2.5 There is no counter hit
+
+Sakuga prices a counter as its own outcome everywhere: `CounterHitStopDuration =
+20` against `SelfHitStopDuration = 12` and `OpponentHitStopDuration = 12`
+(`Resources/HitboxElement.cs`), with engine defaults `DefaultBaseHitstop = 10`
+and `DefaultCounterHitstop = 20` (`Globals/GlobalVariables.cs`). A counter also
+gets its own callout — "Counter" and "Punish" are two of the nine hit
+notifications in `HitNotifs.tres`.
+
+Hitting someone during their startup frames is the single most satisfying thing
+in a fighting game and **it does not exist in ours.** Every hit is the same hit.
+This is also the mechanic that pays for reading the opponent, which is the whole
+behaviour the triangle pass was trying to encourage.
+
+Nearly free for us: we already know the defender's `state === 'attack'` and
+`frame < startup` at the moment of contact.
+
+### 2.6 Simultaneous hitboxes trade; they should be able to clash
+
+Ours resolves both hits (`resolveContact`, `StreetFighter.tsx:1651`), deliberately
+— the comment says trades are symmetric. Sakuga has `ClashHitStopDuration = 20`
+and a per-box `Priority`, so two hitboxes meeting can *clash*: neither lands,
+both recoil, everyone is back to neutral with a bang. That reads better than two
+people simultaneously taking damage, and it is a real moment rather than a
+double-hit nobody can parse.
+
+### 2.7 Invulnerability is one number, not a set of types
+
+`FrameProperties { DAMAGE_IMUNITY, THROW_IMUNITY, PROJECTILE_IMUNITY, LOCK_MOVE }`
+(`Globals/GlobalFlags.cs`). We have a single `invuln` frame count.
+
+**Throw invulnerability specifically matters to us now**, because we shipped a
+grab. Wake-up is currently a flat 12 invulnerable frames against everything;
+without a typed version there is no way to say "getting up is safe from grabs
+but not from strikes", which is the standard answer to a grab-spamming opponent.
+
+### 2.8 There is no superpause
 
 `setSuperPauseTime(pausetime, movetime, unhittable, p2defmul)`
 (`src/char.go:9393`). The world freezes when a super starts; the attacker gets a
@@ -164,6 +222,22 @@ We hand-rolled each of these, usually as a predicate. Their version is a field.
 | input buffer | `time` vs `buffer.time`, plus per-command `buffer.hitpause` and `buffer.pauseend` (`data/common.cmd`) | one 4–10 frame window; both flags hand-rolled as global rules |
 | throws | `p2stateno` + `bindToTarget` (`char.go:8609`) — the attacker takes over the victim's state machine; `unhittabletime` afterwards (`char.go:724`) | bespoke `holdT` / `grabT` pair |
 
+And from Sakuga, which is closer to how we would actually build it:
+
+| concern | Sakuga | ours |
+|---|---|---|
+| ending a juggle | **gravity proration**: `CurrentGravityProration` + `GravityDecayFactor`, `GravityDecay = 2500` — each juggle hit makes them fall faster until the combo dies on its own | hard `JUGGLE_MAX = 2` cap, so the third hit whiffs for no visible reason |
+| long combos | `CurrentHitstunProration` + `HitstunDecayMinCombo = 8`, `MinHitstun = 8` — hitstun shrinks after eight hits, so links get harder | nothing |
+| repeating a move | `CurrentSameMoveProration` — the same move again in a combo scales harder | `if (f.cancel > 0 && f.move === id) return false` — a hard ban, which is the hack version of this |
+| the corner is worth something | `CornerMaxDamageScaling = 120` vs `BaseMaxDamageScaling = 100` (mins 45 vs 35) — corner combos do *more* | nothing; the corner is currently pure downside for the defender and pure upside for the attacker |
+| cancels | `MoveCancelSettings { MoveIndex, Conditions, FrameThreshold }` with `CancelCondition { WHIFF, HIT, BLOCK, KARA }` — per-target, per-outcome, per-window | one `cancel` number, on hit only. No block-cancel, so no blockstrings |
+| hitstun kinds | `HitstunType { NONE, BASIC, KNOCKDOWN, HARD_KNOCKDOWN, DIZZINESS, STAGGERED, GRABBED }` — note **GRABBED is a hitstun type** | `hitstun` / `down` / a bespoke `grabbed` state |
+| knockback | a `Vector2I` + gravity + **duration**, authored separately for ground-hit / ground-block / air-hit / air-block | one velocity, then friction |
+| entering guard | `HitboxType.PROXIMITY_BLOCK` — a box that puts you in guard when genuinely threatened | holding back is always "blocking", even at full screen |
+| block on reaction | `InstantBlockWindow = 3` — guarding within 3 frames of impact is a just-defend | nothing |
+| buffer length | `MoveBufferLength = 10` | 4–10, focus-scaled, baseline 7 — **independent confirmation we are in the right range** |
+| block freeze | `DefaultBlockHitstop = 6` against `DefaultBaseHitstop = 10` | `hitstop * 0.6` — **exactly the same ratio, arrived at independently** |
+
 ---
 
 ## 4. Presentation gaps
@@ -175,27 +249,85 @@ We hand-rolled each of these, usually as a predicate. Their version is a field.
 | flash / trails | PalFX and AfterImage as first-class time-driven effects | a `flash` frame counter |
 | guard break | a set piece: shockwave, glass shards, blue screen flash, dedicated sound (`data/guardbreak.zss`) | n/a — we have no guard meter |
 
+Two more from Sakuga:
+
+| | Sakuga | ours |
+|---|---|---|
+| telling the player what happened | nine callouts — First Strike, Counter, Punish, Just, Escaped, Recovered, Knockdown, Hard Knockdown, Invalid (`HitNotifs.tres`) | a combo counter |
+| frame data | `CombatTracker` computes `FrameAdvantage = HitFrame - StunAtHit` live, every hit | our test harness computes it by hand, off the move table |
+
+The callouts are the cheapest feedback in this entire document. A fighting game
+that says "PUNISH" when you punish is teaching you its own rules for free — and
+we have just added three mechanics (grab, break, juggle) that the player has no
+way of knowing worked.
+
+Putting frame advantage in the sim rather than in the harness would also make it
+assertable, which is worth something on its own.
+
 The camera is the one to take seriously. On a phone at 320×180 a camera that
 pushes in during a close exchange is probably worth more than any single
 mechanic in §2 or §3, and we already did this work on hoops.
 
 ---
 
-## 5. Where we are ahead — do not copy
+## 5. The opponent — where we stand against each
 
-**Their generic AI is a random button-jammer.** `AiInput.Update(level)`
-(`src/input.go:1863`) picks a random direction and mashes buttons at
-`chance = (-11.25*level + 165) * 7`, plus a "cheat" that fires a random command
-off the character's list when `RandF32(0, aiLevel/2+32) > 32`
-(`src/char.go:13612`). Real Mugen AI is hand-written per character in CNS, which
-is to say there is no general AI in that repo at all.
+The two references disagree here, and the disagreement is the useful part.
 
-Ours — reaction delay, whiff punish, guard reading, block→punish, combo and
-juggle follow-ups — is a better opponent than anything shipped there. Leave it
-alone except to teach it each new mechanic (see §10).
+**Ikemen's generic AI is a random button-jammer**, and we are well ahead of it.
+`AiInput.Update(level)` (`src/input.go:1863`) picks a random direction and mashes
+buttons at `chance = (-11.25*level + 165) * 7`, plus a "cheat" that fires a
+random command off the character's list when `RandF32(0, aiLevel/2+32) > 32`
+(`src/char.go:13612`). Real Mugen AI is hand-written per character in CNS — there
+is no general AI in that repo at all. Ours (reaction delay, whiff punish, guard
+reading, block→punish, combo and juggle follow-ups) is a better opponent than
+anything shipped there.
 
-Also out on grounds of "needs art data we do not have": CNS/ZSS state scripting,
-the SFF/AIR sprite formats, and multiple CLSN boxes per animation frame.
+**Sakuga's is structurally better than ours**, and this is the most valuable
+single idea in either repository.
+
+`AIBehavior` (`Resources/AI/AIBehavior.cs`) is a data resource:
+
+```
+DecisionRateFree   a RANGE, not a constant — how often it re-decides when idle
+DecisionRateBusy   … and while committed to something
+InputRandomness    a range applied to its own inputs
+BlockingRate       how often it guards
+TechingRate        how often it techs a knockdown
+PredictionQuality  0-10: how often it correctly READS your current state
+LowHealth          below this it flips to defensive
+```
+
+plus four action packs by distance band (`NearActions` / `MidActions` /
+`FarActions` / `DistantActions`), each a list of `AICondition { Distance,
+UseOnGround, UseOnAir, SuperGaugeRequired, Probability, ActionMode, CounterFlags }`.
+`CounterFlags` is matched against the *opponent's* current state
+(`AIFlags { HITSTUN_STATE, BLOCKSTUN_STATE, ATTACK_STATE, KNOCKED_DOWN,
+INVULNERABLE, HIGH_ACTION, LOW_ACTION, CLOSE_ACTION, … }`), so a condition reads
+"when they are doing this, at this range, with this much meter, do one of these,
+with probability P" (`Components/AIBrain.cs:240-270`).
+
+Two things fall out of that shape which we do not have:
+
+1. **One difficulty knob.** `PredictionQuality` is how often the bot reads you
+   correctly. Ours is four separate hardcoded constants — `AI_PUNISH_CHANCE`,
+   `AI_COMBO_CHANCE`, `AI_JUGGLE_CHANCE`, `AI_BREAK_CHANCE` — tuned by hand and
+   not exposed anywhere. They enumerate `BotDifficulty { BEGINNER, EASY, MEDIUM,
+   HARD, VERY_HARD, PRO }`.
+2. **Personality.** `BotMode { AGGRESSIVE, DEFENSIVE }` selects different action
+   packs from the same brain.
+
+**Why this matters to us specifically.** We shipped venues and NPC opponents
+(task #16). Every street fight in the game currently has the *identical* brain,
+and the only thing that differs between opponents is their name and health. Our
+four AI constants are exactly the thing that should be per-opponent data, and we
+already have the pattern for it in `systems/hoops/roster.ts`. A washed-up rapper
+and a bouncer should not fight the same way, and right now they cannot fight
+differently even in principle.
+
+**Still out of both**, on grounds of needing per-frame art data we do not have:
+CNS/ZSS state scripting, the SFF/AIR sprite formats, multiple collision boxes
+per animation frame, and Sakuga's whole Godot resource/editor layer.
 
 ---
 
@@ -217,33 +349,55 @@ the ground. **Worth doing even if we do nothing else.**
 the moon (landing recovery should price it); the opponent's jump-in read stops
 being free. Guard against: a cross-up that the AI cannot ever block.
 
-### Stage 2 — impact
+### Stage 2 — impact, and the counter hit
 
-- Shake-then-knockback split.
+- **Counter hit** (§2.5): contact during the defender's startup frames is a
+  counter — roughly double hitstop, more damage, more advantage. Nearly free, and
+  it is the mechanic that pays for reading the opponent.
+- **Hit callouts** (§4): "Counter", "Punish", "Break", "Knockdown". The cheapest
+  feedback in this document, and we have three new mechanics the player currently
+  has no way of knowing worked.
+- Shake-then-knockback split (§2.2).
 - Attacker and defender freeze as separate authored numbers; block freeze too.
 - At least three reaction types, so a kick does not read like a jab.
 - `EnvShake` with frequency and decay in place of the scalar.
 
-Pure feel, no balance change intended.
+Mostly feel. The counter hit is the one real balance change, and it should
+sharpen the neutral game rather than move win rates much.
 
-*Gate:* no match-length regression, no win-rate movement outside noise.
+*Gate:* no match-length regression; `proper` should gain a little from counters
+and `mashHeavy` should lose a little to them. Anything bigger means the counter
+bonus is too large.
 
-### Stage 3 — agency on the way down
+### Stage 3 — agency on the way down, and combos that end by themselves
 
-- Knockdown tech (`fall.recover` / `fall.recovertime`).
+- Knockdown tech (`fall.recover` / `fall.recovertime`), with a `TechingRate` on
+  the opponent so it is not all-or-nothing.
+- **Throw invulnerability on wake-up** as a typed frame property (§2.7). We
+  shipped a grab and then left getting up defenceless against it.
+- **Gravity proration replaces `JUGGLE_MAX`.** Each juggle hit adds gravity so
+  the victim falls faster and the combo dies on its own. This supersedes the
+  juggle-points plan: no arbitrary cap, no third hit whiffing for reasons the
+  player cannot see. Delete `juggleSpent` and `JUGGLE_MAX` together.
+- **Same-move proration replaces the hard ban** on cancelling a jab into a jab.
+  The current rule is a hack that happens to work; scaling is the principled
+  version and it generalises to every move.
 - Ground bounce as a juggle extender.
-- Juggle points replacing `JUGGLE_MAX`; delete `juggleSpent`.
 
 *Gate:* free wake-up pressure drops without knockdowns becoming worthless;
-juggle length spreads to 1–3 instead of pinning at 2.
+juggle length spreads naturally to 1–3 instead of pinning at 2; mashing one
+button stays as bad as it is now (3%) *without* the hard cancel ban.
 
 ### Stage 4 — the stage is a place
 
-- Corner push, with hit and block values authored separately.
+- Corner push, with hit and block values authored separately (the stick).
+- **Corner damage scaling** — combos in the corner are worth more (the carrot).
+  Sakuga runs 120% against a 100% base. Right now our corner is pure downside
+  for the defender and pure upside for the attacker, with no tension either way.
 - Camera auto-zoom.
 
 *Gate:* damage taken while cornered drops, but time cornered does not go to
-zero.
+zero, and getting someone cornered is still clearly worth doing.
 
 ### Stage 5 — the special is a big deal
 
@@ -251,8 +405,26 @@ zero.
 
 *Gate:* the special's hit rate rises; its win contribution does not double.
 
-**Scope honesty.** Five stages is a lot for one of twelve mini-games. Stop after
-Stage 2 and look at it before committing to 3–5.
+### Stage 6 — opponents who fight differently
+
+Pull our four hardcoded AI constants (`AI_PUNISH_CHANCE`, `AI_COMBO_CHANCE`,
+`AI_JUGGLE_CHANCE`, `AI_BREAK_CHANCE`) out into a per-opponent behaviour record,
+in the shape Sakuga uses (§5): decision-rate ranges, blocking rate, teching rate,
+a single `prediction` difficulty knob, a low-health threshold, and an
+aggressive/defensive lean. Wire it to the NPC roster we already have, following
+`systems/hoops/roster.ts`.
+
+This is the only stage that is a *product* change rather than a fighter change:
+it is what makes fighting the bouncer different from fighting the washed-up
+rapper, which is currently impossible even in principle.
+
+*Gate:* two opponents with different records produce measurably different match
+shapes — hits taken, block rate, match length — against the same player policy.
+If they do not, the record is not doing anything.
+
+**Scope honesty.** Six stages is a lot for one of twelve mini-games. Stop after
+Stage 2 and look at it before committing to the rest. If only two stages ever
+happen, Stage 1 and Stage 2 are the two.
 
 ---
 
@@ -263,13 +435,32 @@ and most add a HUD element, on a phone, in a mini-game.
 
 - **Guard meter / guard crush.** A second answer to turtling besides the grab.
   Competes with the grab for the same slot; wait until the grab has been played.
+  Both engines have it — Sakuga as per-move `GuardCrush` / `GuardCrushDamage`
+  with a `GuardCrushState` and `GuardCrushHitstun = 40`, Ikemen as `guardpoints`
+  plus a whole set-piece in `data/guardbreak.zss`. Well specified whenever we
+  want it.
 - **Dizzy / stun.** One meter too many.
-- **Parry / ReversalDef.** Def Jam's signature. Also competes with the grab.
+- ~~**Parry / ReversalDef.**~~ **Reclassified — no longer out.** Parked after the
+  Ikemen read on the assumption it was a whole new move competing with the grab.
+  Sakuga shows it does not have to be: `InstantBlockWindow = 3`
+  (`Globals/GlobalVariables.cs`) makes a just-defend a **3-frame window on the
+  block you already have**, not a separate input. That is a handful of lines on
+  top of `blockSucceeds`, it rewards reading without touching the grab's slot,
+  and it gives the "Just" callout something to announce. Candidate for Stage 2
+  or a Stage 2.5; needs a decision.
 - **Red life** (recoverable damage). Noise in a three-round mini-game.
 - **The `hitflag` / `guardflag` refactor as a standalone change.** It is the
   right model and it deletes three predicates, but on its own it is a large diff
   with zero visible difference. Fold it into Stage 3 only as far as it pays.
-- **Generalising the throw into custom states.** Our bespoke hold works.
+- **Generalising the throw into custom states.** Our bespoke hold works. Worth
+  noting Sakuga models it as `HitstunType.GRABBED` — a *kind of hitstun* rather
+  than a separate state — which is probably how ours should have been built and
+  is cheap to change if we ever touch it.
+- **Clash** (§2.6). Nice, readable, and a real moment. Not urgent: our
+  symmetric trade is defensible and simultaneous hitboxes are rare.
+- **Proximity block boxes** (`HitboxType.PROXIMITY_BLOCK`). Fixes "holding back
+  at full screen counts as blocking". Ours is a cosmetic wrinkle at most, since
+  blocking at range costs nothing now that chip is gone.
 - **More attacks.** Tekken's texture comes from strings per limb. A phone D-pad
   cannot express that and should not try; high / low / overhead / throw is what
   two buttons can carry.
@@ -295,15 +486,28 @@ The part of this document that keeps it alive. Nothing below has been verified.
 5. **Is the balance harness sample size honest?** Same question the hoops PRD
    has open: 120 seeded matches against thresholds a few points wide.
 6. **Ikemen's `guard_dist_x`** — the range at which a defender is forced into a
-   guard stance. Read but not understood; may or may not matter for us.
-7. **Their trade resolution** (`priority` + `prioritytype` Hit/Miss/Dodge,
-   `char.go:11085`). We resolve trades symmetrically. Is theirs better, or just
-   more configurable?
-8. **What does `hitshaketime` vs `hittime` vs `slidetime` buy** that a single
-   stun number does not? Stage 2 assumes the split is worth it. Verify first.
-9. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
-   design writing; the Street Fighter III parry literature; anything on throw
-   tech windows on touchscreens.
+   guard stance. Read but not understood. Sakuga's `PROXIMITY_BLOCK` box is the
+   same idea in a cleaner form; see §7.
+7. **Is a 3-frame instant-block window usable on a phone?** Sakuga targets a
+   controller at 60Hz. Touch latency is worse and variable. Our focus stat
+   already scales the input buffer 4–10 frames, so there is a precedent for
+   making the window a player stat rather than a constant — but that needs
+   measuring, not assuming.
+8. **Does the counter hit need to be visible to work?** Stage 2 pairs it with a
+   callout on that assumption. Untested.
+9. **Per-opponent AI records: how many knobs before it is unmaintainable?**
+   Sakuga carries seven plus four action packs. We have four constants. The
+   right number for twelve NPCs in a mini-game is probably nearer four than
+   eleven, but that is a guess.
+10. **Trade resolution.** Ikemen has `priority` + `prioritytype`
+    (Hit/Miss/Dodge, `char.go:11085`); Sakuga has `Priority` plus a clash
+    outcome. We resolve symmetrically. Is either better, or just more
+    configurable?
+11. **What does `hitshaketime` vs `hittime` vs `slidetime` buy** that a single
+    stun number does not? Stage 2 assumes the split is worth it. Verify first.
+12. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
+    design writing; the Street Fighter III parry literature; anything on throw
+    tech windows on touchscreens.
 
 ---
 
@@ -338,6 +542,48 @@ vocabulary — 420k lines, likely more findings in it), `src/anim.go` (the
 art/sim contract), `data/dizzy.zss`, `data/score.zss`, `data/training.zss`
 (what diagnostics a fighting game considers essential — may be worth aligning
 the test harness to), `data/tag.zss`.
+
+### 2026-09-21 — Sakuga Engine
+
+MIT, C#/Godot 4, ~25k lines of which ~12k is engine. A 2024 anime fighter rather
+than a 1999 arcade one, and **closer to our problem than Ikemen on almost every
+axis**. Read: `Globals/GlobalEnums.cs`, `Globals/GlobalFlags.cs`,
+`Globals/GlobalVariables.cs`, `Resources/HitboxElement.cs`,
+`Resources/BlockSettings.cs`, `Resources/MoveCancelSettings.cs`,
+`Components/SakugaProrations.cs`, `Components/CombatTracker.cs`,
+`Resources/AI/*`, `Components/AIBrain.cs`, `HitNotifs.tres`.
+
+Headline finds, in the order they surprised us:
+
+- **We have no counter hit.** Not mentioned once in the Ikemen pass because
+  Ikemen buries it; Sakuga prices it in five places. Every hit in our game is
+  the same hit (§2.5).
+- **Gravity proration is how a juggle should end** — the victim gets heavier
+  until the combo dies, instead of a hard cap making the third hit whiff for
+  invisible reasons. Supersedes the juggle-points plan (§3, Stage 3).
+- **Same-move proration is the principled version** of the hard "a jab cannot
+  cancel into a jab" ban we shipped. Ours is a hack that happens to work.
+- **The corner should pay both ways** — they scale corner combos to 120%
+  against a 100% base. Ours is all stick and no carrot (Stage 4).
+- **Cancels are per-target, per-outcome, per-window**, with block-cancel as a
+  first-class flag. No block-cancel means no blockstrings.
+- **Their AI is data, and better shaped than ours** (§5). Decision rates as
+  ranges, a single `PredictionQuality` difficulty knob, aggressive/defensive
+  personalities, action packs per distance band. This is the one idea in either
+  repo that reaches outside the fighter — it is what would make our twelve NPC
+  opponents fight differently. Added as Stage 6.
+- **A parry need not be a new move.** `InstantBlockWindow = 3` is a window on
+  the block you already have. Reclassified out of §7.
+- **Two independent confirmations we got something right**: their input buffer
+  is 10 frames against our 4–10 (baseline 7), and their block hitstop is 6
+  against a base of 10 — the same 0.6 ratio we picked by hand.
+
+Read but not yet mined: `Resources/FrameDataEvents/` (a move as a list of
+condition→action events — 24 conditions, 35 actions; an architecture worth
+understanding even if we never adopt it), `Collision/PhysicsWorld.cs`,
+`Components/StanceManager.cs`, `Components/SakugaSuperArmor.cs`,
+`Utils/ChecksumCalculator.cs` (determinism verification — possibly useful to the
+test suite), `Components/FighterCamera.cs`.
 
 ---
 
