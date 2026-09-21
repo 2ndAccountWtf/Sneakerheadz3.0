@@ -627,8 +627,8 @@ grab is one move with one outcome; this makes it a game.
 - GRAB tapped is a **weak clinch**; GRAB held is a **strong clinch** — slower
   startup, more turbo, better options. Same button (§2.10, and Phase 1's
   tap/hold).
-- Entry drains turbo. Turbo already exists and is already spent on dashes, so
-  choosing to sprint is choosing to be easier to hold.
+- Entry drains **stamina**, a new resource — the fighter has `hype` and nothing
+  else, so there is currently no reason not to mash. See §6 Phase 2a.
 
 **Inside the hold — the AKI slot model, at our scale.**
 - The hold freezes both fighters. During it the D-pad picks the outcome:
@@ -661,6 +661,126 @@ from Phase 1. Art for a clinch drops in without touching any of this.
 *Gate:* the grab's usage rises without its win contribution rising — a tool,
 not a trump. A bot that always grabs stays beatable by a bot that reads the
 sprawl. Turbo spent on dashes measurably weakens your grapple defence.
+
+### Phase 2a — the grapple move list
+
+**Correction:** the Phase 2 sketch above said the clinch is contested on turbo
+"which already exists". It does not — `turbo` is a hoops field. The fighter
+carries `hype` (the special meter) and nothing else, so the contest needs a
+real resource. See *Stamina* below.
+
+**The rule for what gets in.** A grapple move earns its place only by doing
+something no other move does. Five mechanical roles, and everything below fills
+exactly one:
+
+| role | what it is for |
+|---|---|
+| **chip** | small damage that *keeps* the hold — makes the clinch a place, not a menu |
+| **burst** | big damage, hard knockdown, hold ends — the payoff |
+| **position** | no damage, better options next — the rung up, or a side switch |
+| **drain** | damage over time while both are locked — a contest, not an outcome |
+| **exit** | leave on your terms with advantage — stops the ground being all-in |
+
+---
+
+#### Entry
+
+| input | move | startup | on whiff | cost |
+|---|---|---|---|---|
+| tap GRAB | weak clinch | 5f | −22 | 8 stamina |
+| hold GRAB (~12f) | strong clinch | 9f | −28 | 18 stamina |
+| dash + GRAB | running clinch | 7f | −30 | 20 stamina |
+
+The running clinch reaches further and is harder to break, and the sprawl
+punishes it hardest. Tap-versus-hold comes from Phase 1.
+
+#### Rung 1 — the clinch. Direction is read **during** the hold, not at entry
+
+Weak set — 16-frame hold:
+
+| dir | move | role | effect |
+|---|---|---|---|
+| neutral | **Knee** | chip | ~6 dmg, **keeps the clinch**, builds hype. Same-move proration bleeds it fast, and every knee reopens their break window — so staying is a gamble |
+| forward | **Body slam** | burst | ~15, hard knockdown, wall bonus |
+| back | **Judo trip** | position | ~10, **switches sides**. Less damage is the price of the corner escape |
+| down | **Takedown** | position | 0 dmg, both to the floor, you on top → Rung 2 |
+
+Strong set — 20-frame hold:
+
+| dir | move | role | effect |
+|---|---|---|---|
+| neutral | **Standing guillotine** | drain | ~1.5 dmg/frame while held, both locked, drains their stamina hard. They mash out, you hold. Escape leaves you −14 |
+| forward | **Suplex** | burst | ~24, hard knockdown, heavy hitstop, wall bonus |
+| back | **Back drop** | burst + position | ~18, side switch, they land behind you |
+| up | **Shoulder throw** | burst + setup | ~12 and it **launches** — the only grapple that feeds the juggle system |
+
+#### Rung 2 — ground, you on top
+
+| dir | move | role | effect |
+|---|---|---|---|
+| neutral | **Ground and pound** | chip | ~5 a hit, scales down, builds hype. Each hit reopens their reversal |
+| forward | **Advance to mount** | position | no damage; their escape gets harder, your options get better |
+| down | **Armbar** | drain | ~2 dmg/frame. Bigger payoff than the guillotine, bigger risk |
+| back | **Stand up** | exit | disengage with frame advantage — bank it and reset |
+
+#### The defender — four answers, each beating a different thing
+
+1. **Sprawl** — down-and-back during the grab's *startup*. Stuffs it outright
+   and leaves the grabber −20. This is the **read**, and it is what closes the
+   triangle: strike beats grab, grab beats block, block beats strike, and the
+   right low guard beats the grab.
+2. **Break** — one press of GRAB inside the hold window. Both shoved apart,
+   neutral. The window scales with `focus`. **Mashing does not help.** This is
+   the **reaction**.
+3. **Buck** — on the ground, direction plus button, contested on stamina.
+   Reverses top and bottom. This is the **contest**.
+4. **Ride it out** — take the throw and keep your stamina. Sometimes correct:
+   a failed escape into a submission costs more than the slam would have.
+
+**Submissions are the deliberate exception: mashing *is* correct there.** You
+are already caught, so it is a struggle rather than a read. Keeping that
+distinct from the break is what stops "mash everything" being the whole
+defensive game.
+
+#### Stamina — the resource the fighter is missing
+
+One new field, and it pays for more than the grapple. Starts 100. Regenerates
+quickly standing, slowly in a clinch, **not at all** inside a submission.
+
+- Entry costs as tabled; sprawl 12, break 10, buck 14.
+- Below ~20 you cannot initiate a grapple and your escape windows narrow.
+- Dashes and jumps draw on it too, so movement and grappling compete.
+
+This is also the fighter's missing answer to "why not mash" in general.
+
+#### Environment
+
+The wall bonus exists. Add **one hazard per venue** — a dumpster, a parked car,
+the ice machine — that a throw can send someone into for bonus damage and its
+own animation state. It is Def Jam's signature move and it ties the fighter to
+the venue system the game already has.
+
+#### Weapons
+
+**You cannot grapple with a melee weapon in hand.** Grabbing drops it to the
+floor, where either fighter can pick it up. That is a real decision — keep the
+crowbar, or take the grapple — and it needs no new art beyond a dropped-weapon
+state.
+
+#### Deliberately not included
+
+- **More submissions** (kimura, leg lock, triangle). More animations, identical
+  mechanics. Two — one standing, one ground — cover the drain role.
+- **Guard / half-guard / side control as separate rungs.** TUC runs four; we
+  run two. More rungs is more to learn inside a thirty-second fight.
+- **Air grabs.** Unreadable at 320×180 and they break the anti-air game.
+- **Pins.** No referee. It is a car park.
+
+#### If we build a subset first
+
+The weak clinch's four, the sprawl, the break, and the existing wall slam.
+That is the entire triangle working end to end. The strong set and Rung 2 are
+the second pass.
 
 ### Phase 3 — impact · ~M
 
