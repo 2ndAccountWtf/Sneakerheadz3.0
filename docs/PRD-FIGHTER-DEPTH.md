@@ -618,125 +618,129 @@ The foundation both the grapple and the defence game sit on.
 *Gate:* every existing buffer and focus check passes unchanged; a test asserts
 every reachable fighter state maps to a declared `AnimState` with no fallback.
 
-### Phase 1b — the touch layer, on the CODM / PUBG model
+### Phase 1b — the control scheme: 8-way stick and four buttons
 
-Researched 2026-09-21, then **rewritten the same day.** The first version
-borrowed Skullgirls Mobile and Marvel Contest of Champions — tap / swipe /
-hold, with two-finger holds for block and two-finger swipes for the grab break.
-That was rejected, correctly. The games with genuinely great mobile controls
-are CODM and PUBG Mobile, and **neither uses multi-finger gestures as verbs at
-all.**
+Researched 2026-09-21, rewritten twice. First draft borrowed Skullgirls and
+Marvel Contest of Champions (tap / swipe / hold, two-finger block and break) —
+rejected. Second draft borrowed CODM's five-button context cluster — also more
+than we need. **This is the third and it is smaller than both.**
 
-#### What CODM and PUBG actually do
+**One 8-way stick. Four buttons. Everything else derives.**
 
-- **Many small dedicated buttons**, not a gesture vocabulary. Fire, jump,
-  crouch, prone, reload, aim — each its own target.
-- **A fully customisable HUD.** Elements are dragged on and off the screen,
-  resized, and repositioned. CODM's Advanced Mode hands over manual control of
-  shooting, aiming and movement.
-- **The skill ceiling lives in layout and finger count**, not in gesture
-  difficulty — the whole competitive scene is 2-, 3- and 4-finger claw layouts,
-  shared as codes.
-- **Context-sensitive buttons.** The same screen position becomes *pick up*,
-  *open door* or *revive* depending on what is in front of you.
-- Frequently-used actions sit inside the thumb arc; rarely-used ones sit where
-  reaching is deliberately awkward.
-- Fire button sized at 120–150% of default, with hit targets larger than the
-  visible art.
-
-And from the general UI literature: a **floating** stick — one that appears
-where the thumb lands — measurably beats a fixed one (4.36 vs 4.07 for ease of
-learning, 4.00 vs 3.85 for satisfaction). In landscape, thumbs comfortably
-reach the two lower quadrants and little else.
-
-#### The scheme
-
-**Left thumb — a floating stick.** Appears under the thumb, walks left and
-right, and holding *away* from the opponent is the guard, as today.
-
-**Right thumb — a button cluster.** Five targets, because CODM's answer to
-"crouch" and "jump" is a button, not a stick direction:
-
-| button | neutral |
+| | |
 |---|---|
-| **PUNCH** | jab — largest target, most-pressed |
-| **KICK** | heavy / weapon |
-| **GRAB** | clinch — tap for weak, hold for strong |
+| **stick** | 8-way. Walk, retreat, crouch on down, and the direction read during a clinch |
+| **PUNCH** | |
+| **KICK** | |
 | **JUMP** | |
-| **CROUCH** | |
+| **BLOCK** | |
 
-**This kills the sprawl bug outright.** Crouch stops being a stick direction,
-so `down + back` is no longer ambiguous with crouch-block, and the sprawl is
-simply CROUCH pressed during their grab startup. No hold, no gesture, no
-conflict — and no telegraph, because the button is always present.
+#### Why BLOCK as a button is the important change
 
-**Context-sensitive cluster.** This is the CODM *pick up / revive* pattern, and
-it is the answer to the grapple's four-way read that swipes were reaching for:
+Today the guard is *hold away from the opponent*, which welds defence to
+retreat: you cannot advance behind a guard, and you cannot walk back without
+guarding. Putting block on a button separates them, which is the Tekken and
+Virtua Fighter model and is strictly more expressive.
 
-| state | cluster becomes |
+It also **deletes the sprawl bug at its root.** `down + back` stops meaning two
+things, because crouching is the stick and blocking is a button, and the two
+are independent.
+
+#### The grapple input
+
+The instinct is right and it is the genre standard: **Virtua Fighter throws on
+Punch + Guard, Tekken on 1+3, Dead or Alive on Free + Punch.** Two buttons
+together *is* how fighting games do throws.
+
+The catch is only on glass — two simultaneous presses in the same thumb cluster
+is the same awkwardness that got the two-finger scheme rejected. So it splits
+by device, and both map to one intent the simulation sees:
+
+| device | grapple |
 |---|---|
-| clinch (weak) | KNEE · SLAM · TRIP · TAKEDOWN |
-| clinch (strong) | CHOKE · SUPLEX · BACKDROP · THROW |
-| ground, on top | POUND · MOUNT · ARMBAR · STAND |
-| being held | a single large **BREAK** |
-| being juggled / down | **TECH** |
+| **keyboard** | **BLOCK + PUNCH** — the Virtua Fighter convention |
+| **touch** | **BLOCK held + stick toward them** — left thumb pushes in, right thumb guards |
 
-Pressing one of four labelled buttons is faster, more accurate and less
-ambiguous than flicking a direction — and it is **self-documenting**, which
-quietly solves most of the discoverability problem the mechanics have had since
-the triangle shipped. Nobody has to be told the grab has four outcomes; the
-clinch shows them.
+The touch version is two thumbs each doing something natural, never two
+fingers racing on one cluster. It is also thematically exact: you close the
+distance behind your guard and end up tied up. Outside grab range the same
+input is simply an advancing guard, which is useful on its own.
 
-The single **BREAK** button also enforces "one press, not a mash" honestly: it
-exists only inside the window, so there is nothing to mash beforehand.
+**Tap for a weak clinch, hold for a strong one**, as specced.
 
-**Customisation, because that is half of why CODM feels good:**
+#### Everything else derives — no new buttons
 
-- Layout presets — right cluster, left cluster, and a wider claw-friendly
-  spread.
-- Per-button drag to reposition, with position saved per player.
-- Button size and opacity settings.
-- Hit targets larger than the drawn art, always.
-
-#### What is explicitly not in this
-
-- **No two-finger anything.** No two-finger block, no two-finger break.
-- **No swipes for core actions.** A flick may later be an *alternative* for a
-  power-user shortcut, never the only way to do something.
-- **No gesture recognition ambiguity**, which also deletes a whole class of
-  tests the previous version needed.
-
-#### Portability — what other games get
-
-The context-sensitive cluster is the reusable part, and it lands hardest on
-Hoops, where the help text currently spends a paragraph explaining that the
-buttons mean different things depending on who has the ball:
-
-| game | cluster changes when |
+| action | input |
 |---|---|
-| Hoops | you have the ball, a team-mate has it, or the other team does |
-| Cart Race | drifting, or in the air |
-| Pizza Run / Flight 404 | carrying, climbing, or falling |
-| Darts / Dice | aiming versus committing |
+| dash | double-tap toward on the stick |
+| sweep | down + KICK |
+| special | down + PUNCH at full meter |
+| air attack | JUMP, then PUNCH or KICK |
+| crouch-block | stick down + BLOCK |
+| **clinch outcome** | **the stick direction held when the hold resolves** |
+| **break** | **press BLOCK during the hold window** |
+| **sprawl** | **enter crouch-block inside the timing window as their grab starts** |
+| **instant block** | **press BLOCK within a few frames of the hit landing** |
 
-The floating stick and the customisable layout are engine-wide and benefit
-every game with a stick.
+Three of those deserve a note.
+
+**The clinch outcome needs no button at all.** The fighters are frozen and the
+stick is already under the thumb, so the direction you are holding when the
+hold resolves picks the outcome — toward, away, down, up, or neutral. **Neutral
+is the knee**, so doing nothing gives you the safe chip option rather than a
+fumble. This is what the swipes and the context cluster were both reaching for,
+and it costs nothing.
+
+**The sprawl becomes a timed input rather than a held one**, which is what
+stops a permanent crouch-block auto-sprawling every grab: it only counts if you
+*entered* crouch-block within the window as their grab became active. Holding
+it from earlier does not. That check is exactly what Phase 1's frame-stamped
+history is for.
+
+**The instant block is the same mechanic** — a defensive press judged on when
+it arrived — so the two share one implementation. This is Marvel Contest of
+Champions' parry, which is the one thing worth keeping from that draft.
+
+#### What this deletes from earlier drafts
+
+- The GRAB button. Four buttons, not five.
+- Every two-finger input.
+- Swipe recognition, and the whole class of gesture-ambiguity tests with it.
+- The context-sensitive cluster as a *control* mechanism. It may still earn its
+  place later as a **display** — showing the four clinch options while the hold
+  is live is a readability aid, not an input.
+
+#### Still worth taking from CODM
+
+- **A floating stick**, appearing where the thumb lands. Measurably better than
+  a fixed one (4.36 vs 4.07 ease of learning, 4.00 vs 3.85 satisfaction).
+- **Customisable layout** — presets, per-button drag saved per player, size and
+  opacity. Half of why CODM feels good.
+- **Hit targets larger than the drawn art.**
+
+#### Portability
+
+This is a smaller, more general scheme than the cluster, so it ports further: an
+8-way stick plus four buttons with tap/hold and button-pair inputs is a
+complete vocabulary any of the sixteen games can draw from. Hoops already wants
+three actions and a direction; Cart Race wants a stick and two; the runners want
+a stick and one.
 
 #### What to measure
 
-The headless harness drives `FightInput` directly and cannot feel a thumb, so
-this phase is proved with unit tests rather than balance runs:
+Unit tests, not balance runs — the harness drives `FightInput` directly:
 
-- **Reachability**: every button in every context sits inside the landscape
-  thumb arc at the smallest supported screen.
-- **Hit target**: every button's touch region is at least its drawn size, and
-  no two regions overlap.
-- **Context integrity**: every reachable fighter state maps to a declared
-  cluster, with no state showing a button that cannot fire.
-- **Latency**: a press registers within the existing input buffer window
-  (4–10 frames by `focus`), or the buffer is doing nothing.
-- **Layout safety**: a customised layout cannot place a button off-screen or
-  fully underneath another.
+- **Pair detection**: BLOCK+PUNCH registers as a grapple and not as a block
+  followed by a punch, across a realistic spread of press offsets.
+- **No false positives**: a block and a punch a long way apart never read as a
+  grapple.
+- **Sprawl timing**: entering crouch-block inside the window sprawls; holding
+  it from before the window does not.
+- **Neutral default**: a clinch resolved with the stick centred always produces
+  the knee.
+- **Reachability**: stick and all four buttons inside the landscape thumb arc
+  at the smallest supported screen.
+- **Latency**: any input registers inside the existing buffer window.
 
 ### Phase 2 — the grapple system · ~L
 
@@ -816,11 +820,10 @@ punishes it hardest. Tap-versus-hold comes from Phase 1.
 
 #### Rung 1 — the clinch. Direction is read **during** the hold, not at entry
 
-**Input, revised by §6 Phase 1b:** on touch the four outcomes are **four
-labelled buttons** that replace the neutral cluster for the length of the hold
-— the CODM context-button pattern. Faster and less ambiguous than a flick, and
-self-documenting: nobody has to be told the clinch has four outcomes. The
-direction mapping below is the keyboard equivalent.
+**Input, settled in §6 Phase 1b:** the outcome is **the stick direction held
+when the hold resolves** — no button, no swipe, no extra cluster. The fighters
+are frozen and the thumb is already on the stick. **Neutral is the knee**, so
+doing nothing gives you the safe chip option rather than a fumble.
 
 Weak set — 16-frame hold:
 
@@ -855,12 +858,9 @@ Strong set — 20-frame hold:
    and leaves the grabber −20. This is the **read**, and it is what closes the
    triangle: strike beats grab, grab beats block, block beats strike, and the
    right low guard beats the grab.
-2. **Break** — a single large **BREAK** button that appears only for the
-   length of the window (§6 Phase 1b). Both shoved apart, neutral. The window
-   scales with `focus`. Because the button exists only inside the window there
-   is nothing to mash beforehand, which enforces "one press, not a mash"
-   through the input itself rather than through a counter. On a keyboard it is
-   a single GRAB press. This is the **reaction**.
+2. **Break** — **press BLOCK** during the hold window (§6 Phase 1b). Both
+   shoved apart, neutral. The window scales with `focus`, and only the first
+   press inside it counts, so mashing buys nothing. This is the **reaction**.
 3. **Buck** — on the ground, direction plus button, contested on stamina.
    Reverses top and bottom. This is the **contest**.
 4. **Ride it out** — take the throw and keep your stamina. Sometimes correct:
@@ -936,15 +936,15 @@ Three ways out, and one has to be picked before any of this is built:
 - **(c) No sprawl; the grab is simply unblockable** — what we ship today. Keeps
   the triangle three-sided and gives up the fourth answer.
 
-- **(d) CROUCH becomes a button, not a stick direction** (§6 Phase 1b, the
-  CODM model). The sprawl is then simply CROUCH pressed during their grab
-  startup.
+- **(d) BLOCK becomes a button** (§6 Phase 1b). Crouching stays on the stick,
+  guarding moves to a button, and the two become independent — so `down + back`
+  stops meaning two things at once. The sprawl is then **entering crouch-block
+  inside the timing window** as their grab goes active; holding it from earlier
+  does not count, which is what stops a permanent crouch auto-sprawling.
 
-**Resolved: (d).** Moving crouch off the stick removes the ambiguity at its
-source — `down + back` stops meaning two things at once — rather than papering
-over it with a timing rule. On a keyboard the crouch key does the same job.
-This is the first case of the control rework deleting a design problem instead
-of re-expressing it.
+**Resolved: (d).** It removes the ambiguity at its source rather than papering
+over it, it costs no extra button, and the timing check is the same one the
+instant block needs — one implementation, two mechanics.
 
 **2. Grabbing someone in blockstun is currently legal and undefined.**
 `grabbable()` excludes `hitstun` but not `blockstun`, so a tick throw — poke,
