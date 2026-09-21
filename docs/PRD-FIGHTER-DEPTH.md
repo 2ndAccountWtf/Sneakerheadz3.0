@@ -293,6 +293,72 @@ person you beat.
 
 ---
 
+## 1b. Readiness — how deep is this, really
+
+Audited 2026-09-21 against one question: **could someone start writing code
+tomorrow without getting stuck?** Verified against the actual codebase, not
+from memory.
+
+### Ready to build
+
+| phase | why |
+|---|---|
+| **8 · block roll** | a concrete model with terms, clamps and three worked cases. `blockSucceeds` → quality, a glancing branch in `applyHit`, a `guardHeld` counter. The best-specced thing in these documents |
+| **10 · dirty fighting** | four moves with startup, damage, effect and price; the one rule change (`hittable` letting the stomp reach a downed fighter) is named |
+| **3 · impact** | the counter hit is a one-line condition on state we already track; the rest is authored numbers |
+
+### Ready bar one named gap each
+
+| phase | the gap |
+|---|---|
+| **1 · input + animation** | the input half is clear. **The animation contract interface is not specified** — frame counts, loop flags, anchor, missing-clip fallback, whether held states expose struggle progress. This must be pinned before any art is commissioned, and it is about an hour of writing |
+| **1b · controls** | **the shell caps at three action buttons.** `TouchZones` takes `[string,string] \| [string,string,string]` and `Btn` ends at `'c'`. We need four, so `Btn`, `InputState`, `KEYMAP`, `TouchZones`, `TouchPad` and `ArcadeShell.actions` all extend by one. Small, concrete, previously unnoticed. Layout persistence also unspecified |
+| **4 · air game** | the mechanics are clear; **the side-swap and facing rules for a cross-up are not written**, and that is the fiddly part of every 2D fighter — who faces where, when the guard direction flips, what happens mid-jump |
+| **5 · ground game** | tech and wake-up are clear. **The proration models have no numbers** — how much gravity per juggle hit, how hard a repeated move scales. Phase 8 has a model; this does not |
+
+### Verified this pass — previously unknown, now de-risked
+
+- **Phase 9 is wireable.** `systems/hospital.ts` exposes
+  `admit(day, cause, worth)` and a `STABILISED_AT = 12` threshold; heat lives on
+  the player and `systems/police` reads it; `banking.ts` has `deposit` and
+  `chargeToCredit`. The APIs exist and are player-shaped. What remains is
+  designing the result object and deciding whether changing `onFinish` is a
+  breaking change across all sixteen games or an additive one.
+- **Phase 7 has a proven pattern in this repo.** Hoops already runs
+  `cam: { zoom, fx, fy }` with an eased follow and — importantly — a **zoom
+  ladder** rather than continuous zoom, because a first version measured 99.6%
+  of frames rendering at a non-integer zoom and looking wrong. Copy the pattern
+  and the pitfall is already paid for.
+
+### Not ready — and it is the centrepiece
+
+**Phase 2, the grapple.** Three things block it:
+
+1. **Seven of the eight open decisions in `SPEC-FIGHTER-GRAPPLE.md` are still
+   open.** Only the sprawl was resolved. Tick throws, two grabs on one frame,
+   the round ending mid-hold, a projectile arriving mid-hold, the special as a
+   reversal, stalling, and grabbing a rising opponent all still need answers.
+2. **The clinch state machine is not drawn.** The move list says what each
+   outcome does; nothing says what happens frame by frame inside the hold, how
+   a rung transition executes, or what the AI observes while held.
+3. **Stamina is a new whole-game resource with invented numbers** and no tuning
+   pass behind any of them.
+
+That is one focused decision-and-drawing session, not another research arc.
+
+### The honest summary
+
+The plan is **deep on design, and now mostly verified on integration**. Nine of
+ten phases are buildable, three of them immediately. One phase — the biggest
+and the one everything was pointed at — needs a session before code.
+
+**The de-risking option:** Phase 8 is build-ready, self-contained, and the
+single change most likely to make the fighter feel like a fight. Building it
+first would test whether the method in these documents still works before
+committing to the grapple.
+
+---
+
 ## 2. Explicitly out of scope
 
 Good ideas, deliberately not being built yet. Each one adds a rule to explain
