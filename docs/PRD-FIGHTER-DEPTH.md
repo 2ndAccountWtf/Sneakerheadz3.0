@@ -1110,28 +1110,76 @@ taken, block rate, grapple rate, match length — against the same player policy
 *Gate:* damage taken while cornered drops, time cornered does not go to zero,
 and getting someone cornered stays worth doing.
 
-### Phase 8 — the guard economy · ~S · **opened by Phase 1b**
+### Phase 8 — blocking is a roll, not a guarantee · ~M
 
-Moving block onto a button created a hole and it has to be closed in the same
-pass. Today the guard is *hold away*, so guarding and retreating are the same
-act and you pay for defence by giving up ground. On a button you can **advance
-behind a guard**, and since ordinary moves no longer chip (correctly — see §3),
-walking forward blocking costs nothing at all.
+**Decided 2026-09-21.** This replaces the stamina-tax version of the guard
+economy, and it is a better answer than anything in the six references.
 
-The genre's three answers, and we need at least two:
+**The principle: the only defence that works every time is being out of range.**
+A guard is an attempt, not an immunity. It usually works, sometimes it turns a
+clean hit into a glancing one, and occasionally a punch, kick or elbow comes
+straight through it.
 
-- **Pushback on block** — a guarded hit shoves the blocker back, so turtling
-  loses ground. We have some of this; it needs to be authored per move
-  alongside the block-freeze numbers in Phase 3.
-- **Guard drains stamina slowly while held** — holding a guard is a choice with
-  a price, and stamina is already arriving with the grapple.
-- **Throws beat guard** — we have it, but it only bites if the grapple's entry
-  is fast enough to punish a turtle on reaction. That is a tuning question for
-  the entry frames in Phase 2.
+That is true to fighting, and mechanically it does three jobs at once:
+
+1. It **closes the free-advancing-guard hole** that Phase 1b opened, without a
+   stamina tax bolted on — a permanent guard leaks damage on its own.
+2. It gives **range a real job**. Backing out is the only clean answer, which
+   is the neutral game the fighter has never really had.
+3. It makes **the grapple the answer to a turtle**, alongside the leak, exactly
+   as the design already intends.
+
+#### Three outcomes, not two
+
+`blockSucceeds()` currently returns a boolean. It becomes a roll returning one
+of:
+
+| outcome | effect |
+|---|---|
+| **Clean** | as today — blockstun, no damage, pushback |
+| **Glancing** | partial damage (~30%), reduced blockstun, attacker keeps less advantage |
+| **Breach** | it lands as though unguarded |
+
+#### What drives the roll — and why it is not dice
+
+The failure mode here is "I blocked and still got hit", which reads as unfair.
+The answer is that **player-controlled factors dominate the roll**, and the
+random part only decides the margin:
+
+- **Stance** is the biggest term by far. Guarding low against a low attack is
+  near-certain; the wrong stance stays a clean hit exactly as it does today.
+- **Guard fatigue** — the longer a guard is held unbroken, the worse it gets.
+  This is the piece that prices the advancing guard, and it is thematic rather
+  than arbitrary: your arms get heavy.
+- **Move weight** — a jab is easy to hold, a heavy or an elbow is not. A per-move
+  `pierce` value, authored next to the block-freeze numbers in Phase 3.
+- **Stamina**, and **`focus`**, which already scales the input buffer.
+- Fresh guard, correct stance, full stamina should be *very* reliable. The roll
+  should only bite when you are tired, wrong, or holding it forever.
+
+#### It has to be legible
+
+A roll the player cannot see is indistinguishable from a bug. Each outcome gets
+its own read:
+
+- **Clean** — the existing block spark and sound.
+- **Glancing** — a different spark, the fighter rocks, a small chip of health.
+- **Breach** — the full hit reaction, so it is obvious the guard failed rather
+  than looking like the game dropped an input.
+
+Guard fatigue needs a tell too — the guard arm visibly drops as it degrades,
+which is also an `AnimState` the artist can key against.
+
+#### Determinism
+
+The roll goes through the existing seeded RNG, so the headless harness and the
+"same seed fights the same fight twice" check keep working unchanged.
 
 *Gate:* a bot that walks forward permanently guarding must lose to a mixed bot,
-and must lose harder than it does today. If it does not, the button made the
-game worse.
+and lose harder than it does today. A bot that guards **correctly and briefly**
+must still be rewarded — if short, well-timed guards are unreliable, the roll is
+tuned wrong. And `proper` must not drop more than a few points: this is a
+neutral-game change, not a difficulty change.
 
 ### Phase 9 — the fight is an event, not a system · ~M
 
@@ -1166,14 +1214,17 @@ hands, whether you are high, whether you have eaten.
 circumstances — a clean win with fists versus a win with a crowbar in front of
 witnesses — produce materially different consequences in the world.
 
-### Phase 10 — street-fight texture · ~M
+### Phase 10 — street-fight texture · ~M · **lowest priority**
 
-The mechanics specced so far would suit a tournament. This is a car park.
+Marked *could be interesting* rather than agreed. The mechanics specced so far
+would suit a tournament and this is a car park, but none of what remains here
+is load-bearing.
 
-- **Dirty fighting.** A cheap shot — eye rake, groin, sand — that is fast,
-  damaging and *safe*, but costs street cred and turns the crowd. A move whose
-  price is social rather than mechanical is something no reference in this
-  document has, and it is the most characterful thing available.
+- ~~**Dirty fighting with a social price.**~~ **CUT 2026-09-21.** A cheap shot
+  that costs street cred was rejected: it is a street fight, and punishing the
+  player for fighting like it is the wrong instinct. Nothing in the fighter
+  should price a move socially. If cheap shots ever return they are ordinary
+  moves balanced on frames and damage like everything else.
 - **The weapon on the floor.** Phase 2 already drops a melee weapon when you
   grapple. Leaving it there makes it a scramble — either fighter can dive for
   it, and that is a genuine decision mid-fight.
@@ -1183,16 +1234,15 @@ The mechanics specced so far would suit a tournament. This is a car park.
 - **Getting jumped.** Two on one exists in this world and the fighter cannot
   express it. Large, and worth naming rather than discovering later.
 
-### Phase 11 — how a fight ends · ~S
+### ~~Phase 11 — how a fight ends~~ · **CUT 2026-09-21**
 
-Today: K.O., or a timeout decided on health. A street fight has more endings,
-and each is a different feeling:
+Proposed five endings — give up, the cops, someone breaks it up, running,
+submission. **Cut by decision: there are two endings, K.O. and a timeout on
+health.** Keeping it to two keeps the fight readable and keeps the consequences
+in Phase 9 simple to reason about.
 
-- They **give up** — stop fighting at low health rather than being knocked out.
-- **The cops** — heat crosses a threshold mid-fight and it ends for everyone.
-- Someone **breaks it up** — the venue, a bouncer, Bibi.
-- You **run** — the existing Run Away, but with consequences rather than a −$5.
-- A **submission** ends it, once Phase 2 has chokes and armbars.
+Note for Phase 2: a choke or armbar that empties the health bar is therefore a
+K.O., not a separate submission ending.
 
 ### Match shape — a question, not a decision
 
@@ -1223,8 +1273,10 @@ everything else needs; the other is the grapple system, which is the largest
 single gap between what this is and what was asked for.
 
 **But Phase 8 is not optional if Phase 1b ships.** Moving block to a button
-opens the free-advancing-guard hole, and shipping the control change without
-the guard economy makes the neutral game worse than it is today.
+opens the free-advancing-guard hole, and the block roll is what closes it —
+shipping the control change without it makes the neutral game worse than it is
+today. It is also the single change most likely to make the fighter feel like a
+fight rather than a frame-data exercise.
 
 **And Phase 9 is the one most likely to be underrated.** Everything else in
 this document makes the fighting better. Phase 9 is the only thing that makes
