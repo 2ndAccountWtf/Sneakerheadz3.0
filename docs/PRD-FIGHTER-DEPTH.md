@@ -62,6 +62,9 @@ useful for different things, so they are kept apart below rather than merged.
 | best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality | move *strings*, throw escapes you have to read, and teaching the player |
 | read | 2026-09-21 | 2026-09-21 | 2026-09-21 |
 
+Two further repositories were checked and are **not** in that table, because
+neither is a fighting game engine. They are recorded in §1d.
+
 **Diminishing returns, stated honestly.** Three engines in, the mechanic space is
 well covered and each new reference adds less than the last. Ikemen gave five
 structural holes; Sakuga gave three plus the AI idea; Schwarzerblitz gave two
@@ -120,6 +123,45 @@ reference in the Tekken school**, which is what was actually asked for, and two
 of its ideas are things neither 2D engine has.
 
 ---
+
+### 1d. Two non-engine references
+
+Checked 2026-09-21 after the three engines. One is useful and one is refused.
+
+**GrappleMap** — `https://github.com/Eelis/GrappleMap`. **Public domain**
+(`LICENSE`: all authors released their contributions into the public domain).
+Not a game: a database of 5,647 interconnected grappling positions and
+transitions, animated as stick figures, with a browser viewer, an editor and a
+drill runner.
+
+Useful for exactly one idea, which none of the three engines had — see §7.
+Ignored: the 3D joint-coordinate encoding, the Vrui/VR viewer, the Blender
+pipeline, and essentially the entire body of real jiu-jitsu content.
+
+**Virtual Pro-Wrestling 2** — `https://github.com/aki-club/vpw2`. **Refused, on
+two independent grounds.**
+
+The lineage is the most on-target of anything in this document: AKI Corporation
+built VPW2, and AKI then built Def Jam Vendetta and Def Jam Fight for NY. This
+is, genuinely, Def Jam's ancestor engine. It is still the wrong thing to use.
+
+1. **Licensing.** It is a matching decompilation of a copyrighted commercial N64
+   game. There is no licence covering the decompiled output — the only
+   `UNLICENSE` in the tree applies to `tools/` — and the README requires the
+   user to supply their own ROM because the assets are not distributable. This
+   is the same category as the leaked NBA Jam source, which is already governed
+   by a standing rule in `NBA-JAM-MECHANICS.md`: read for design rules only,
+   never copy, and say so in every document that cites it.
+2. **There is nothing to read.** Even setting the licence aside, the repository
+   is 408 files of raw MIPS assembly against 14 C files, with auto-generated
+   symbol names (`func3_800F3E88`). `docs/` is 558 lines and is entirely
+   build and ROM-layout notes — `notes.txt` is thirteen lines about boot code
+   and linked objects. The one design-bearing symbol found in a scan was
+   `BroadAction_Leapfrog_Primary`. Design intent is not recoverable from this
+   without months of reverse engineering, and the result would be a fact about
+   a 2000 N64 game rather than a rule we could act on.
+
+Recorded so the question is not reopened. **A decompilation is not a reference.**
 
 ## 2. Structural gaps — things our game cannot express
 
@@ -545,6 +587,31 @@ and most add a HUD element, on a phone, in a mini-game.
   noting Sakuga models it as `HitstunType.GRABBED` — a *kind of hitstun* rather
   than a separate state — which is probably how ours should have been built and
   is cheap to change if we ever touch it.
+- **The grapple as a position graph.** The one idea from GrappleMap (§1d), and
+  the only answer in this whole document to "what would a Def Jam grapple
+  actually be".
+
+  All three engines model a throw as a *single move*: Sakuga as
+  `HitstunType.GRABBED`, Schwarzerblitz as an `FK_ThrowMove` with a target
+  animation, Ikemen as `p2stateno` + `bindToTarget`. **GrappleMap models
+  grappling as a graph**: positions are nodes carrying a tagged state vocabulary
+  (161 tags — `bottom_supine`, `top_kneeling`, `top_underhook`, `crossface`,
+  `back`, `turtle`, `half_guard`), and transitions are edges between them. A
+  drill in `drills/*.script` is literally a path through that graph, which is
+  also the shape Stage 0's tutorial drills want.
+
+  That is the Def Jam grapple: you clinch, and from the position you end up in a
+  *different set of options* is available.
+
+  Parked, and the scale is why. GrappleMap has 5,647 positions; our entire
+  fighter is about 2,000 lines. But the shape does not need 5,647 nodes — it
+  needs three. **The scoped version, if we ever want it:** the grab catches into
+  a clinch; from the clinch, forward-plus-button and back-plus-button lead to two
+  different positions; each position has its own finish and its own escape.
+  That is roughly one extra state and two extra branches on the hold we already
+  have, and it turns the grab from one move into a small read. Perhaps sixty
+  lines. Revisit only after Stage 0 — a grab nobody can find does not need a
+  second layer.
 - **Clash** (§2.6). Nice, readable, and a real moment. Not urgent: our
   symmetric trade is defensible and simultaneous hitboxes are rare.
 - **Proximity block boxes** (`HitboxType.PROXIMITY_BLOCK`). Fixes "holding back
@@ -615,7 +682,11 @@ The part of this document that keeps it alive. Nothing below has been verified.
     built on the claim that invisibility is now the bottleneck. That claim is
     reasoning, not measurement, and the headless harness cannot test it — a bot
     always knows every mechanic. Needs a human.
-13. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
+13. **Would a three-node grapple graph read on a phone?** The scoped version in
+    §7 asks the player to make a directional choice inside a 13-frame hold. That
+    may be unreadable at 320×180 with 15px fighters, which is the same doubt as
+    §8.1 and probably has the same answer.
+14. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
     design writing; the Street Fighter III parry literature; anything on throw
     tech windows on touchscreens. **None of these should be read before Stage 0
     ships** — see the scope note in §6.
@@ -730,6 +801,30 @@ Sakuga's and validates the Stage 6 shape without adding to it.
 three plus the AI idea, this one two. Three engines read, nothing built. The
 next move is Stage 0, not a fourth repository.
 
+### 2026-09-21 — GrappleMap, and a refusal
+
+Two repositories checked, neither a fighting game engine. Full notes in §1d.
+
+**GrappleMap** (public domain) is a 5,647-position database of grappling
+positions and transitions. One idea worth having, and it is one no engine in
+this document had: **a grapple is a graph, not a move.** Positions are nodes
+with a tagged state vocabulary, transitions are edges, and a training drill is a
+path through it. That is the Def Jam grapple described precisely. Parked in §7
+with a scoped three-node version costing roughly sixty lines, because 5,647
+nodes against our 2,000-line fighter is not a proposal.
+
+**Virtual Pro-Wrestling 2** is refused. It is AKI Corporation's engine and AKI
+went on to build Def Jam Vendetta and Fight for NY, so the lineage is the most
+on-target thing anyone has pointed at. It is still wrong on two independent
+grounds: it is an unlicensed matching decompilation of a copyrighted commercial
+game (the NBA Jam category, already governed by a standing rule), and there is
+nothing in it to read — 408 files of auto-named MIPS assembly and 558 lines of
+docs that are entirely about ROM layout. A decompilation is not a reference.
+
+**Count so far: five repositories examined, zero lines of fighter code written
+since the triangle pass.** The scope note in §6 stands and now applies to
+non-engine references too.
+
 ## 10. Standing rules
 
 1. **Measure, do not reason.** Every claim in this document that is not a
@@ -741,7 +836,15 @@ next move is Stage 0, not a fourth repository.
    check fail with the right message. Four first-draft checks in the triangle
    pass did not discriminate and were rewritten rather than kept.
 4. **Revert rather than ship something measurably worse.**
-5. **No code, no data, no art from Ikemen GO or the M.U.G.E.N ecosystem.**
+5. **No code, no data, no art from any reference in §1.** That covers Ikemen GO
+   and the M.U.G.E.N ecosystem, Sakuga Engine, Schwarzerblitz (whose assets are
+   explicitly all-rights-reserved), and GrappleMap. Rules and shapes only.
+6. **A decompilation of a commercial game is not a reference.** Established over
+   the leaked NBA Jam source and reaffirmed for Virtual Pro-Wrestling 2 (§1d).
+   Do not reopen either.
+7. **Stop reading and build.** Five repositories have been examined and nothing
+   has shipped since 2026-09-21. No further reference — engine or otherwise —
+   before Stage 0 is in the game.
 
 ---
 
