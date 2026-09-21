@@ -202,6 +202,77 @@ the source as working states. This is good design *thinking*, not played,
 validated behaviour. Treat it as a hypothesis, the way we treat our own
 un-measured ideas.
 
+### 1f. Searching for borrowable grappling code — the answer is there isn't any
+
+Asked 2026-09-21: find wrestling/grappling code we can **borrow**, not merely
+read. That makes licence the whole question, so first, our side:
+`package.json` says `"private": true` and there is **no LICENSE file in this
+repository**. Sneakerhead Dope Wars is proprietary, all rights reserved. So:
+
+| licence | may we take code? |
+|---|---|
+| public domain | yes, freely |
+| MIT / BSD-3 | yes, keeping the copyright notice |
+| **GPLv3** | **no** — it would oblige us to release this game under GPLv3 |
+| **no licence stated** | **no** — all rights reserved by default |
+
+Against that, everything examined:
+
+| project | licence | borrowable? | why not |
+|---|---|---|---|
+| GrappleMap | **public domain** | **yes** | but it is C++ tools plus 3D pose data, not game code |
+| Ikemen GO | MIT | yes | Go, 420k lines, desktop OpenGL |
+| Sakuga Engine | MIT | yes | C#, Godot resources |
+| Schwarzerblitz | BSD-3 (code) | yes | C++, Irrlicht, 3D, Windows |
+| Virtual Pro Grappler | **GPLv3** | **no** | copyleft, and it is the only one in our stack |
+| VPW2 | none (decompilation) | **no** | §1d |
+| **TUC** (`tb808/TUC`) | **none stated, `private: true`** | **no** | all rights reserved |
+
+**The conclusion is a negative result and it is worth stating plainly: there is
+no wrestling or grappling code we can lift.** The two closest matches are both
+TypeScript, both excellent, and both unusable — one copyleft, one unlicensed.
+Everything permissively licensed is in a language we would have to port from,
+at which point we are writing our own code from someone else's design, which is
+what this document has been doing all along.
+
+The one genuinely free thing is GrappleMap's **data** (public domain): the
+position/transition graph and its vocabulary. Not its C++.
+
+### 1g. TUC — the closest design, and proof of the scope
+
+`https://github.com/tb808/TUC` — an MMA fight sim in TypeScript with Vitest and
+Playwright. **Unlicensed, so nothing is taken from it.** Read for rules only,
+like everything else here.
+
+It matters for one reason above all: **it does the entire grappling loop in 295
+lines** (`src/game/combat.ts`), with the whole game in 1,204. That is an
+existence proof at our scale. Its shape, as rules:
+
+- Combat states run `idle … clinch | takedown | ground | submission | finished`,
+  and ground position is a **four-rung ladder**, not a graph:
+  `guard → halfGuard → sideControl → mount`, ordered by dominance.
+- One object owns the whole grapple — mode, who is on top, the position, a
+  timer, a progress value, and an in-flight `transition { by, direction }`.
+- The escalation is a chain: clinch → takedown attempt → ground at guard →
+  advance the position → mount → submission.
+- **The sprawl is the counter.** During the takedown's ~0.78s window, a
+  defender holding *low* guard with stamina to spend stuffs it and stuns the
+  attacker. That is our triangle again: the grab beats a guard, but the *right*
+  guard beats the grab.
+- **Position is contested on stamina**, not on a coin flip: from guard the
+  bottom man reverses if the top man is the more tired by a margin.
+- Stamina gates entry (a takedown costs about twice a clinch) and barely
+  regenerates while grappling.
+- A ground-and-pound stoppage fires on unanswered hits plus accumulated head
+  damage — a "you are not defending yourself" rule rather than a health bar.
+- Rounds score `damage / grappling / control / knockdowns` separately, so
+  position wins close rounds without damage.
+- Difficulty carries a per-level `grappling` weight, the same shape as Sakuga's
+  single prediction knob (§5).
+- And once more, independently: **strikes are remapped by context** — a punch
+  becomes a clinch punch or a ground punch depending on the grapple mode. Three
+  unrelated codebases now solve "more moves than buttons" the same way (§2.10).
+
 ## 2. Structural gaps — things our game cannot express
 
 These are not tuning. The mechanic does not exist and cannot be reached from the
@@ -605,6 +676,42 @@ zero, and getting someone cornered is still clearly worth doing.
 
 *Gate:* the special's hit rate rises; its win contribution does not double.
 
+### Stage 5.5 — the grapple ladder (specified, not parked)
+
+Written up 2026-09-21 after §1f/§1g. Three references independently point at
+the same shape, and TUC proves it costs about 300 lines end to end, so this
+stops being "someday" and becomes a stage with a design.
+
+**Ours is not their ladder.** A street fight outside an AM/PM is not an MMA
+bout: no cage, no rounds won on position, no submissions. What transfers is the
+*structure* — a grapple is a small ordered ladder of positions, entered at a
+cost, contested continuously, and escapable.
+
+The minimum that is still a game, on our existing three buttons:
+
+- The grab already catches into a 13-frame hold. Make that hold **rung one**.
+- From the hold, the D-pad picks the outcome — neutral, up, down, toward
+  (§2.10, and no new button).
+- One of those outcomes **advances a rung** rather than finishing: it spends
+  the hold to reach a stronger position with its own four outcomes. Two rungs,
+  not four.
+- The defender contests continuously rather than once: our break is currently
+  a single press inside a window. TUC contests on stamina; VPG contests on a
+  spirit band. Ours should contest on **turbo**, which already exists and is
+  already spent on dashes — so choosing to sprint is choosing to be easier to
+  hold down.
+- **The sprawl is the lesson to steal wholesale.** A specific defensive read —
+  not any block, the *right* one — beats the grab outright and punishes it.
+  That closes the triangle properly: strike beats grab, grab beats block,
+  block beats strike, and a correctly-timed low guard beats the grab too.
+
+*Gate:* the grab's usage rate rises without its win contribution rising —
+i.e. it becomes a tool rather than a trump. A bot that always grabs must stay
+beatable by a bot that reads the sprawl.
+
+**Still after Stage 0.** A grapple ladder nobody can find is worse than no
+ladder, and `§2.8` has not moved.
+
 ### Stage 6 — opponents who fight differently
 
 Pull our four hardcoded AI constants (`AI_PUNISH_CHANCE`, `AI_COMBO_CHANCE`,
@@ -695,8 +802,9 @@ and most add a HUD element, on a phone, in a mini-game.
   new state, no new node type, no new button. That is the version to build if
   we build one, and it is perhaps thirty lines rather than sixty.
 
-  Revisit only after Stage 0. A grab nobody can find does not need a second
-  layer.
+  **Superseded again, and promoted out of §7: this is now Stage 5.5.** TUC
+  (§1g) showed the whole loop costs about 300 lines, which removes the scale
+  objection that kept it parked.
 - **The AKI reversal model, as rules rather than numbers.** From
   `docs/mechanics/REVERSALS.md`: the defender presses **once** and mashing
   explicitly does not improve the odds; the input must land **before the
@@ -966,6 +1074,34 @@ mechanic.
 
 **Six repositories examined. Still nothing shipped since the triangle pass.**
 
+### 2026-09-21 — the hunt for borrowable grappling code
+
+Asked for wrestling and grappling code we can **borrow** rather than read.
+Checked our own position first: `private: true`, no LICENSE, proprietary.
+
+**Negative result, and the important one in this log: there is none.** Full
+table in §1f. The two closest matches are both TypeScript, both good, and both
+unusable — Virtual Pro Grappler is GPLv3 and would relicense this game, and
+`tb808/TUC` states no licence at all, which means all rights reserved. Every
+permissively licensed project is in a language we would port from, which is
+writing our own code from someone else's design — exactly what this document
+has been doing for six repositories.
+
+The only freely usable artefact found anywhere is GrappleMap's public-domain
+**data**, not its code.
+
+Read TUC anyway, for rules (§1g). Worth it: it runs a complete
+clinch → takedown → ground → submission loop in **295 lines**, which kills the
+scale objection that had the grapple parked in §7 through three research
+passes. Promoted to **Stage 5.5** with a design sized for our three buttons,
+taking the sprawl — a specific defensive read that beats a grab outright — as
+the piece that finally closes our triangle.
+
+Also a third independent confirmation of §2.10: TUC remaps a punch into a
+clinch punch or a ground punch by context. AKI slots, VPG slot data and TUC all
+solve "more moves than buttons" the same way, and none of them does it with
+strings.
+
 ## 10. Standing rules
 
 1. **Measure, do not reason.** Every claim in this document that is not a
@@ -981,6 +1117,10 @@ mechanic.
    and the M.U.G.E.N ecosystem, Sakuga Engine, Schwarzerblitz (whose assets are
    explicitly all-rights-reserved), GrappleMap and Virtual Pro Grappler. Rules
    and shapes only.
+5b. **This repository is proprietary** — `private: true`, no LICENSE file. That
+   is what makes GPLv3 fatal rather than inconvenient, and it is why a
+   repository with no stated licence (all rights reserved by default) is just
+   as closed to us as a commercial one. Checked before borrowing, every time.
 5a. **Virtual Pro Grappler is GPLv3 and is written in our own stack.** Copying
    from it would oblige us to release this game under GPLv3, and unlike every
    other reference the code is copy-paste compatible. Read its prose, write our
