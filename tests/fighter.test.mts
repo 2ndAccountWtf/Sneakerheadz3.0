@@ -17,12 +17,32 @@
  * Every real fighting game buffers: a press a few frames early comes out the
  * instant you recover. These checks pin that down, and the rest cover the
  * mechanics that had nothing guarding them.
+ *
+ * The second thing wrong with it was bigger and took a harness to see. The
+ * parts of a fighting game were all here — frame data, highs and lows, a cancel
+ * window, a launcher — and the loop between them was broken in three places:
+ *
+ *   - Nothing was punishable on block. The worst outcome for throwing your
+ *     slowest move and having it guarded was minus seven frames, which buys the
+ *     defender nothing. Blocking correctly was a way to take less damage, never
+ *     a way to take the turn, so there was no reason to ever do it.
+ *   - One button was the whole game. The jab was plus six on hit against its own
+ *     four frames of startup, so mashing it was a true infinite: measured at 77
+ *     unanswered hits in ten seconds against a standing opponent.
+ *   - There was no third option. Strike and block, and nothing that beat a
+ *     guard, so a defending opponent was a coin flip between high and low,
+ *     forever.
+ *
+ * And two dead mechanics: the special launched a body into the air that nothing
+ * could reach, and a quarter of a match's running time was announce banners.
+ *
+ * The checks below are the instrument that found all of that.
  */
 import assert from 'node:assert/strict';
 import {
     createFight, stepFight, startAttack, blankInput, seeded,
     bufferFramesFor, BUFFER_FRAMES, BUFFER_MIN, BUFFER_MAX, FOCUS_BASELINE,
-    hitbox, hurtbox, movesFor,
+    hitbox, hurtbox, movesFor, JUGGLE_MAX, INTRO_TIME, KO_TIME,
     type FightState, type FightInput, type Fighter,
 } from '../components/minigames/StreetFighter.tsx';
 import { FISTS } from '../systems/weapons.ts';
@@ -42,7 +62,7 @@ function liveFight(seed = 7): FightState {
     return s;
 }
 
-const press = (btn: 'a' | 'b' | 'up'): FightInput => ({
+const press = (btn: 'a' | 'b' | 'up' | 'c'): FightInput => ({
     ...blankInput(),
     [btn]: true,
     [`${btn}Pressed`]: true,
@@ -52,6 +72,30 @@ const press = (btn: 'a' | 'b' | 'up'): FightInput => ({
 const idleFor = (s: FightState, n: number) => {
     for (let i = 0; i < n; i++) stepFight(s, blankInput(), DT);
 };
+
+/**
+ * A fight with the opponent's brain held off.
+ *
+ * His decision timers are pushed out of reach every frame, so what a check
+ * measures is the rule and not his mood. Without this every one of the checks
+ * below reads as a coin flip: the first draft of them had the grab failing to
+ * catch a guard, and the reason was that he was jabbing it out of the air —
+ * which is correct behaviour, and nothing to do with what was being measured.
+ */
+function lab(gap = 17, opts: { guard?: boolean; breaks?: boolean } = {}) {
+    const s = createFight({ opponent: 'Dummy', weapon: FISTS, rng: seeded(9) });
+    const pin = () => {
+        s.phase = 'fight'; s.phaseT = 0; s.roundClock = 60;
+        s.ai.think = 9999; s.ai.react = 9999; s.ai.queued = null;
+        s.ai.plan = opts.guard ? 'block' : 'neutral';
+        if (s.f.state !== 'grabbed') s.ai.breakIn = -2;
+        else if (s.ai.breakIn === -2) s.ai.breakIn = opts.breaks ? 1 : -1;
+    };
+    pin();
+    s.p.x = 130;
+    s.f.x = 130 + gap;
+    return { s, step: (cmd: FightInput = blankInput()) => { pin(); stepFight(s, cmd, DT); } };
+}
 
 console.log('\nthe fight starts');
 
@@ -228,6 +272,232 @@ t('the same seed fights the same fight twice', () => {
     assert.equal(run(), run(), 'the fight is not reproducible');
 });
 
+console.log('\nstrike, block, grab — the three that beat each other');
+
+t('a grab goes straight through a held guard', () => {
+    const L = lab(17, { guard: true });
+    const hp0 = L.s.f.hp;
+    let caught = false;
+    for (let i = 0; i < 60; i++) {
+        L.step(i === 0 ? press('c') : blankInput());
+        if (stateOf(L.s.f) === 'grabbed') caught = true;
+    }
+    assert.ok(caught, 'a guard stopped the grab, which leaves nothing that beats a guard');
+    assert.ok(L.s.f.hp < hp0, `the throw did no damage (${hp0} → ${L.s.f.hp})`);
+});
+
+t('a strike beats a grab, so the grab is not the answer to everything', () => {
+    const L = lab(17);
+    for (let i = 0; i < 30; i++) {
+        // His jab starts a frame LATER and still wins: four frames against five.
+        if (i === 1) startAttack(L.s, L.s.f, 'jab');
+        L.step(i === 0 ? press('c') : blankInput());
+    }
+    assert.equal(L.s.stats.grabsLanded, 0, 'the grab caught someone who was already punching it');
+});
+
+t('a guard is worth holding: no chip off an ordinary move', () => {
+    // Every move used to chip, and blocking twenty-odd swings a round cost more
+    // health than the hits it avoided. Correct defence was a slower loss.
+    // Asserted per frame rather than per match: a kick that slips past the
+    // guard is a clean hit and SHOULD take health, so a running total would be
+    // measuring the dummy's footwork instead of the chip rule.
+    const L = lab(30, { guard: true });
+    let blocked = 0, chip = 0;
+    for (let r = 0; r < 10; r++) {
+        for (let i = 0; i < 30; i++) {
+            const wasBlocked = L.s.stats.hitsBlocked;
+            const wasLanded = L.s.stats.hitsLanded;
+            const hp = L.s.f.hp;
+            L.step(i === 0 ? press('b') : blankInput());
+            if (L.s.stats.hitsBlocked > wasBlocked && L.s.stats.hitsLanded === wasLanded) {
+                blocked++;
+                chip += hp - L.s.f.hp;
+            }
+        }
+    }
+    assert.ok(blocked > 0, 'nothing was ever blocked, so this measured nothing');
+    assert.equal(chip, 0, `blocking ${blocked} kicks cost ${chip}hp of chip`);
+});
+
+t('blocking a kick hands you the turn', () => {
+    // Frame advantage on block, read off the table rather than asserted from a
+    // constant: this is the number that decides whether defence is a decision.
+    const m = movesFor(FISTS);
+    const onBlock = (id: keyof typeof m) => m[id].blockstun - m[id].recovery;
+    assert.ok(onBlock('heavy') <= -10, `a blocked kick is only ${onBlock('heavy')}`);
+    assert.ok(onBlock('sweep') <= -10, `a blocked sweep is only ${onBlock('sweep')}`);
+    assert.ok(onBlock('special') <= -8, `a blocked special is only ${onBlock('special')}`);
+    // Punishable means punishable BY SOMETHING. The jab is the punish.
+    assert.ok(m.jab.startup < -onBlock('heavy'), 'nothing is fast enough to punish a blocked kick');
+    // And the jump-in stays plus, or guessing an air attack right pays nothing.
+    assert.ok(onBlock('air') > 0, 'a blocked jump-in leaves you minus');
+});
+
+t('mashing GRAB gets you out of one; ignoring it does not', () => {
+    const outcome = (mash: boolean) => {
+        const L = lab(17);
+        let hp0 = 0;
+        for (let i = 0; i < 80; i++) {
+            const c = stateOf(L.s.p) === 'grabbed' && mash ? press('c') : blankInput();
+            if (i === 1) { startAttack(L.s, L.s.f, 'grab'); hp0 = L.s.p.hp; }
+            L.step(c);
+        }
+        return { lost: hp0 - L.s.p.hp, broken: L.s.stats.grabsBroken };
+    };
+    const ignored = outcome(false);
+    const mashed = outcome(true);
+    assert.ok(ignored.lost > 0, 'eating a grab cost nothing');
+    assert.equal(ignored.broken, 0, 'a grab broke itself');
+    assert.equal(mashed.broken, 1, 'mashing the button did not break the grab');
+    assert.ok(mashed.lost < ignored.lost, `breaking out cost ${mashed.lost}hp, eating it cost ${ignored.lost}hp`);
+});
+
+t('a throw into a wall hurts more than one into open air', () => {
+    const thrown = (x: number) => {
+        const L = lab(17, { breaks: false });
+        L.s.p.x = x;
+        L.s.f.x = x + 17;
+        const hp0 = L.s.f.hp;
+        for (let i = 0; i < 70; i++) L.step(i === 0 ? press('c') : blankInput());
+        return hp0 - L.s.f.hp;
+    };
+    const wall = thrown(258);
+    const open = thrown(150);
+    assert.ok(open > 0, 'a throw in open space did nothing at all');
+    assert.ok(wall > open, `into the wall ${wall}hp, mid-stage ${open}hp`);
+});
+
+console.log('\nthe combo, and the one that used to be an infinite');
+
+t('a punch chains into a kick', () => {
+    const L = lab(22);
+    const hp0 = L.s.f.hp;
+    let kicked = false;
+    for (let i = 0; i < 40; i++) {
+        const c = i === 0 ? press('a') : (L.s.p.cancel > 0 && !kicked ? press('b') : blankInput());
+        L.step(c);
+        if (L.s.p.move === 'heavy') kicked = true;
+    }
+    assert.ok(kicked, 'the cancel window never produced the kick');
+    assert.ok(L.s.combo.count >= 2, `the two hits did not read as a combo (${L.s.combo.count})`);
+    assert.ok(hp0 - L.s.f.hp >= 15, `punch into kick only did ${hp0 - L.s.f.hp}hp`);
+});
+
+t('a punch does not chain into another punch', () => {
+    // It used to, and since the jab was also plus on hit that made mashing one
+    // button a true infinite — 77 unanswered hits in ten seconds, measured.
+    //
+    // Asserted on the cancel window rather than on damage done: proration bleeds
+    // an infinite down to roughly the same total either way, so a damage total
+    // cannot tell the two builds apart. Whether the second jab COMES OUT can.
+    const L = lab(22);
+    let hitAt = -1, cancelled = -1, restarted = -1;
+    for (let i = 0; i < 80; i++) {
+        const hp = L.s.f.hp;
+        const wasMove = L.s.p.move;
+        const wasFrame = L.s.p.frame;
+        L.step(press('a'));
+        if (hitAt < 0 && L.s.f.hp < hp) { hitAt = i; continue; }
+        if (hitAt < 0) continue;
+        // A cancel: still inside a jab, but the frame counter jumped backwards
+        // because a NEW jab replaced the one that was recovering.
+        if (cancelled < 0 && wasMove === 'jab' && L.s.p.move === 'jab' && L.s.p.frame < wasFrame) cancelled = i;
+        // A clean restart: the move ended, then came out again on its own time.
+        if (restarted < 0 && wasMove !== 'jab' && L.s.p.move === 'jab') restarted = i;
+    }
+    assert.ok(hitAt >= 0, 'the first jab never connected, so this measured nothing');
+    assert.equal(cancelled, -1, 'a jab cancelled into another jab, which is the infinite');
+    // Checked last: in a build where the jab DOES chain it never leaves the move
+    // at all, so this would fire first and report the wrong thing.
+    assert.ok(restarted >= 0, 'the jab never came out a second time, so this measured nothing');
+});
+
+console.log('\nthe launcher launches into something');
+
+t('a punch reaches a body that is genuinely up in the air', () => {
+    // Held at a fixed height rather than caught on the way down: a falling body
+    // passes through ordinary mid-hitbox range all by itself, so a check that
+    // lets it fall passes whether or not the juggle rule exists at all. Above
+    // about 30px the rule is the only thing that connects.
+    const reaches = (up: number) => {
+        const L = lab(20);
+        const hold = () => {
+            L.s.f.y = 152 - up; L.s.f.vy = 0;
+            L.s.f.state = 'hitstun'; L.s.f.hitstun = 60; L.s.f.juggle = 0;
+        };
+        hold();
+        startAttack(L.s, L.s.p, 'jab');
+        for (let i = 0; i < 12; i++) { L.step(); if (L.s.stats.juggleHits > 0) return true; hold(); }
+        return false;
+    };
+    assert.ok(reaches(38), 'a body 38px up could not be touched, so the launch is decoration');
+    assert.ok(reaches(45), 'a body 45px up could not be touched');
+});
+
+t('a juggle ends; it does not carry a body to the floor every time', () => {
+    const L = lab(20);
+    L.s.p.hype = 100;
+    let peak = 152;
+    for (let i = 0; i < 90; i++) {
+        const c = i === 0
+            ? ({ ...press('a'), down: true } as FightInput)
+            : (L.s.f.y < 151.5 && stateOf(L.s.f) === 'hitstun' ? press('a') : blankInput());
+        L.s.f.x = Math.min(L.s.f.x, L.s.p.x + 24);
+        L.step(c);
+        peak = Math.min(peak, L.s.f.y);
+    }
+    assert.ok(152 - peak > 30, `the launch only lifted him ${(152 - peak).toFixed(0)}px`);
+    assert.ok(L.s.stats.juggleHits > 0, 'the launcher led to nothing');
+    assert.ok(L.s.stats.juggleHits <= JUGGLE_MAX, `a juggle ran to ${L.s.stats.juggleHits} hits`);
+});
+
+t('the launcher outlives its own recovery, with room to act', () => {
+    // It did not: minus 168 of launch against 22 frames of recovery put the
+    // victim back on the floor before the uppercut had put its arm down, and
+    // the follow-up window was literally negative. Measured off the sim rather
+    // than off the constants, because the constants were what was wrong.
+    const L = lab(20);
+    L.s.p.hype = 100;
+    let free = -1, landed = -1;
+    for (let i = 0; i < 120; i++) {
+        L.step(i === 0 ? ({ ...press('a'), down: true } as FightInput) : blankInput());
+        if (free < 0 && L.s.f.y < 151.5 && stateOf(L.s.p) !== 'attack') free = i;
+        if (free >= 0 && landed < 0 && L.s.f.y >= 151.5) landed = i;
+    }
+    assert.ok(free >= 0, 'the uppercut never launched anybody');
+    assert.ok(landed > free, 'he was on the floor before the uppercut finished');
+    const window = landed - free;
+    assert.ok(
+        window > movesFor(FISTS).jab.startup + 6,
+        `only ${window} frames between recovering and him landing — no room to follow up`,
+    );
+});
+
+console.log('\nthe match is a match, not a slideshow');
+
+t('the announce does not eat a quarter of the running time', () => {
+    // Measured at 4.7s of round cards and 5.4s of K.O. inside a 41-second match.
+    const s = createFight({ opponent: 'D', weapon: FISTS, rng: seeded(11) });
+    let live = 0, total = 0;
+    for (let i = 0; i < 60 * 400 && s.phase !== 'over'; i++) {
+        if (s.phase === 'fight' && s.hitstop <= 0) live++;
+        total++;
+        stepFight(s, blankInput(), DT);
+    }
+    assert.ok(live / total > 0.68, `only ${(100 * live / total).toFixed(0)}% of the match was live play`);
+    assert.ok(INTRO_TIME <= 1.5 && KO_TIME <= 1.8, 'the banners went back up');
+});
+
+t('a press skips the round card', () => {
+    const s = createFight({ opponent: 'D', weapon: FISTS, rng: seeded(4) });
+    const slow = createFight({ opponent: 'D', weapon: FISTS, rng: seeded(4) });
+    let fast = 0, patient = 0;
+    while (s.phase === 'intro' && fast < 400) { stepFight(s, press('a'), DT); fast++; }
+    while (slow.phase === 'intro' && patient < 400) { stepFight(slow, blankInput(), DT); patient++; }
+    assert.ok(fast < patient, `skipping took ${fast} frames, waiting took ${patient}`);
+});
+
 // ---------------------------------------------------------------------------
 // Balance
 //
@@ -250,7 +520,7 @@ const NO_REACH = Math.max(REACH.heavy.reach, REACH.sweep.reach) + BODY;
 
 const facingFoe = (s: FightState): 'left' | 'right' => (s.f.x >= s.p.x ? 'right' : 'left');
 const facingAway = (s: FightState): 'left' | 'right' => (s.f.x >= s.p.x ? 'left' : 'right');
-const hold = (btn: 'a' | 'b'): FightInput =>
+const hold = (btn: 'a' | 'b' | 'c'): FightInput =>
     ({ ...blankInput(), [btn]: true, [`${btn}Pressed`]: true } as FightInput);
 const walking = (s: FightState, dir: 'left' | 'right', rest: Partial<FightInput> = {}): FightInput =>
     ({ ...blankInput(), [dir]: true, ...rest } as FightInput);
@@ -268,17 +538,57 @@ const DASH_IN: Policy = (s, i) => {
 /** Guards only while he is actually swinging, so it never backs into a corner. */
 const GUARDING: Policy = s => (s.f.state === 'attack' ? walking(s, facingAway(s)) : blankInput());
 const PASSIVE: Policy = () => blankInput();
+/** Holds a guard and nothing else. Should lose, and lose to the grab. */
+const TURTLE: Policy = s => walking(s, facingAway(s));
+
+/**
+ * The game as it is meant to be played: guard what is coming, cash the punish
+ * in as the combo rather than a single poke, grab a guard, spend the meter.
+ *
+ * This policy is the whole point of the harness. A player who does all of this
+ * should beat one who mashes by a wide margin, and before this pass they did
+ * not — mashing the long button won 85% of matches and playing properly won
+ * 100%, which is to say the two were indistinguishable because the opponent
+ * could not punish either of them.
+ */
+let properLastAtk = -99;
+const PROPER: Policy = (s, i) => {
+    if (i === 0) properLastAtk = -99;
+    const gap = Math.abs(s.p.x - s.f.x);
+    const fm = s.f.move ? s.f.moves[s.f.move] : null;
+    const recovering = s.f.state === 'attack' && !!fm && s.f.frame >= fm.startup + fm.active;
+    const mine = s.p.moves;
+    const poke = (btn: 'a' | 'b' | 'c') => { properLastAtk = i; return hold(btn); };
+    // The combo: cash the cancel window rather than poking again.
+    if (s.p.cancel > 0 && s.p.move === 'jab') return hold('b');
+    if (gap > mine.heavy.reach + BODY - 3) return walking(s, facingFoe(s));
+    if (recovering && gap < mine.heavy.reach + BODY - 5) {
+        if (s.p.hype >= 100 && gap < mine.special.reach) return { ...poke('a'), down: true } as FightInput;
+        return poke('a');
+    }
+    // Guard what is actually coming, and guess its height off the move.
+    if (fm && s.f.state === 'attack' && !recovering) {
+        return walking(s, facingAway(s), fm.height === 'low' ? { down: true } : {});
+    }
+    if (s.f.blockHeld && gap < mine.grab.reach + BODY) return poke('c');
+    if (gap > mine.jab.reach + BODY - 6) return walking(s, facingFoe(s));
+    if (i - properLastAtk > 15) return poke('a');
+    return walking(s, facingAway(s));
+};
 
 interface Series {
     matches: number; wins: number;
     frames: number; inReach: number;
     jabs: number; dmgTaken: number;
     gapSum: number;
+    grabbed: number; juggled: number;
+    dmgDealt: number;
 }
 
 /** Plays whole matches against the AI and reports what happened in them. */
 function series(policy: Policy, seeds: number): Series {
-    const r: Series = { matches: 0, wins: 0, frames: 0, inReach: 0, jabs: 0, dmgTaken: 0, gapSum: 0 };
+    const r: Series = { matches: 0, wins: 0, frames: 0, inReach: 0, jabs: 0, dmgTaken: 0, gapSum: 0,
+                        grabbed: 0, juggled: 0, dmgDealt: 0 };
     for (let n = 1; n <= seeds; n++) {
         const s = createFight({ opponent: 'Foe', weapon: FISTS, rng: seeded(n * 7919) });
         for (let i = 0; s.matchWon === null && i < 60 * 60 * 6; i++) {
@@ -294,8 +604,11 @@ function series(policy: Policy, seeds: number): Series {
             if (gap < NO_REACH) r.inReach++;
             if (s.stats.hitsLanded > landed && s.f.hp < foeHp && s.p.move === 'jab') r.jabs++;
             if (s.p.hp < ownHp) r.dmgTaken += ownHp - s.p.hp;
+            if (s.f.hp < foeHp) r.dmgDealt += foeHp - s.f.hp;
         }
         r.matches++;
+        r.grabbed += s.stats.grabsLanded;
+        r.juggled += s.stats.juggleHits;
         if (s.matchWon) r.wins++;
     }
     return r;
@@ -306,6 +619,9 @@ const SEEDS = 40;
 const heavy = series(MASH_HEAVY, SEEDS);
 const jab = series(MASH_JAB, SEEDS);
 const dashing = series(DASH_IN, SEEDS);
+const proper = series(PROPER, SEEDS);
+const turtle = series(TURTLE, SEEDS);
+const rate = (r: Series) => r.wins / r.matches;
 
 console.log('\nthe spacing, which is the whole fight');
 
@@ -330,24 +646,76 @@ t('the neutral gap came in off the old dead zone', () => {
 
 console.log('\nno one button is the whole game');
 
-t('mashing the long button is good, not solved', () => {
-    const rate = heavy.wins / heavy.matches;
-    assert.ok(rate < 0.9, `the kick alone won ${(rate * 100).toFixed(0)}% of matches`);
-    assert.ok(rate > 0.3, `the kick is now useless: ${(rate * 100).toFixed(0)}%`);
+t('playing it properly beats mashing, by a lot', () => {
+    // The number this whole pass exists for. Mashing the long button used to win
+    // 85% and playing properly 100%, which meant the two were the same game.
+    assert.ok(rate(proper) > 0.6, `playing properly won only ${(rate(proper) * 100).toFixed(0)}%`);
+    assert.ok(
+        rate(proper) - rate(heavy) > 0.35,
+        `proper ${(rate(proper) * 100).toFixed(0)}% vs mashing ${(rate(heavy) * 100).toFixed(0)}% — too close to tell apart`,
+    );
+});
+
+t('no single button is the whole game', () => {
+    assert.ok(rate(heavy) < 0.4, `the kick alone won ${(rate(heavy) * 100).toFixed(0)}% of matches`);
+    assert.ok(rate(jab) < 0.4, `the jab alone won ${(rate(jab) * 100).toFixed(0)}% of matches`);
+});
+
+t('the kick is not useless — it is what the punch chains into', () => {
+    // The old guard on this was a win rate for mashing it, which measured the
+    // opponent rather than the move. Measure the move.
+    const m = movesFor(FISTS);
+    assert.ok(m.heavy.damage > m.jab.damage * 1.8, 'the kick stopped being worth the commitment');
+    const L = lab(22);
+    const hp0 = L.s.f.hp;
+    let kicked = false;
+    for (let i = 0; i < 40; i++) {
+        L.step(i === 0 ? press('a') : (L.s.p.cancel > 0 && !kicked ? press('b') : blankInput()));
+        if (L.s.p.move === 'heavy') kicked = true;
+    }
+    const combo = hp0 - L.s.f.hp;
+    assert.ok(combo > m.jab.damage * 2, `punch into kick did ${combo}hp, two jabs would do ${m.jab.damage * 2}`);
+});
+
+t('turtling loses, and loses to the grab', () => {
+    // A guard that never has to be abandoned is a solved defence. It is the
+    // reason the grab exists, so this is the check that says the grab landed.
+    assert.ok(rate(turtle) < 0.15, `holding a guard forever won ${(rate(turtle) * 100).toFixed(0)}%`);
+    assert.ok(
+        turtle.grabbed / turtle.matches > 4,
+        `a turtle got grabbed ${(turtle.grabbed / turtle.matches).toFixed(1)} times a match`,
+    );
 });
 
 t('the jab is a move that actually lands', () => {
     // 1.3 hits a match, at six damage each, is not a move. It is a decoration.
-    const per = jab.jabs / jab.matches;
+    const per = proper.jabs / proper.matches;
     assert.ok(per > 8, `the jab landed ${per.toFixed(1)} times a match`);
 });
 
-t('walking in beats standing still and mashing', () => {
-    // The point of the dash. A policy that closes the gap should out-perform
-    // the one that waits at the edge of its own range pressing the long button.
+t('the opponent can do the things the game is teaching you', () => {
+    // He could not, and it showed: with no combo and no juggle of his own he
+    // took eight hits a match and lost every one of them to correct play.
+    assert.ok(proper.juggled / proper.matches > 0.5, 'nobody ever juggled anybody');
     assert.ok(
-        dashing.wins / dashing.matches > heavy.wins / heavy.matches,
-        `dashing in won ${dashing.wins}/${dashing.matches}, mashing won ${heavy.wins}/${heavy.matches}`,
+        proper.dmgTaken / proper.matches > 25,
+        `playing properly took only ${(proper.dmgTaken / proper.matches).toFixed(0)}hp a match — he is a heavy bag`,
+    );
+});
+
+t('walking in beats standing still and mashing', () => {
+    // The point of the dash. Compared on damage rather than on match wins: both
+    // of these policies now lose almost every match to an opponent who punishes,
+    // and two rates near zero cannot be told apart. What the dash is FOR is
+    // getting into range, so measure that.
+    const perSecond = (r: Series) => r.dmgDealt / (r.frames / 60);
+    assert.ok(
+        perSecond(dashing) > perSecond(heavy),
+        `dashing in dealt ${perSecond(dashing).toFixed(2)} dmg/s, mashing dealt ${perSecond(heavy).toFixed(2)}`,
+    );
+    assert.ok(
+        dashing.inReach / dashing.frames > heavy.inReach / heavy.frames,
+        'dashing in did not actually spend more time in range',
     );
 });
 

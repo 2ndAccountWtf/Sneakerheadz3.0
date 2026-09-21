@@ -54,6 +54,19 @@ const DASH_FRAMES = 11;
 const TAP_WINDOW = 13;
 
 const ROUND_SECONDS = 60;
+
+/**
+ * Announce timings, and why they are this short.
+ *
+ * A best-of-three used to spend a quarter of its running time on banners:
+ * measured at 4.7s of "ROUND n — FIGHT" and 5.4s of "K.O." inside a 41-second
+ * match. That is the difference between a fighting game and a slideshow with a
+ * fighting game in it. The intro is also skippable, because the second time you
+ * see a round card you are not reading it.
+ */
+export const INTRO_TIME = 1.25;
+export const KO_TIME = 1.6;
+export const OVER_TIME = 1.35;
 const ROUNDS_TO_WIN = 2;   // best of 3
 
 // ---------------------------------------------------------------------------
@@ -72,7 +85,7 @@ const ROUNDS_TO_WIN = 2;   // best of 3
  * relationship is the whole game; the damage numbers are almost incidental.
  */
 export type Height = 'low' | 'mid' | 'overhead';
-export type MoveId = 'jab' | 'heavy' | 'sweep' | 'air' | 'special' | 'toss';
+export type MoveId = 'jab' | 'heavy' | 'sweep' | 'air' | 'special' | 'toss' | 'grab';
 
 export interface MoveDef {
     label: string;
@@ -87,6 +100,18 @@ export interface MoveDef {
     knock: number;
     /** Frames the defender is locked in hitstun (this is what allows combos). */
     hitstun: number;
+    /**
+     * Frames the defender is locked in blockstun.
+     *
+     * Explicit, not derived, because this number IS the defence game. Blockstun
+     * minus the attacker's own recovery is the frame advantage on block, and a
+     * fighting game is playable exactly to the degree that guessing right hands
+     * you the turn. This used to be `hitstun * 0.5` for every move, which made
+     * the worst thing that could happen to a whiffed special minus seven — not
+     * enough to punish with anything. So nobody ever blocked, and the game was
+     * a mashing contest with hit sparks.
+     */
+    blockstun: number;
     /** Frames BOTH fighters freeze on impact — the "hit-stop" that sells weight. */
     hitstop: number;
     shake: number;
@@ -102,6 +127,20 @@ export interface MoveDef {
     meter?: number;
     /** Spawns a projectile at the end of startup instead of having a hitbox. */
     throws?: boolean;
+    /**
+     * A grab: unblockable, and the victim gets a window to break out of it.
+     * This is the third leg of the triangle — block beats strikes, a grab beats
+     * a block, and a strike beats a grab because a grab has startup and no
+     * armour. Without it a guarding opponent is a wall you are asked to
+     * out-guess forever on one coin flip.
+     */
+    grab?: boolean;
+    /** Frames the victim has to mash out of a grab before the throw executes. */
+    breakWindow?: number;
+    /** Extra damage when the throw ends with a body against a wall. */
+    wallBonus?: number;
+    /** This move may connect with an opponent already up in the air (juggles). */
+    juggles?: boolean;
 }
 
 const BASE_MOVES: Record<MoveId, MoveDef> = {
@@ -109,39 +148,69 @@ const BASE_MOVES: Record<MoveId, MoveDef> = {
     jab: {
         label: 'Jab', startup: 4, active: 3, recovery: 6,
         damage: 6, reach: 25, height: 'mid',
-        knock: 18, hitstun: 12, hitstop: 3, shake: 1, chip: 0.10, cancel: 13,
+        // +3 on hit, -2 on block. Plus enough to be your turn, not so plus that
+        // a second jab is guaranteed: at +3 against its own 4 frames of startup
+        // this is a frame trap, which loses to a block and beats a mash. It used
+        // to be +6, and a jab loop was a genuine infinite — measured at 77
+        // unanswered hits in ten seconds.
+        knock: 18, hitstun: 9, blockstun: 4, hitstop: 3, shake: 1, chip: 0, cancel: 13,
+        juggles: true,
     },
     // Slow, long, hurts. Whiffing it is a decision you regret.
     heavy: {
         label: 'Kick', startup: 9, active: 4, recovery: 15,
         damage: 13, reach: 33, height: 'mid',
-        knock: 70, hitstun: 19, hitstop: 6, shake: 4, chip: 0.09, cancel: 0,
+        // -12 on block: a jab punishes it. This is what a block is FOR.
+        knock: 70, hitstun: 19, blockstun: 3, hitstop: 6, shake: 4, chip: 0, cancel: 0,
+        juggles: true,
     },
     // Low: goes UNDER a standing block. Knocks down, so it never combos.
     sweep: {
         label: 'Sweep', startup: 8, active: 4, recovery: 18,
         damage: 10, reach: 31, height: 'low',
-        knock: 56, hitstun: 24, hitstop: 5, shake: 3, chip: 0.08, cancel: 0,
+        // -14 on block. Going low is a real gamble, not a free mixup.
+        knock: 56, hitstun: 24, blockstun: 4, hitstop: 5, shake: 3, chip: 0, cancel: 0,
         knockdown: true,
     },
     // Overhead: goes OVER a crouch block. The answer to a turtle.
     air: {
         label: 'Air Stomp', startup: 4, active: 9, recovery: 6,
         damage: 9, reach: 22, height: 'overhead',
-        knock: 40, hitstun: 16, hitstop: 4, shake: 2, chip: 0.12, cancel: 11, air: true,
+        // The one move that is plus on block, because a jump-in you guessed
+        // right about should still pay: landing it starts your pressure.
+        knock: 40, hitstun: 16, blockstun: 8, hitstop: 4, shake: 2, chip: 0, cancel: 11, air: true,
     },
     // The special. Costs the whole hype meter, launches, gets a banner.
     special: {
-        label: 'Shoelace Uppercut', startup: 5, active: 7, recovery: 22,
+        label: 'Shoelace Uppercut', startup: 5, active: 7, recovery: 16,
         damage: 24, reach: 28, height: 'mid',
-        knock: 120, hitstun: 30, hitstop: 10, shake: 7, chip: 0.18, cancel: 0,
-        knockdown: true, launch: -190, meter: 100,
+        // -16 on block: spending the whole meter on a read you got wrong costs
+        // you the round's worth of turn. Landing it launches, and the launch is
+        // now worth something — see the juggle rules in `stepFight`.
+        // Launch and recovery are one number, not two. At -168 and 22 frames of
+        // recovery the victim was back on the floor before the uppercut had put
+        // its arm down: the launch was a visual effect with no move behind it,
+        // measured at zero follow-up hits. Higher and shorter, the meter now
+        // buys a juggle — which is the only reason to have a launcher at all.
+        knock: 120, hitstun: 34, blockstun: 6, hitstop: 10, shake: 7, chip: 0.18, cancel: 0,
+        knockdown: true, launch: -232, meter: 100,
     },
     // Windup for a thrown AM/PM weapon. No hitbox of its own.
     toss: {
         label: 'Throw', startup: 6, active: 1, recovery: 11,
         damage: 0, reach: 0, height: 'mid',
-        knock: 0, hitstun: 0, hitstop: 0, shake: 0, chip: 0, cancel: 0, throws: true,
+        knock: 0, hitstun: 0, blockstun: 0, hitstop: 0, shake: 0, chip: 0, cancel: 0, throws: true,
+    },
+    /**
+     * The grab. Short reach, unblockable, and a whiffed one is twenty-two
+     * frames of standing there — the most punishable thing in the game, which
+     * is the price of the only move a guard cannot stop.
+     */
+    grab: {
+        label: 'Grab', startup: 5, active: 2, recovery: 22,
+        damage: 15, reach: 17, height: 'mid',
+        knock: 165, hitstun: 30, blockstun: 0, hitstop: 8, shake: 6, chip: 0, cancel: 0,
+        knockdown: true, grab: true, breakWindow: 13, wallBonus: 9,
     },
 };
 
@@ -161,6 +230,7 @@ export function movesFor(weapon: Weapon): Record<MoveId, MoveDef> {
         air: { ...BASE_MOVES.air },
         special: { ...BASE_MOVES.special },
         toss: { ...BASE_MOVES.toss },
+        grab: { ...BASE_MOVES.grab },
     };
     if (weapon.klass === 'melee' && weapon.id !== FISTS.id) {
         // Registry damage is balanced for a text prototype (26-38 on a 70hp
@@ -188,7 +258,7 @@ export function movesFor(weapon: Weapon): Record<MoveId, MoveDef> {
 // Fighter / world state
 // ---------------------------------------------------------------------------
 
-export type FighterState = 'idle' | 'walk' | 'crouch' | 'air' | 'attack' | 'hitstun' | 'down' | 'ko';
+export type FighterState = 'idle' | 'walk' | 'crouch' | 'air' | 'attack' | 'hitstun' | 'grabbed' | 'down' | 'ko';
 
 export interface Fighter {
     isPlayer: boolean;
@@ -236,7 +306,18 @@ export interface Fighter {
      * runs on every hit that lands. The follow-up is the most common input in a
      * fight and it was the one most likely to be thrown away.
      */
-    buf: { a: number; b: number; up: number };
+    buf: { a: number; b: number; up: number; c: number };
+    /**
+     * Held in a grab: frames left to break out, and how many break presses have
+     * landed. Mashing works — one clean press is enough at full strength, and a
+     * player who panics and hammers the button is not punished for it.
+     */
+    grabT: number;
+    breaks: number;
+    /** The attacker's side of the same hold: frames left before the throw fires. */
+    holdT: number;
+    /** Juggle hits taken since leaving the ground. Caps an air string. */
+    juggle: number;
     /**
      * How many frames a press of this fighter's waits. The player's comes from
      * `Player.focus`; the AI always runs the baseline, so sharpening up is a real
@@ -302,7 +383,7 @@ export interface FightState {
      */
     ammoBank: Record<string, number>;
     /** Diagnostics the test script leans on. */
-    stats: { hitsBlocked: number; hitsLanded: number; throwsMade: number };
+    stats: { hitsBlocked: number; hitsLanded: number; throwsMade: number; grabsLanded: number; grabsBroken: number; juggleHits: number };
 }
 
 export interface AiBrain {
@@ -320,16 +401,26 @@ export interface AiBrain {
     guardLow: boolean;
     /** Frame counter, used to shape the forward hold into a double tap. */
     tick: number;
+    /**
+     * Frames until he mashes out of a grab. -1 means he decided not to get out
+     * of this one, -2 means he is not in one. Decided once, on the catch, so
+     * the break is a coin he flipped rather than a reflex he always has.
+     */
+    breakIn: number;
+    /** Frames the player has been holding guard. Past a point, he grabs. */
+    sawGuard: number;
 }
 
 export interface FightInput {
     left: boolean; right: boolean; up: boolean; down: boolean; a: boolean; b: boolean;
-    aPressed: boolean; bPressed: boolean; upPressed: boolean;
+    /** The grab button, and the same button that breaks out of a grab. */
+    c: boolean;
+    aPressed: boolean; bPressed: boolean; upPressed: boolean; cPressed: boolean;
 }
 
 export const blankInput = (): FightInput => ({
-    left: false, right: false, up: false, down: false, a: false, b: false,
-    aPressed: false, bPressed: false, upPressed: false,
+    left: false, right: false, up: false, down: false, a: false, b: false, c: false,
+    aPressed: false, bPressed: false, upPressed: false, cPressed: false,
 });
 
 /** Tiny LCG so a test run is reproducible; the game itself passes Math.random. */
@@ -393,7 +484,8 @@ function makeFighter(isPlayer: boolean, name: string, x: number, hp: number, wea
         ammo: weapon.uses ?? Infinity,
         slow: 0, flash: 0, blockFlash: 0,
         weapon, moves: movesFor(weapon), dealt: 0,
-        buf: { a: 0, b: 0, up: 0 },
+        buf: { a: 0, b: 0, up: 0, c: 0 },
+        grabT: 0, breaks: 0, holdT: 0, juggle: 0,
         bufFrames: BUFFER_FRAMES,
         dash: 0, tapWin: 0, fwdWas: false,
     };
@@ -407,18 +499,19 @@ export function createFight(cfg: FightConfig): FightState {
         p: makeFighter(true, 'You', 108, pHp, cfg.weapon),
         f: makeFighter(false, cfg.opponent, 212, fHp, FISTS),
         projectiles: [], sparks: [],
-        phase: 'intro', phaseT: 2.4,
+        phase: 'intro', phaseT: INTRO_TIME,
         round: 1, roundClock: ROUND_SECONDS,
         wins: 0, losses: 0, matchWon: null,
-        banner: { text: 'ROUND 1 — FIGHT!', t: 2.4, color: PAL.warn },
-        talk: { text: TRASH_TALK[Math.floor(rng() * TRASH_TALK.length)], t: 2.4 },
+        banner: { text: 'ROUND 1 — FIGHT!', t: INTRO_TIME, color: PAL.warn },
+        talk: { text: TRASH_TALK[Math.floor(rng() * TRASH_TALK.length)], t: INTRO_TIME },
         combo: { count: 0, byPlayer: true, t: 0 },
         hitstop: 0, shake: 0, elapsed: 0,
         credEdge: Math.max(0, Math.min(0.2, cfg.credEdge ?? 0)),
         rng,
-        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false, tick: 0 },
+        ai: { plan: 'approach', think: 20, queued: null, aggr: 0.35, react: 0, guardLow: false, tick: 0,
+              breakIn: -2, sawGuard: 0 },
         ammoBank: { [cfg.weapon.id]: cfg.weapon.uses ?? Infinity },
-        stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0 },
+        stats: { hitsBlocked: 0, hitsLanded: 0, throwsMade: 0, grabsLanded: 0, grabsBroken: 0, juggleHits: 0 },
     };
     // Sharpness is the player's edge alone. A coffee before a fight buys a more
     // forgiving window on your own presses; it does nothing for the other guy.
@@ -480,6 +573,17 @@ export function hitbox(f: Fighter): Box | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * Chip damage, and why the ordinary moves lost theirs.
+ *
+ * Every move used to chip. Measured over forty matches, a player who blocked
+ * well blocked twenty-one swings a round and paid about thirty health for the
+ * privilege — more than the hits he avoided were worth. Correct defence was a
+ * slower way to lose, which is a strange thing for a fighting game to teach.
+ * Only the special and a thrown weapon chip now: you may guard a punch all day,
+ * and the way through a guard is the grab.
+ */
+
+/**
  * Block rules, and why they are asymmetric:
  *
  *   standing block  stops 'mid' and 'overhead', LOSES to 'low'
@@ -489,10 +593,34 @@ export function hitbox(f: Fighter): Box | null {
  * which keeps the AI from being able to just hold back forever and keeps the
  * player from doing the same.
  */
+/** How many hits a launched body may eat before it simply falls. */
+export const JUGGLE_MAX = 2;
+
 /** You cannot hit someone who is already on the floor — wait for the getup. */
-const hittable = (f: Fighter) => f.state !== 'down' && f.state !== 'ko';
+const hittable = (f: Fighter) => f.state !== 'down' && f.state !== 'ko' && f.state !== 'grabbed';
+
+/**
+ * A grab only catches someone standing in front of you on the floor. It cannot
+ * pluck a fighter out of a jump and it cannot be used as a meaty on a body that
+ * is still getting up — both of which would make it the answer to everything
+ * rather than the answer to a guard.
+ */
+const grabbable = (f: Fighter) =>
+    hittable(f) && f.y >= GROUND - 0.5 && f.state !== 'hitstun';
+
+/**
+ * A body that has taken its juggle hits is done being hit until it lands.
+ *
+ * Capping `juggleConnects` alone was not enough: a launched fighter falls back
+ * through ordinary mid-hitbox height on the way down, so an attacker who simply
+ * kept pressing got a third hit through the normal overlap and the cap read as
+ * a suggestion. Measured at three hits against a limit of two.
+ */
+const juggleSpent = (f: Fighter) =>
+    f.y < GROUND - 0.5 && f.state === 'hitstun' && f.juggle >= JUGGLE_MAX;
 
 function blockSucceeds(def: Fighter, m: MoveDef): boolean {
+    if (m.grab) return false;                 // the whole point of a grab
     if (!def.blockHeld) return false;
     if (def.state === 'attack' || def.state === 'hitstun' || def.state === 'down' || def.state === 'air') return false;
     if (m.height === 'mid') return true;
@@ -512,9 +640,13 @@ function applyHit(s: FightState, atk: Fighter, def: Fighter, m: MoveDef, at: Box
     if (blockSucceeds(def, m)) {
         // Chip damage: blocking is good, not free. Guarding also builds hype,
         // so playing defence still charges the special.
-        const chip = Math.max(1, Math.round(m.damage * m.chip));
+        // `Math.max(1, …)` used to sit here, which meant a move declaring no
+        // chip still cost the blocker a point. Twenty-one blocks a round is
+        // twenty-one health for guarding correctly, and that is the tax this
+        // whole change was undoing.
+        const chip = m.chip > 0 ? Math.max(1, Math.round(m.damage * m.chip)) : 0;
         def.hp = Math.max(0, def.hp - chip);
-        def.blockstun = Math.round(m.hitstun * 0.5);
+        def.blockstun = m.blockstun;
         def.blockFlash = 6;
         def.vx = -def.facing * m.knock * 0.35;
         def.hype = Math.min(100, def.hype + 3);
@@ -546,9 +678,20 @@ function applyHit(s: FightState, atk: Fighter, def: Fighter, m: MoveDef, at: Box
     def.frame = 0;
     def.flash = 5;
     def.crouch = false;
-    def.vx = -def.facing * m.knock;
-    if (m.launch) { def.vy = m.launch; def.y = Math.min(def.y, GROUND - 1); }
-    if (m.knockdown) { def.downTimer = 38; }
+    // A hit that catches a body already off the ground is a juggle: it keeps
+    // them up instead of blasting them away, so the launcher finally leads
+    // somewhere. `JUGGLE_MAX` is what stops it leading somewhere forever.
+    const juggling = def.y < GROUND - 0.5 && !m.launch;
+    if (juggling) {
+        def.juggle++;
+        def.vy = Math.min(def.vy, -76);
+        def.vx = -def.facing * m.knock * 0.3;
+        s.stats.juggleHits++;
+    } else {
+        def.vx = -def.facing * m.knock;
+    }
+    if (m.launch) { def.vy = m.launch; def.y = Math.min(def.y, GROUND - 1); def.juggle = 0; }
+    if (m.knockdown && !juggling) { def.downTimer = 38; }
 
     atk.hype = Math.min(100, atk.hype + dmg * 1.1);
     def.hype = Math.min(100, def.hype + dmg * 0.7);
@@ -621,6 +764,11 @@ export function bufferPresses(f: Fighter, cmd: FightInput) {
     if (cmd.aPressed) f.buf.a = w;
     if (cmd.bPressed) f.buf.b = w;
     if (cmd.upPressed) f.buf.up = w;
+    if (cmd.cPressed) f.buf.c = w;
+    // A grab break is read the moment the press arrives, not when the fighter
+    // is next able to act — being held IS being unable to act, so routing the
+    // break through `canAct` would make it impossible by construction.
+    if (cmd.cPressed && f.state === 'grabbed') f.breaks++;
 }
 
 /**
@@ -632,10 +780,12 @@ function decayBuffer(f: Fighter, df: number) {
     if (f.buf.a > 0) f.buf.a = Math.max(0, f.buf.a - df);
     if (f.buf.b > 0) f.buf.b = Math.max(0, f.buf.b - df);
     if (f.buf.up > 0) f.buf.up = Math.max(0, f.buf.up - df);
+    if (f.buf.c > 0) f.buf.c = Math.max(0, f.buf.c - df);
 }
 
 function canAct(f: Fighter): boolean {
     if (f.state === 'hitstun' || f.state === 'down' || f.state === 'ko') return false;
+    if (f.state === 'grabbed') return false;
     if (f.blockstun > 0) return false;
     if (f.state === 'attack') {
         // Only cancellable during a granted cancel window (after a light hit).
@@ -663,6 +813,17 @@ export function startAttack(s: FightState, f: Fighter, id: MoveId): boolean {
             color: f.isPlayer ? PAL.accent : PAL.accent2,
         };
     }
+    /**
+     * A cancel window is a window into something ELSE.
+     *
+     * Jab used to cancel into jab, and since a jab was also plus on hit, mashing
+     * one button was a true infinite that proration alone had to bleed out. A
+     * chain that has to change moves is the oldest fix in the genre and it is
+     * also the better game: the combo is PUNCH then KICK, which is a thing the
+     * player discovers with their thumbs and then owns.
+     */
+    if (f.cancel > 0 && f.move === id) return false;
+
     f.state = 'attack';
     f.move = id;
     f.frame = 0;
@@ -671,6 +832,120 @@ export function startAttack(s: FightState, f: Fighter, id: MoveId): boolean {
     f.crouch = id === 'sweep';
     if (!m.air) { f.vx = 0; f.dash = 0; f.tapWin = 0; }
     return true;
+}
+
+/**
+ * A move with `juggles` may connect with a launched opponent even when the
+ * boxes do not line up vertically — the attacker is understood to be reaching
+ * up at a body that is on its way down. Horizontal range still has to be real,
+ * and the body has to be low enough to touch.
+ */
+function juggleConnects(atk: Fighter, box: Box, def: Fighter): boolean {
+    const m = atk.move ? atk.moves[atk.move] : null;
+    if (!m || !m.juggles) return false;
+    if (def.y >= GROUND - 0.5) return false;             // on the floor: normal rules
+    if (def.state !== 'hitstun') return false;           // only a body you put up there
+    if (def.juggle >= JUGGLE_MAX) return false;
+    if (def.y < GROUND - 52) return false;               // too high to reach
+    const hu = hurtbox(def);
+    return box.x < hu.x + hu.w && box.x + box.w > hu.x;
+}
+
+/** The catch. Damage does not happen here — the break window decides that. */
+function applyGrab(s: FightState, atk: Fighter, def: Fighter) {
+    const m = atk.moves.grab;
+    const win = m.breakWindow ?? 12;
+    def.state = 'grabbed';
+    def.grabT = win;
+    // A press already in flight counts. Reaching a break is a reaction test;
+    // punishing someone for having pressed one frame too early is not.
+    def.breaks = def.buf.c > 0 ? 1 : 0;
+    def.buf.c = 0;
+    def.move = null;
+    def.frame = 0;
+    def.hitstun = 0;
+    def.blockstun = 0;
+    def.crouch = false;
+    def.vx = 0;
+    def.vy = 0;
+    atk.holdT = win;
+    atk.hasHit = true;
+    atk.vx = 0;
+    s.hitstop = Math.max(s.hitstop, 5);
+    s.stats.grabsLanded++;
+    spark(s, (atk.x + def.x) / 2, atk.y - 20, false);
+}
+
+/**
+ * The hold, resolved. Either they got a hand free — in which case the two of
+ * them shove apart and nobody is owed anything — or the throw happens.
+ *
+ * This is the one place a wall matters. Being thrown into one hurts more, which
+ * is what makes having your back to it a position rather than a decoration.
+ */
+function resolveHold(s: FightState, atk: Fighter, def: Fighter, df: number) {
+    if (atk.holdT <= 0) return;
+    atk.holdT -= df;
+    def.grabT = atk.holdT;
+    // Keep the victim pinned at arm's length for the whole hold.
+    def.x = atk.x + atk.facing * (BODY_W + 1);
+    def.x = Math.max(STAGE_L, Math.min(STAGE_R, def.x));
+    def.y = GROUND;
+    if (atk.holdT > 0) return;
+
+    atk.holdT = 0;
+    def.grabT = 0;
+    const m = atk.moves.grab;
+
+    if (def.breaks > 0) {
+        // Broken. Both shoved apart, nobody stunned — the reset is clean on
+        // purpose, so escaping a grab is worth the press and nothing more.
+        def.state = 'idle';
+        def.breaks = 0;
+        const dir = atk.facing;
+        def.vx = dir * 96;
+        atk.vx = -dir * 96;
+        atk.state = 'idle';
+        atk.move = null;
+        atk.frame = 0;
+        atk.cancel = 0;
+        s.hitstop = Math.max(s.hitstop, 4);
+        s.shake = Math.max(s.shake, 2);
+        s.stats.grabsBroken++;
+        s.banner = { text: 'BREAK!', t: 0.7, color: PAL.warn };
+        return;
+    }
+
+    // Thrown. Forward, hard, and into the wall if one is there.
+    const dir = atk.facing;
+    const landing = def.x + dir * 46;
+    const intoWall = landing < STAGE_L + 14 || landing > STAGE_R - 14;
+    const edge = atk.isPlayer ? 1 + s.credEdge : 1 - s.credEdge * 0.6;
+    const dmg = Math.max(1, Math.round((m.damage + (intoWall ? (m.wallBonus ?? 0) : 0)) * edge));
+
+    def.hp = Math.max(0, def.hp - dmg);
+    atk.dealt += dmg;
+    def.state = 'hitstun';
+    def.hitstun = m.hitstun;
+    def.downTimer = 42;
+    def.flash = 6;
+    def.facing = dir === 1 ? -1 : 1;
+    def.vx = dir * m.knock;
+    def.vy = -90;
+    def.y = GROUND - 1;
+    def.juggle = JUGGLE_MAX;                 // a thrown body is not juggle fodder
+    atk.hype = Math.min(100, atk.hype + dmg * 1.1);
+    def.hype = Math.min(100, def.hype + dmg * 0.7);
+    atk.state = 'idle';
+    atk.move = null;
+    atk.frame = 0;
+    s.hitstop = Math.max(s.hitstop, m.hitstop + (intoWall ? 4 : 0));
+    s.shake = Math.max(s.shake, m.shake + (intoWall ? 4 : 0));
+    s.stats.hitsLanded++;
+    s.combo.count = 0;
+    s.combo.t = 0;
+    spark(s, def.x, def.y - 14, true);
+    if (intoWall) s.banner = { text: 'OFF THE WALL!', t: 0.9, color: PAL.accent };
 }
 
 function throwWeapon(s: FightState, f: Fighter) {
@@ -709,7 +984,8 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
     decayBuffer(f, df);
 
     // Always face the opponent unless committed to a move or airborne.
-    if (f.state !== 'attack' && !airborne && f.state !== 'down' && f.state !== 'hitstun') {
+    if (f.state !== 'attack' && !airborne && f.state !== 'down' && f.state !== 'hitstun'
+        && f.state !== 'grabbed') {
         f.facing = other.x >= f.x ? 1 : -1;
     }
 
@@ -742,7 +1018,8 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
 
     // 'ko' counts as locked: otherwise the movement branch below would set the
     // state back to 'idle' and the loser would stand up during their own K.O.
-    const locked = f.state === 'hitstun' || f.state === 'down' || f.state === 'ko' || f.blockstun > 0;
+    const locked = f.state === 'hitstun' || f.state === 'down' || f.state === 'ko'
+        || f.state === 'grabbed' || f.blockstun > 0;
 
     // --- intent from input ---
     const toward = other.x >= f.x ? 1 : -1;
@@ -806,6 +1083,18 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
          * few frames left, so it won the check and jabbed again. Measured over
          * fifty matches, a "jab then heavy" policy landed exactly zero heavies.
          */
+        /**
+         * The grab is on its own button because two buttons at once is not an
+         * input a thumb can make. It is checked before the strikes: a player
+         * who pressed GRAB meant GRAB.
+         */
+        const tryGrab = () => {
+            if (f.buf.c <= 0) return;
+            if (airborne) { f.buf.c = 0; return; }
+            if (startAttack(s, f, 'grab')) f.buf.c = 0;
+        };
+        tryGrab();
+
         if (f.buf.b > f.buf.a) { tryHeavy(); tryLight(); }
         else { tryLight(); tryHeavy(); }
 
@@ -840,7 +1129,7 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
     }
 
     // --- attack frame advance ---
-    if (f.state === 'attack' && f.move) {
+    if (f.state === 'attack' && f.move && f.holdT <= 0) {
         const m = f.moves[f.move];
         f.frame += df;
         if (m.throws && !f.hasHit && f.frame >= m.startup) {
@@ -870,11 +1159,14 @@ function stepFighter(s: FightState, f: Fighter, other: Fighter, cmd: FightInput,
                 f.frame = 0;
             }
             if (f.state === 'hitstun' && f.downTimer <= 0) f.downTimer = 22;
+            f.juggle = 0;
         }
     } else {
         f.vy = 0;
     }
 
+    // Someone in a hold — either end of it — is parked by `resolveHold`.
+    if (f.holdT > 0 || f.state === 'grabbed') { f.vx = 0; f.vy = 0; }
     f.x += f.vx * dt;
     // Knockback and blockstun pushback decay so nobody slides forever.
     if (locked || f.state === 'attack') f.vx *= Math.pow(0.86, df);
@@ -909,7 +1201,7 @@ function separate(a: Fighter, b: Fighter) {
 const PROJECTILE_MOVE = (dmg: number): MoveDef => ({
     label: 'Thrown', startup: 0, active: 1, recovery: 0,
     damage: dmg, reach: 0, height: 'mid',
-    knock: 58, hitstun: 16, hitstop: 5, shake: 3, chip: 0.09, cancel: 0,
+    knock: 58, hitstun: 16, blockstun: 8, hitstop: 5, shake: 3, chip: 0.09, cancel: 0,
 });
 
 const RETURN_DIST = 120;
@@ -980,6 +1272,28 @@ function stepProjectiles(s: FightState, dt: number) {
  * respond to anything, and `aggr` rising only as his own health drops, so the
  * fight gets more desperate rather than starting that way.
  */
+/**
+ * The three rolls that set how good he is, all in one place.
+ *
+ * Break is how often he gets a hand free — a grab should be a good bet, not a
+ * free one. Combo is how often he cashes his own cancel window. Juggle is how
+ * often he follows a body he has put in the air. The last two are the whole
+ * difference between an opponent and a heavy bag: with them at zero a bot
+ * playing correctly won every match it played and took eight hits doing it;
+ * with them at one it won almost all of them back.
+ */
+const AI_BREAK_CHANCE = 0.52;
+const AI_COMBO_CHANCE = 0.42;
+const AI_JUGGLE_CHANCE = 0.45;
+/**
+ * How often he cashes a block into a punish. This is the single number that
+ * decides whether mashing the long button is a bad idea or a hopeless one:
+ * at 0.7 a masher won three matches in a hundred, which is not "bad idea", it
+ * is "there is no game here for you". Somebody who only presses one button
+ * should lose most of the time and still see the inside of a win.
+ */
+const AI_PUNISH_CHANCE = 0.45;
+
 function aiInput(s: FightState, dt: number): FightInput {
     const cmd = blankInput();
     const ai = s.ai;
@@ -993,13 +1307,83 @@ function aiInput(s: FightState, dt: number): FightInput {
     // Ramps as he loses; the player's street cred takes a little off the top.
     ai.aggr = Math.max(0.15, Math.min(0.95, 0.32 + (1 - f.hp / f.maxHp) * 0.55 - s.credEdge * 0.5));
 
+    /**
+     * Getting out of a grab.
+     *
+     * Decided once, on the catch, and then executed a few frames later — so he
+     * escapes a little over half of them and you can feel the difference
+     * between a grab that worked and one that did not. A per-frame roll would
+     * make every grab a slot machine; a flat always-escape would make the grab
+     * pointless, which is where the game already was.
+     */
+    if (f.state === 'grabbed') {
+        if (ai.breakIn === -2) {
+            ai.breakIn = s.rng() < AI_BREAK_CHANCE ? 2 + Math.floor(s.rng() * 6) : -1;
+        }
+        if (ai.breakIn >= 0) {
+            ai.breakIn -= df;
+            if (ai.breakIn <= 0) { cmd.c = true; cmd.cPressed = true; ai.breakIn = -1; }
+        }
+        return cmd;
+    }
+    ai.breakIn = -2;
+
     const toward: 1 | -1 = p.x >= f.x ? 1 : -1;
     const dist = Math.abs(p.x - f.x);
     const pm = p.move ? p.moves[p.move] : null;
     const playerAttacking = p.state === 'attack' && !!pm && !pm.throws;
     const playerRecovering = playerAttacking && !!pm && p.frame >= pm.startup + pm.active;
+    /**
+     * His own cancel window, and his own juggle.
+     *
+     * Both of these are off-schedule, like the reflex guard, because both are
+     * windows measured in single-figure frames and his decision timer runs at
+     * twelve to twenty-two. Without them the combo and the launcher were the
+     * player's private toys: a correct-play bot took eight hits a match and won
+     * every single one. An opponent who cannot do the thing the game is
+     * teaching you is not an opponent, it is a tutorial.
+     */
+    // Rolled on the frame the window opens, never per frame: a per-frame roll
+    // is a slot machine that always eventually pays, which is how he went from
+    // never comboing to comboing every time and taking the match rate with him.
+    if (f.cancel >= f.moves.jab.cancel - 1 && f.move === 'jab'
+        && dist < f.moves.heavy.reach + BODY_W - 2 && s.rng() < AI_COMBO_CHANCE) {
+        cmd.bPressed = true; cmd.b = true;
+        return cmd;
+    }
+    // The juggle costs him his reaction, the same resource everything else he
+    // does off-schedule costs him. That is what keeps it to a hit or two
+    // instead of carrying a body from the launch to the floor every time.
+    if (p.y < GROUND - 0.5 && p.state === 'hitstun' && p.juggle < JUGGLE_MAX
+        && f.state !== 'attack' && f.y >= GROUND - 0.5 && ai.react <= 0
+        && s.rng() < AI_JUGGLE_CHANCE) {
+        ai.react = 6 + Math.floor(s.rng() * 7);
+        if (dist < f.moves.jab.reach + BODY_W - 2) { cmd.aPressed = true; cmd.a = true; }
+        else if (toward === 1) cmd.right = true; else cmd.left = true;
+        return cmd;
+    }
+
+    // How long you have been sitting on guard. A turtle gets grabbed.
+    if (p.blockHeld) ai.sawGuard += df; else ai.sawGuard = Math.max(0, ai.sawGuard - df * 2);
+
     const incoming = s.projectiles.find(pr =>
         !pr.dead && pr.fromPlayer && Math.sign(pr.vx) === (f.x > p.x ? 1 : -1) && Math.abs(pr.x - f.x) < 80);
+
+    /**
+     * The punish he earned.
+     *
+     * He blocked something slow and it is still recovering. His decision timer
+     * runs at 12-22 frames, so left to the schedule he walks out of the window
+     * he just paid for and the player learns that a blocked kick costs nothing.
+     * Measured: mashing the long button won 85% of matches against a defender
+     * who guarded 42% of it and never once cashed in. He re-decides on the spot
+     * instead, most of the time.
+     */
+    if (f.blockstun <= 0 && ai.plan === 'block' && playerRecovering
+        && dist < f.moves.heavy.reach + BODY_W + 12 && s.rng() < AI_PUNISH_CHANCE) {
+        ai.think = 0;
+        ai.react = 0;
+    }
 
     // --- decide ---
     if (ai.think <= 0 && ai.react <= 0) {
@@ -1026,6 +1410,13 @@ function aiInput(s: FightState, dt: number): FightInput {
             ai.plan = 'attack';
             ai.queued = 'special';
             ai.think = 22;
+        } else if (ai.sawGuard > 22 && dist < f.moves.grab.reach + BODY_W + 10 && r < 0.6) {
+            // He has watched you hold back for a third of a second. A block does
+            // not stop a grab, and this is the moment the player learns that.
+            ai.plan = 'attack';
+            ai.queued = 'grab';
+            ai.sawGuard = 0;
+            ai.think = 18;
         } else if (playerAttacking && dist < reach + 18 && r < 0.5 + ai.aggr * 0.2) {
             ai.plan = 'block';
             // Guess the height. He is wrong often enough to be beatable.
@@ -1043,11 +1434,19 @@ function aiInput(s: FightState, dt: number): FightInput {
                 // Read the guard: sweep a stander, stomp a croucher.
                 if (p.blockHeld && !p.crouch) ai.queued = s.rng() < 0.5 ? 'sweep' : 'heavy';
                 else if (p.blockHeld && p.crouch) ai.queued = s.rng() < 0.45 ? 'jumpin' : 'heavy';
-                else { const k = s.rng(); ai.queued = k < 0.38 ? 'jab' : k < 0.72 ? 'heavy' : 'sweep'; }
+                else {
+                    // Weighted toward the jab because the jab is his way into
+                    // the combo; the kick and the sweep are the one-hit reads.
+                    const k = s.rng();
+                    ai.queued = k < 0.5 ? 'jab' : k < 0.72 ? 'heavy' : k < 0.88 ? 'sweep' : 'grab';
+                }
                 ai.think = 14;
             } else { ai.plan = r < 0.5 ? 'block' : 'neutral'; ai.guardLow = s.rng() < 0.4; ai.think = 16; }
         } else {
-            if (r < 0.62) { ai.plan = 'attack'; ai.queued = 'jab'; ai.think = 12; }
+            // Point blank. Mostly the jab, sometimes the grab, because a nose-to-nose
+            // opponent who only ever jabs is one you can simply hold back against.
+            if (r < 0.5) { ai.plan = 'attack'; ai.queued = 'jab'; ai.think = 12; }
+            else if (r < 0.68) { ai.plan = 'attack'; ai.queued = 'grab'; ai.think = 16; }
             else { ai.plan = 'retreat'; ai.think = 14; }
         }
         // Reaction delay before the NEXT read — an opening stays open for a beat.
@@ -1063,7 +1462,19 @@ function aiInput(s: FightState, dt: number): FightInput {
      * still has to have his reaction available, and he still guesses the height,
      * so mashing is *good* against him rather than free.
      */
-    if (playerAttacking && pm && ai.react <= 2 && ai.plan !== 'block' && ai.queued !== 'special'
+    /**
+     * Seeing a grab start is not a reason to guard — guarding is what a grab is
+     * for. His out is the four-frame jab against its five frames of startup, and
+     * only if he still has his reaction. Getting this wrong costs him the throw,
+     * which is exactly the trade the player is being offered.
+     */
+    if (pm && pm.grab && p.state === 'attack' && ai.react <= 1 && p.frame < pm.startup
+        && dist < f.moves.jab.reach + BODY_W && s.rng() < 0.42) {
+        ai.plan = 'attack';
+        ai.queued = 'jab';
+        ai.think = 8;
+        ai.react = 3 + Math.floor(s.rng() * 4);
+    } else if (playerAttacking && pm && !pm.grab && ai.react <= 2 && ai.plan !== 'block' && ai.queued !== 'special'
         && dist < pm.reach + BODY_W + 8
         && p.frame >= pm.startup - 7 && p.frame < pm.startup + pm.active + 2
         && s.rng() < 0.64) {
@@ -1135,7 +1546,8 @@ function aiInput(s: FightState, dt: number): FightInput {
             // a free opponent he steps inside it first.
             const frozen = playerRecovering || p.state === 'hitstun' || p.blockstun > 0;
             if (dist <= want.reach + BODY_W - (frozen ? 1 : 5)) {
-                if (ai.queued === 'jab' || ai.queued === 'special') { cmd.aPressed = true; cmd.a = true; }
+                if (ai.queued === 'grab') { cmd.cPressed = true; cmd.c = true; }
+                else if (ai.queued === 'jab' || ai.queued === 'special') { cmd.aPressed = true; cmd.a = true; }
                 else { cmd.bPressed = true; cmd.b = true; }
                 // Sweep and special are both "down + button" inputs, same as the player's.
                 if (ai.queued === 'sweep' || ai.queued === 'special') cmd.down = true;
@@ -1161,6 +1573,8 @@ function resetRound(s: FightState) {
         f.state = 'idle'; f.move = null; f.frame = 0; f.hasHit = false;
         f.hitstun = 0; f.blockstun = 0; f.blockHeld = false; f.crouch = false;
         f.downTimer = 0; f.invuln = 0; f.cancel = 0; f.slow = 0;
+        f.grabT = 0; f.breaks = 0; f.holdT = 0; f.juggle = 0;
+        f.buf.a = 0; f.buf.b = 0; f.buf.up = 0; f.buf.c = 0;
         f.flash = 0; f.blockFlash = 0; f.dealt = 0;
         f.dash = 0; f.tapWin = 0; f.fwdWas = false;
         f.hype = hype;                      // ammo deliberately NOT reset: uses are per game
@@ -1173,12 +1587,13 @@ function resetRound(s: FightState) {
     s.roundClock = ROUND_SECONDS;
     s.hitstop = 0;
     s.shake = 0;
-    s.ai = { plan: 'approach', think: 24, queued: null, aggr: 0.32, react: 0, guardLow: false, tick: 0 };
+    s.ai = { plan: 'approach', think: 24, queued: null, aggr: 0.32, react: 0, guardLow: false, tick: 0,
+             breakIn: -2, sawGuard: 0 };
 }
 
 function endRound(s: FightState, playerWon: boolean | null, byKo: boolean) {
     s.phase = 'ko';
-    s.phaseT = 2.7;
+    s.phaseT = KO_TIME;
     if (playerWon === true) s.wins++;
     else if (playerWon === false) s.losses++;
 
@@ -1186,8 +1601,8 @@ function endRound(s: FightState, playerWon: boolean | null, byKo: boolean) {
     if (loser && byKo) { loser.state = 'ko'; loser.downTimer = 999; }
 
     s.banner = byKo
-        ? { text: 'K.O.!', t: 2.7, color: PAL.bad }
-        : { text: 'TIME UP', t: 2.7, color: PAL.warn };
+        ? { text: 'K.O.!', t: KO_TIME, color: PAL.bad }
+        : { text: 'TIME UP', t: KO_TIME, color: PAL.warn };
     s.shake = Math.max(s.shake, byKo ? 7 : 2);
     s.talk = playerWon === false
         ? { text: TRASH_TALK[Math.floor(s.rng() * TRASH_TALK.length)], t: 2.4 }
@@ -1203,23 +1618,58 @@ function advanceAfterKo(s: FightState) {
         s.matchWon = exhausted ? s.wins >= s.losses : s.wins >= ROUNDS_TO_WIN;
         s.phase = 'over';
         // Hold the final banner for a beat before the result card appears.
-        s.phaseT = 1.9;
+        s.phaseT = OVER_TIME;
         s.banner = s.matchWon
-            ? { text: 'YOU WIN', t: 1.9, color: PAL.ok }
-            : { text: 'YOU LOSE', t: 1.9, color: PAL.bad };
+            ? { text: 'YOU WIN', t: OVER_TIME, color: PAL.ok }
+            : { text: 'YOU LOSE', t: OVER_TIME, color: PAL.bad };
         return;
     }
     s.round++;
     resetRound(s);
     s.phase = 'intro';
-    s.phaseT = 2.3;
-    s.banner = { text: `ROUND ${s.round} — FIGHT!`, t: 2.3, color: PAL.warn };
-    s.talk = { text: TRASH_TALK[Math.floor(s.rng() * TRASH_TALK.length)], t: 2.3 };
+    s.phaseT = INTRO_TIME;
+    s.banner = { text: `ROUND ${s.round} — FIGHT!`, t: INTRO_TIME, color: PAL.warn };
+    s.talk = { text: TRASH_TALK[Math.floor(s.rng() * TRASH_TALK.length)], t: INTRO_TIME };
 }
 
 // ---------------------------------------------------------------------------
 // The step
 // ---------------------------------------------------------------------------
+
+/**
+ * Who hit whom this frame.
+ *
+ * Two passes, and the order is the rule that makes the triangle close:
+ *
+ *   1. Strikes, resolved from boxes captured BEFORE anything is applied, so two
+ *      hitboxes live on the same frame is a trade and not a race won by
+ *      whoever the array lists first.
+ *   2. Grabs, and only for a fighter who is still swinging one — which is to
+ *      say, one who was not hit out of it in pass 1. That single line is
+ *      "a strike beats a grab", and without it the grab beat everything.
+ */
+function resolveContact(s: FightState) {
+    const pBox = hitbox(s.p);
+    const fBox = hitbox(s.f);
+    const pMove = s.p.move ? s.p.moves[s.p.move] : null;
+    const fMove = s.f.move ? s.f.moves[s.f.move] : null;
+
+    const strike = (atk: Fighter, def: Fighter, box: Box | null, m: MoveDef | null) => {
+        if (!box || !m || m.grab || atk.hasHit || !hittable(def) || juggleSpent(def)) return;
+        if (overlaps(box, hurtbox(def)) || juggleConnects(atk, box, def)) applyHit(s, atk, def, m, box);
+    };
+    strike(s.p, s.f, pBox, pMove);
+    strike(s.f, s.p, fBox, fMove);
+
+    const grab = (atk: Fighter, def: Fighter, box: Box | null, m: MoveDef | null) => {
+        if (!box || !m || !m.grab || atk.hasHit) return;
+        if (atk.state !== 'attack' || atk.move !== 'grab') return;   // hit out of it
+        if (!grabbable(def) || def.invuln > 0) return;
+        if (overlaps(box, hurtbox(def))) applyGrab(s, atk, def);
+    };
+    grab(s.p, s.f, pBox, pMove);
+    grab(s.f, s.p, fBox, fMove);
+}
 
 /**
  * One fixed 1/60s tick of the whole fight. Pure: same state + same inputs +
@@ -1258,6 +1708,9 @@ export function stepFight(s: FightState, cmd: FightInput, dt: number) {
 
     if (s.phase === 'intro') {
         s.phaseT -= dt;
+        // Any button skips the card. The last beat is kept so the round never
+        // starts on the exact frame of the press.
+        if ((cmd.aPressed || cmd.bPressed || cmd.cPressed) && s.phaseT > 0.25) s.phaseT = 0.25;
         // Both fighters idle during the announce; keeps them from pre-swinging.
         stepFighter(s, s.p, s.f, blankInput(), dt);
         stepFighter(s, s.f, s.p, blankInput(), dt);
@@ -1286,22 +1739,17 @@ export function stepFight(s: FightState, cmd: FightInput, dt: number) {
     bufferPresses(s.f, foeCmd);
     stepFighter(s, s.p, s.f, cmd, dt);
     stepFighter(s, s.f, s.p, foeCmd, dt);
-    separate(s.p, s.f);
+    // A hold parks both bodies itself; `separate` would spend the frame shoving
+    // them apart and then be overruled, which reads as a jitter.
+    if (s.p.holdT > 0) resolveHold(s, s.p, s.f, df);
+    else if (s.f.holdT > 0) resolveHold(s, s.f, s.p, df);
+    else separate(s.p, s.f);
 
     // Attacks resolve after both fighters have moved, so trades are symmetric:
     // if both hitboxes are live on the same frame, both land. The move defs are
     // captured first because the first hit may cancel the other fighter's move
     // out from under us.
-    const pBox = hitbox(s.p);
-    const fBox = hitbox(s.f);
-    const pMove = s.p.move ? s.p.moves[s.p.move] : null;
-    const fMove = s.f.move ? s.f.moves[s.f.move] : null;
-    if (pBox && pMove && !s.p.hasHit && hittable(s.f) && overlaps(pBox, hurtbox(s.f))) {
-        applyHit(s, s.p, s.f, pMove, pBox);
-    }
-    if (fBox && fMove && !s.f.hasHit && hittable(s.p) && overlaps(fBox, hurtbox(s.p))) {
-        applyHit(s, s.f, s.p, fMove, fBox);
-    }
+    resolveContact(s);
 
     stepProjectiles(s, dt);
     s.ammoBank[s.p.weapon.id] = s.p.ammo;   // keep the bank in step with the hand
@@ -1463,6 +1911,21 @@ function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
         return;
     }
 
+    // Held. Feet off the floor, kicking, and — if it is you — a prompt, because
+    // a mechanic with a thirteen-frame window has to announce itself.
+    if (f.state === 'grabbed') {
+        const jitter = Math.sin(s.elapsed * 44) * 1.6;
+        shadow(ctx, f.x, GROUND + 1, 9, 3, 0.35);
+        actor(ctx, spriteId, f.x + jitter, f.y - 5, {
+            height: FIG_H, facing: f.facing, frame: 0, stride: 0.4, swap, kit, hurt, shadow: false,
+        });
+        if (f.isPlayer) {
+            const on = Math.floor(s.elapsed * 22) % 2 === 0;
+            glyph(ctx, '🔄', f.x, f.y - FIG_H - 12, on ? 11 : 9);
+        }
+        return;
+    }
+
     const m = f.state === 'attack' && f.move ? f.moves[f.move] : null;
     const phase: 'startup' | 'active' | 'recovery' | null = !m ? null
         : f.frame < m.startup ? 'startup'
@@ -1530,6 +1993,13 @@ function drawFighter(ctx: CanvasRenderingContext2D, s: FightState, f: Fighter) {
             }
             rect(ctx, fwd === 1 ? front : front - 10, f.y - 34, 10, 5, skin);
             glyph(ctx, '👟', front + fwd * 16, f.y - 44, 9, fwd * 0.6);
+        } else if (f.move === 'grab') {
+            // Both arms out. A grab that reads as a grab is the difference
+            // between the player learning the triangle and the player guessing.
+            const len = 13 * (phase === 'startup' ? 0.55 : 1);
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 27, len, 4, skin);
+            rect(ctx, fwd === 1 ? front : front - len, f.y - 20, len, 4, skin);
+            if (f.holdT > 0) glyph(ctx, '✊', front + fwd * 9, f.y - 24, 10);
         } else if (f.move === 'toss') {
             rect(ctx, fwd === 1 ? front - 2 : front - 4, f.y - 32, 6, 4, skin);
             if (phase === 'startup') glyph(ctx, f.weapon.glyph, front + fwd * 3, f.y - 35, 9);
@@ -1735,8 +2205,9 @@ const StreetFighter: React.FC<{
         // Edge-triggered buttons are consumed every frame so a press fires once
         // even if several simulation steps run inside one animation frame.
         const cmd: FightInput = {
-            left: i.left, right: i.right, up: i.up, down: i.down, a: i.a, b: i.b,
+            left: i.left, right: i.right, up: i.up, down: i.down, a: i.a, b: i.b, c: i.c,
             aPressed: consume('a'), bPressed: consume('b'), upPressed: consume('up'),
+            cPressed: consume('c'),
         };
         stepFight(s, cmd, dt);
         renderFight(ctx, s);
@@ -1766,7 +2237,7 @@ const StreetFighter: React.FC<{
             running={done === null}
             onFrame={onFrame}
             onInput={onInput}
-            actions={['Punch', heavyLabel]}
+            actions={['Punch', heavyLabel, 'Grab']}
             vertical
             onQuit={done === null ? onQuit : undefined}
             quitLabel="Run Away"
@@ -1774,11 +2245,15 @@ const StreetFighter: React.FC<{
             selectedWeapon={weaponId}
             onSelectWeapon={selectWeapon}
             help={
-                '◀ ▶ walk · double-tap FORWARD to dash in · ▲ jump · ▼ crouch · hold BACK (away from him) to block — ' +
-                'standing block stops highs, crouch block stops lows. ' +
-                'PUNCH is fast and combos into itself; ' + heavyLabel.toUpperCase() + ' is slow, long and hurts. ' +
-                '▼ + ' + heavyLabel.toUpperCase() + ' sweeps low (goes under a standing block); jump + PUNCH comes down over a crouch block. ' +
-                'Fill the HYPE bar then ▼ + PUNCH for the Shoelace Uppercut. Thrown AM/PM weapons use the ' + heavyLabel.toUpperCase() + ' button.'
+                'Three things beat each other and that is the whole game. BLOCK beats his swings — hold BACK, away from him. ' +
+                'GRAB beats his block: nothing stops it, so a man who will not stop guarding is a man you throw into a wall. ' +
+                'And a punch beats a grab, because a grab is slow to start. ' +
+                'Guess right and you get the turn: block his ' + heavyLabel.toUpperCase() + ' and he is wide open — that is your free hit. ' +
+                'PUNCH then ' + heavyLabel.toUpperCase() + ' is the combo (a punch will not chain into another punch). ' +
+                '▼ + ' + heavyLabel.toUpperCase() + ' sweeps under a standing block; jump + PUNCH comes down over a crouch block. ' +
+                'When he grabs YOU, hammer GRAB to break out. ' +
+                'Fill HYPE then ▼ + PUNCH for the Shoelace Uppercut — it launches, and you can hit him again on the way down. ' +
+                '◀ ▶ walk · double-tap FORWARD to dash · ▲ jump · ▼ crouch.'
             }
             overlay={done !== null && s ? (
                 <MiniGameResult
