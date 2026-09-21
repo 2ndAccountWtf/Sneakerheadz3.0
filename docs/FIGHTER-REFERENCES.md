@@ -1,0 +1,743 @@
+# Fighter references — what six engines do, and what we do not
+
+Every engine and database read for the fighter, what each gave us, the licence position on each, and the gap tables. Reference material: consult it, do not read it end to end.
+
+Split out of `PRD-FIGHTER-DEPTH.md` on 2026-09-21, which had grown to 2,013
+lines doing four jobs at once. That document is now the plan and the index;
+this one is fighter references.
+
+---
+
+## 1. The references
+
+Three engines have been read. They are from different eras and schools and are
+useful for different things, so they are kept apart below rather than merged.
+
+| | Ikemen GO | Sakuga Engine | Schwarzerblitz |
+|---|---|---|---|
+| what | Go rewrite of a M.U.G.E.N-compatible engine | one person's Godot 4 / C# anime fighter framework | one person's C++/Irrlicht 3D arena fighter, shipped |
+| lineage | 1999 arcade-era, Mugen data formats | 2024, Guilty Gear / BlazBlue school | 2016–2020, **Tekken / Virtua Fighter school** |
+| size | ~420k lines | ~25k, of which ~12k is the engine | ~82k lines |
+| licence | MIT | MIT | **BSD-3 for code; assets explicitly all-rights-reserved** |
+| best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality | move *strings*, throw escapes you have to read, and teaching the player |
+| read | 2026-09-21 | 2026-09-21 | 2026-09-21 |
+
+Three further repositories were checked and are **not** in that table, because
+none is a fighting game engine. They are recorded in §1d and §1e.
+
+**Diminishing returns, stated honestly.** Three engines in, the mechanic space is
+well covered and each new reference adds less than the last. Ikemen gave five
+structural holes; Sakuga gave three plus the AI idea; Schwarzerblitz gave two
+that matter and a pile of confirmations. **The bottleneck is no longer knowing
+what to build — it is that none of it has been built or measured.** A fourth
+engine is not the next move.
+
+**Standing rule for all three.** No code, no data and no art from either repository, or
+from the M.U.G.E.N content ecosystem, is used here, and none may be. The Mugen
+character/stage ecosystem in particular is overwhelmingly ripped commercial
+sprites — `FIGHTER-RESEARCH.md` §"The ripped-sprite problem" already flags this.
+We read them for rules. Citations are `file:line` so a later session can re-find
+the thing rather than trust this summary.
+
+### 1a. Ikemen GO
+
+`https://github.com/ikemen-engine/Ikemen-GO` (`LICENCE.txt`, MIT, Suehiro +
+contributors 2016–2026).
+
+Not transliterable: 420k lines of Go driving OpenGL/Vulkan, with netplay, Lua
+scripting and the SFF/AIR sprite formats, against our 320×180 canvas in a React
+modal. The value is the data model. `HitDef` (`src/char.go:589`) is a 130-field
+struct — the most complete open-source specification of "what a hit is" that
+exists — and `data/common1.cns.zss` is a design document in disguise, enumerating
+every state a fighter needs.
+
+### 1b. Sakuga Engine
+
+`https://github.com/NoisyChain/Sakuga-Engine` (`LICENSE`, MIT, NoisyChain 2024).
+C# on Godot 4, rollback netcode, deterministic fixed-point (`SimulationScale =
+10000`), explicitly "2D 1v1 anime-style".
+
+Small enough to read end to end, and **much closer to our problem than Ikemen**.
+Where Ikemen tells us what a 1999 engine needed, Sakuga tells us what a modern
+fighter considers table stakes — and several of those we do not have at all. Its
+`Globals/GlobalEnums.cs` and `Globals/GlobalFlags.cs` are together a better
+vocabulary check than the whole of `HitDef`, and its `GlobalVariables.cs` is a
+single screen of every tunable a fighting game needs.
+
+### 1c. Schwarzerblitz
+
+`https://github.com/AndreaJens/SchwarzerblitzEngine` — Andrea "Jens" Demetrio,
+2016–2022. C++ on a custom Irrlicht fork, SFML for audio, **Windows-only, 3D**.
+The author's own README calls the code ugly and says there is no netcode.
+
+**Licence needs care, unlike the other two.** `LICENSE.md` is BSD-3 for the
+source — permissive, fine to read — but the bundled assets are stated as *"all
+rights reserved ... cannot be redistributed without the owner's consent",*
+covering character designs, 3D models, music, sound effects, illustrations,
+stages, icons and menu art. Our standing no-assets rule already covers this; it
+is recorded because this is the first of the three to draw the line explicitly.
+
+Architecturally useless to us: it is a 3D arena fighter, so most of the move
+record is tracking angles, sidestep and throw cameras. **But it is the only
+reference in the Tekken school**, which is what was actually asked for, and two
+of its ideas are things neither 2D engine has.
+
+---
+
+### 1d. Two non-engine references
+
+Checked 2026-09-21 after the three engines. One is useful and one is refused.
+
+**GrappleMap** — `https://github.com/Eelis/GrappleMap`. **Public domain**
+(`LICENSE`: all authors released their contributions into the public domain).
+Not a game: a database of 5,647 interconnected grappling positions and
+transitions, animated as stick figures, with a browser viewer, an editor and a
+drill runner.
+
+Useful for exactly one idea, which none of the three engines had — see §7.
+Ignored: the 3D joint-coordinate encoding, the Vrui/VR viewer, the Blender
+pipeline, and essentially the entire body of real jiu-jitsu content.
+
+**Virtual Pro-Wrestling 2** — `https://github.com/aki-club/vpw2`. **Refused, on
+two independent grounds.**
+
+The lineage is the most on-target of anything in this document: AKI Corporation
+built VPW2, and AKI then built Def Jam Vendetta and Def Jam Fight for NY. This
+is, genuinely, Def Jam's ancestor engine. It is still the wrong thing to use.
+
+1. **Licensing.** It is a matching decompilation of a copyrighted commercial N64
+   game. There is no licence covering the decompiled output — the only
+   `UNLICENSE` in the tree applies to `tools/` — and the README requires the
+   user to supply their own ROM because the assets are not distributable. This
+   is the same category as the leaked NBA Jam source, which is already governed
+   by a standing rule in `NBA-JAM-MECHANICS.md`: read for design rules only,
+   never copy, and say so in every document that cites it.
+2. **There is nothing to read.** Even setting the licence aside, the repository
+   is 408 files of raw MIPS assembly against 14 C files, with auto-generated
+   symbol names (`func3_800F3E88`). `docs/` is 558 lines and is entirely
+   build and ROM-layout notes — `notes.txt` is thirteen lines about boot code
+   and linked objects. The one design-bearing symbol found in a scan was
+   `BroadAction_Leapfrog_Primary`. Design intent is not recoverable from this
+   without months of reverse engineering, and the result would be a fact about
+   a 2000 N64 game rather than a rule we could act on.
+
+Recorded so the question is not reopened. **A decompilation is not a reference.**
+
+### 1e. Virtual Pro Grappler — read the docs, touch none of the code
+
+`https://github.com/chaotix610/VirtualProGrappler` — an open-source wrestling
+game and engine "inspired by the AKI-era N64 wrestling games: WWF No Mercy,
+Virtual Pro Wrestling 2, WCW/nWo Revenge". An *original implementation*, not a
+decompilation — the legitimate version of what §1d refused.
+
+**Two licence facts, and they matter more here than anywhere else in this
+document.**
+
+1. **It is GPLv3.** Every other reference is MIT, BSD-3 or public domain.
+   GPLv3 is copyleft: code taken from it would oblige us to release
+   Sneakerhead Dope Wars under GPLv3.
+2. **It is TypeScript on Vite with Vitest** — our exact stack. Every previous
+   reference was Go, C#, C++ or a database, so "do not copy the code" was a
+   principle nobody was tempted to break. Here the files would drop straight
+   into `components/` and work.
+
+Those two facts together make this the one reference where the no-code rule has
+teeth. **Read the prose. Take the rules. Write our own numbers and our own
+code.** Ideas and mechanics are not copyrightable; their expression is.
+
+A third caution: `src/combat/reversal.ts` transcribes a reversal probability
+table whose source doc (`docs/mechanics/REVERSALS.md`) cites N64 RAM addresses,
+so that GPL'd file also carries data extracted from a commercial game. Both
+reasons to take the shape and none of the digits.
+
+**What is worth reading: `docs/mechanics/`, 2,163 lines of plain-English design
+prose** — by some distance the best-written design material in any of the six
+repositories. Findings in §2.10, §7 and the log.
+
+**Maturity caveat.** The docs are well ahead of the code. The README says the
+project is in an "early engine and tooling phase ... before full match gameplay
+comes online", `src/combat/` is about 800 lines, and the blueprint's own states
+(`GrappleHold`, `GrappleInitiation`, `Submission`, `Pinning`) do not appear in
+the source as working states. This is good design *thinking*, not played,
+validated behaviour. Treat it as a hypothesis, the way we treat our own
+un-measured ideas.
+
+### 1f. Searching for borrowable grappling code — the answer is there isn't any
+
+Asked 2026-09-21: find wrestling/grappling code we can **borrow**, not merely
+read. That makes licence the whole question, so first, our side:
+`package.json` says `"private": true` and there is **no LICENSE file in this
+repository**. Sneakerhead Dope Wars is proprietary, all rights reserved. So:
+
+| licence | may we take code? |
+|---|---|
+| public domain | yes, freely |
+| MIT / BSD-3 | yes, keeping the copyright notice |
+| **GPLv3** | **no** — it would oblige us to release this game under GPLv3 |
+| **no licence stated** | **no** — all rights reserved by default |
+
+Against that, everything examined:
+
+| project | licence | borrowable? | why not |
+|---|---|---|---|
+| GrappleMap | **public domain** | **yes** | but it is C++ tools plus 3D pose data, not game code |
+| Ikemen GO | MIT | yes | Go, 420k lines, desktop OpenGL |
+| Sakuga Engine | MIT | yes | C#, Godot resources |
+| Schwarzerblitz | BSD-3 (code) | yes | C++, Irrlicht, 3D, Windows |
+| Virtual Pro Grappler | **GPLv3** | **no** | copyleft, and it is the only one in our stack |
+| VPW2 | none (decompilation) | **no** | §1d |
+| **TUC** (`tb808/TUC`) | **none stated, `private: true`** | **no** | all rights reserved |
+
+**The conclusion is a negative result and it is worth stating plainly: there is
+no wrestling or grappling code we can lift.** The two closest matches are both
+TypeScript, both excellent, and both unusable — one copyleft, one unlicensed.
+Everything permissively licensed is in a language we would have to port from,
+at which point we are writing our own code from someone else's design, which is
+what this document has been doing all along.
+
+The one genuinely free thing is GrappleMap's **data** (public domain): the
+position/transition graph and its vocabulary. Not its C++.
+
+### 1g. TUC — the closest design, and proof of the scope
+
+`https://github.com/tb808/TUC` — an MMA fight sim in TypeScript with Vitest and
+Playwright. **Unlicensed, so nothing is taken from it.** Read for rules only,
+like everything else here.
+
+It matters for one reason above all: **it does the entire grappling loop in 295
+lines** (`src/game/combat.ts`), with the whole game in 1,204. That is an
+existence proof at our scale. Its shape, as rules:
+
+- Combat states run `idle … clinch | takedown | ground | submission | finished`,
+  and ground position is a **four-rung ladder**, not a graph:
+  `guard → halfGuard → sideControl → mount`, ordered by dominance.
+- One object owns the whole grapple — mode, who is on top, the position, a
+  timer, a progress value, and an in-flight `transition { by, direction }`.
+- The escalation is a chain: clinch → takedown attempt → ground at guard →
+  advance the position → mount → submission.
+- **The sprawl is the counter.** During the takedown's ~0.78s window, a
+  defender holding *low* guard with stamina to spend stuffs it and stuns the
+  attacker. That is our triangle again: the grab beats a guard, but the *right*
+  guard beats the grab.
+- **Position is contested on stamina**, not on a coin flip: from guard the
+  bottom man reverses if the top man is the more tired by a margin.
+- Stamina gates entry (a takedown costs about twice a clinch) and barely
+  regenerates while grappling.
+- A ground-and-pound stoppage fires on unanswered hits plus accumulated head
+  damage — a "you are not defending yourself" rule rather than a health bar.
+- Rounds score `damage / grappling / control / knockdowns` separately, so
+  position wins close rounds without damage.
+- Difficulty carries a per-level `grappling` weight, the same shape as Sakuga's
+  single prediction knob (§5).
+- And once more, independently: **strikes are remapped by context** — a punch
+  becomes a clinch punch or a ground punch depending on the grapple mode. Three
+  unrelated codebases now solve "more moves than buttons" the same way (§2.10).
+
+## 2. Structural gaps — things our game cannot express
+
+These are not tuning. The mechanic does not exist and cannot be reached from the
+current model. Each one names which reference it came from, because the three
+references found different holes and it matters which is which. §2.8 is the odd
+one out: it is not a missing mechanic but a missing way to find the mechanics,
+and it is the one most likely to be worth doing first.
+
+### 2.1 You cannot jump over your opponent
+
+Their pushbox is `standbox` *and a separate* `airbox` (`src/char.go:355-357`,
+read from `ground.front` / `ground.back` / `air.front` / `air.back`). Ours is one
+symmetric `MIN_SEP = 15` (`StreetFighter.tsx:38`) and `separate()`
+(`StreetFighter.tsx:1179`) never looks at `y`:
+
+```ts
+function separate(a: Fighter, b: Fighter) {
+    const dx = b.x - a.x;          // no y, no airborne check
+```
+
+So both bodies are solid at all times, including mid-air. **The cross-up — jump
+over them, attack from the wrong side, their guard is now backwards — is
+structurally impossible.** It is one of the two or three fundamental mixups in
+any 2D fighter.
+
+It also explains why the jump feels pointless: an air attack can only ever
+arrive from the front, which is exactly why the opponent reads it trivially.
+
+*Biggest single finding in this pass. Cheap to fix.*
+
+### 2.2 A hit has one reaction; Ikemen's has eight
+
+From `data/common1.cns.zss`:
+
+```
+5000 shaking → 5001 knocked back          (5010/5011 crouch, 150-155 guard)
+5020 air shaking → 5030 knocked away → 5035 transition
+                   → 5040 recover in air  |  5050 falling
+5070/5071 tripped        5080/5081 hit while already down
+5100 hit the ground → 5101 BOUNCE → 5110 lying → 5120 getting up
+5200/5201 tech on the ground        5210 tech in the air
+```
+
+The split that matters most is the first: **shake, then knockback.** On impact
+you freeze in place for a few frames and only *then* slide. We apply damage and
+velocity on the same frame, which is part of why our hits read as a number going
+down rather than as contact. Ground bounce (5101) is a free juggle extender.
+
+### 2.3 There is no air guard, and guarding is not a state
+
+Theirs: 120 guard-start → 130 stand / 131 crouch / **132 air** → 140 guard-end.
+Ours is a `blockHeld` boolean that is false whenever airborne. Combined with
+§2.1, jumping is a pure commitment with no defensive option at all.
+
+### 2.4 The jump has no startup and no landing recovery
+
+Theirs: StateDef 40 jump-start with `ctrl:0`, 50 jump-up, 52 **jump-land** with
+`ctrl:0`. Landing recovery is *the* balance lever on jump spam, and we have
+none — our fighter is actionable the instant they touch the floor.
+
+Same for the backdash: theirs is a distinct airborne state (105 hop-back) with
+its own landing state (106). Ours is a reverse walk at `WALK_BACK`, symmetric
+with walking forward.
+
+### 2.5 There is no counter hit
+
+Sakuga prices a counter as its own outcome everywhere: `CounterHitStopDuration =
+20` against `SelfHitStopDuration = 12` and `OpponentHitStopDuration = 12`
+(`Resources/HitboxElement.cs`), with engine defaults `DefaultBaseHitstop = 10`
+and `DefaultCounterHitstop = 20` (`Globals/GlobalVariables.cs`). A counter also
+gets its own callout — "Counter" and "Punish" are two of the nine hit
+notifications in `HitNotifs.tres`.
+
+Hitting someone during their startup frames is the single most satisfying thing
+in a fighting game and **it does not exist in ours.** Every hit is the same hit.
+This is also the mechanic that pays for reading the opponent, which is the whole
+behaviour the triangle pass was trying to encourage.
+
+Nearly free for us: we already know the defender's `state === 'attack'` and
+`frame < startup` at the moment of contact.
+
+### 2.6 Simultaneous hitboxes trade; they should be able to clash
+
+Ours resolves both hits (`resolveContact`, `StreetFighter.tsx:1651`), deliberately
+— the comment says trades are symmetric. Sakuga has `ClashHitStopDuration = 20`
+and a per-box `Priority`, so two hitboxes meeting can *clash*: neither lands,
+both recoil, everyone is back to neutral with a bang. That reads better than two
+people simultaneously taking damage, and it is a real moment rather than a
+double-hit nobody can parse.
+
+### 2.7 Invulnerability is one number, not a set of types
+
+`FrameProperties { DAMAGE_IMUNITY, THROW_IMUNITY, PROJECTILE_IMUNITY, LOCK_MOVE }`
+(`Globals/GlobalFlags.cs`). We have a single `invuln` frame count.
+
+**Throw invulnerability specifically matters to us now**, because we shipped a
+grab. Wake-up is currently a flat 12 invulnerable frames against everything;
+without a typed version there is no way to say "getting up is safe from grabs
+but not from strikes", which is the standard answer to a grab-spamming opponent.
+
+### 2.8 The player has no way to learn any of this
+
+Schwarzerblitz ships a numbered tutorial — `FK_TutorialPhase` in
+`FK_SceneGameTutorial.h` runs to 23+ phases, one mechanic each: MovementForward,
+Crouching, StandingGuard, Punch, Kick, TechThrow, FlowCombo, GroundRecovery,
+Backstep, **ThrowEscape**, CrouchedGuard, JumpAttacks, Projectiles… Each phase
+carries its own message, required input and pass condition. It also ships
+`FK_MoveListPanel` — the game shows you your own moves.
+
+We have **one paragraph of help text**, and we just added three mechanics
+(grab, break, juggle) plus a whole triangle that the player has no way to
+discover. A player who never presses GRAB never learns that a guard is
+beatable, and nothing in the game tells them.
+
+This is arguably the highest-value finding in the whole document *for our
+situation specifically*, because our problem stopped being "not enough
+mechanics" on 2026-09-21. It is now "the mechanics are invisible". A move list
+and four or five 15-second drills would do more for how the fighter feels than
+Stages 4 and 5 combined.
+
+### 2.10 Two buttons are not the ceiling — context is
+
+Recorded here rather than in §7 because it overturns a decision this document
+made twice. Move strings were parked on the grounds that "with two attack
+buttons the vocabulary is A-A, A-B, B-A, B-B and little else". **That was the
+wrong frame.**
+
+AKI's answer is not strings, it is **context × direction × button**
+(`docs/mechanics/move-slot-overview.md`). The same two buttons mean different
+things depending on where you are:
+
+```
+position   front grapple | back grapple | standing | running | ground | turnbuckle
+strength   weak | strong
+direction  neutral | left-right | up | down
+button     A | B
+```
+
+`front-weak-grapple-3` is front grapple, weak, D-pad up, A. That is eight moves
+per grapple position from two buttons, and it is how an N64 controller carries
+a few hundred moves.
+
+**We already do a thin version of this** — `down + B` is the sweep, `down + A`
+is the special, airborne `A` is the air attack. What we do not have is a
+*position* that counts as a context. The grab is the obvious one: it already
+holds both fighters still for thirteen frames and currently has exactly one
+outcome.
+
+See §7 for the scoped version. It costs no new button and no new state.
+
+### 2.9 There is no superpause
+
+`setSuperPauseTime(pausetime, movetime, unhittable, p2defmul)`
+(`src/char.go:9393`). The world freezes when a super starts; the attacker gets a
+head start (`movetime`); the victim is briefly unhittable and their defence is
+multiplied. Our special just comes out. This is the cheapest "this move is a big
+deal" effect in the genre.
+
+---
+
+## 3. Data-model gaps — special cases that want to be data
+
+We hand-rolled each of these, usually as a predicate. Their version is a field.
+
+| concern | Ikemen | ours |
+|---|---|---|
+| what a hit can touch | `hitflag`: stand / crouch / air / lying / falling (`char.go:10990`) | `hittable`, `grabbable`, `juggleSpent` — three predicates (`:600`, `:608`, `:619`) |
+| what stops a hit | `guardflag`: H / L / A (`char.go:11300`) | `height`, doing this job *and* placing the box |
+| juggle limit | `air_juggle` points, per-defender budget, default 15 (`char.go:341`, `:5891`) | `JUGGLE_MAX = 2`, every hit costs 1 (`:597`) |
+| juggle damage | `fall.defence_up 50`, `fall.defence_mul 1.5` (`char.go:337-339`) | combo proration only |
+| freeze on contact | `pausetime[2]` + `guard_pausetime[2]` — attacker and defender freeze for *different* lengths, block authored separately | one `hitstop`, ×0.6 on block |
+| reaction look | `animtype`: Light / Medium / Hard / Back / Up / DiagUp (`char.go:559-568`) | every hit looks identical |
+| ground reaction | `HitType`: None / High / Low / **Trip** (`char.go:571-578`) | a `knockdown` boolean |
+| corner | attacker eats the push when the defender is walled (`char.go:9954`) | nothing; `separate()` gives the whole shove to whoever is off the wall |
+| knockdown recovery | `fall.recover` / `fall.recovertime` (defaults `true` / `4`, `char.go:850-851`) | flat 38–42 frames on the floor, no agency |
+| input buffer | `time` vs `buffer.time`, plus per-command `buffer.hitpause` and `buffer.pauseend` (`data/common.cmd`) | one 4–10 frame window; both flags hand-rolled as global rules |
+| throws | `p2stateno` + `bindToTarget` (`char.go:8609`) — the attacker takes over the victim's state machine; `unhittabletime` afterwards (`char.go:724`) | bespoke `holdT` / `grabT` pair |
+
+And from Sakuga, which is closer to how we would actually build it:
+
+| concern | Sakuga | ours |
+|---|---|---|
+| ending a juggle | **gravity proration**: `CurrentGravityProration` + `GravityDecayFactor`, `GravityDecay = 2500` — each juggle hit makes them fall faster until the combo dies on its own | hard `JUGGLE_MAX = 2` cap, so the third hit whiffs for no visible reason |
+| long combos | `CurrentHitstunProration` + `HitstunDecayMinCombo = 8`, `MinHitstun = 8` — hitstun shrinks after eight hits, so links get harder | nothing |
+| repeating a move | `CurrentSameMoveProration` — the same move again in a combo scales harder | `if (f.cancel > 0 && f.move === id) return false` — a hard ban, which is the hack version of this |
+| the corner is worth something | `CornerMaxDamageScaling = 120` vs `BaseMaxDamageScaling = 100` (mins 45 vs 35) — corner combos do *more* | nothing; the corner is currently pure downside for the defender and pure upside for the attacker |
+| cancels | `MoveCancelSettings { MoveIndex, Conditions, FrameThreshold }` with `CancelCondition { WHIFF, HIT, BLOCK, KARA }` — per-target, per-outcome, per-window | one `cancel` number, on hit only. No block-cancel, so no blockstrings |
+| hitstun kinds | `HitstunType { NONE, BASIC, KNOCKDOWN, HARD_KNOCKDOWN, DIZZINESS, STAGGERED, GRABBED }` — note **GRABBED is a hitstun type** | `hitstun` / `down` / a bespoke `grabbed` state |
+| knockback | a `Vector2I` + gravity + **duration**, authored separately for ground-hit / ground-block / air-hit / air-block | one velocity, then friction |
+| entering guard | `HitboxType.PROXIMITY_BLOCK` — a box that puts you in guard when genuinely threatened | holding back is always "blocking", even at full screen |
+| block on reaction | `InstantBlockWindow = 3` — guarding within 3 frames of impact is a just-defend | nothing |
+| buffer length | `MoveBufferLength = 10` | 4–10, focus-scaled, baseline 7 — **independent confirmation we are in the right range** |
+| block freeze | `DefaultBlockHitstop = 6` against `DefaultBaseHitstop = 10` | `hitstop * 0.6` — **exactly the same ratio, arrived at independently** |
+
+And from Schwarzerblitz, the Tekken-school items neither 2D engine has
+(`FK_Move.h`, `FK_MoveListMove.h`):
+
+| concern | Schwarzerblitz | ours |
+|---|---|---|
+| move strings | `followupMoves` **and** `cancelIntoMoves` as two separate lists, plus `followupOnly` (a move that exists only as a string continuation) and `isMultiChainable`. `FK_MoveListMove` is a trie node | seven flat moves and one `cancel` number. **This is the Tekken texture that was originally asked for** — see §7 for why it is still parked |
+| breaking a throw | `escapeInput` is **per throw** (`FK_ThrowMove`), so which button breaks it depends on which throw it is — you have to *read* the animation | one GRAB button, so our break is a reaction test and never a read |
+| minimum range | `moveMinRange` as well as `moveMaxRange` — some moves whiff if you are too close | max reach only |
+| properties over time | `attackTypeAtFrame` — a vector, so a move's attack type changes frame by frame; `invincibilityType` and `armorType` are vectors of attack type, so a move can be invincible to lows but not mids | one `invuln` counter |
+| keeping a launcher worth it | `maximumDamageScaling` **per move** — a move can cap how far its own combo scales | global proration only |
+| AI hints on the move | `AIflag_onlyDuringOpponentAttack` — the move record tells the AI when it is appropriate | four global constants |
+| trade | `movePriority` | symmetric trade |
+| targeting | `antiAirOnlyFlag`, `vsGroundedOpponentFlag` | nothing |
+| execution as a skill | `requiresPreciseInputFlag` — just-frame moves | nothing |
+
+Ignored as 3D-only: tracking angles, sidestep, throw cameras, ring-out.
+
+---
+
+## 4. Presentation gaps
+
+| | Ikemen | ours |
+|---|---|---|
+| camera | auto-zoom on fighter distance, with `zoomindelay` / `zoominspeed` / `zoomoutspeed` (`src/camera.go:32-42`) | fixed 320×180; fighters range 18–302 apart |
+| screen shake | `EnvShake{time, freq, ampl, phase, mul, dir, diradd, decay}` (`system.go:6676`) | a scalar counting down |
+| flash / trails | PalFX and AfterImage as first-class time-driven effects | a `flash` frame counter |
+| guard break | a set piece: shockwave, glass shards, blue screen flash, dedicated sound (`data/guardbreak.zss`) | n/a — we have no guard meter |
+
+Two more from Sakuga:
+
+| | Sakuga | ours |
+|---|---|---|
+| telling the player what happened | nine callouts — First Strike, Counter, Punish, Just, Escaped, Recovered, Knockdown, Hard Knockdown, Invalid (`HitNotifs.tres`) | a combo counter |
+| frame data | `CombatTracker` computes `FrameAdvantage = HitFrame - StunAtHit` live, every hit | our test harness computes it by hand, off the move table |
+
+The callouts are the cheapest feedback in this entire document. A fighting game
+that says "PUNISH" when you punish is teaching you its own rules for free — and
+we have just added three mechanics (grab, break, juggle) that the player has no
+way of knowing worked.
+
+Putting frame advantage in the sim rather than in the harness would also make it
+assertable, which is worth something on its own.
+
+The camera is the one to take seriously. On a phone at 320×180 a camera that
+pushes in during a close exchange is probably worth more than any single
+mechanic in §2 or §3, and we already did this work on hoops.
+
+---
+
+## 5. The opponent — where we stand against each
+
+The two references disagree here, and the disagreement is the useful part.
+
+**Ikemen's generic AI is a random button-jammer**, and we are well ahead of it.
+`AiInput.Update(level)` (`src/input.go:1863`) picks a random direction and mashes
+buttons at `chance = (-11.25*level + 165) * 7`, plus a "cheat" that fires a
+random command off the character's list when `RandF32(0, aiLevel/2+32) > 32`
+(`src/char.go:13612`). Real Mugen AI is hand-written per character in CNS — there
+is no general AI in that repo at all. Ours (reaction delay, whiff punish, guard
+reading, block→punish, combo and juggle follow-ups) is a better opponent than
+anything shipped there.
+
+**Sakuga's is structurally better than ours**, and this is the most valuable
+single idea in either repository.
+
+`AIBehavior` (`Resources/AI/AIBehavior.cs`) is a data resource:
+
+```
+DecisionRateFree   a RANGE, not a constant — how often it re-decides when idle
+DecisionRateBusy   … and while committed to something
+InputRandomness    a range applied to its own inputs
+BlockingRate       how often it guards
+TechingRate        how often it techs a knockdown
+PredictionQuality  0-10: how often it correctly READS your current state
+LowHealth          below this it flips to defensive
+```
+
+plus four action packs by distance band (`NearActions` / `MidActions` /
+`FarActions` / `DistantActions`), each a list of `AICondition { Distance,
+UseOnGround, UseOnAir, SuperGaugeRequired, Probability, ActionMode, CounterFlags }`.
+`CounterFlags` is matched against the *opponent's* current state
+(`AIFlags { HITSTUN_STATE, BLOCKSTUN_STATE, ATTACK_STATE, KNOCKED_DOWN,
+INVULNERABLE, HIGH_ACTION, LOW_ACTION, CLOSE_ACTION, … }`), so a condition reads
+"when they are doing this, at this range, with this much meter, do one of these,
+with probability P" (`Components/AIBrain.cs:240-270`).
+
+Two things fall out of that shape which we do not have:
+
+1. **One difficulty knob.** `PredictionQuality` is how often the bot reads you
+   correctly. Ours is four separate hardcoded constants — `AI_PUNISH_CHANCE`,
+   `AI_COMBO_CHANCE`, `AI_JUGGLE_CHANCE`, `AI_BREAK_CHANCE` — tuned by hand and
+   not exposed anywhere. They enumerate `BotDifficulty { BEGINNER, EASY, MEDIUM,
+   HARD, VERY_HARD, PRO }`.
+2. **Personality.** `BotMode { AGGRESSIVE, DEFENSIVE }` selects different action
+   packs from the same brain.
+
+**Why this matters to us specifically.** We shipped venues and NPC opponents
+(task #16). Every street fight in the game currently has the *identical* brain,
+and the only thing that differs between opponents is their name and health. Our
+four AI constants are exactly the thing that should be per-opponent data, and we
+already have the pattern for it in `systems/hoops/roster.ts`. A washed-up rapper
+and a bouncer should not fight the same way, and right now they cannot fight
+differently even in principle.
+
+**Still out of both**, on grounds of needing per-frame art data we do not have:
+CNS/ZSS state scripting, the SFF/AIR sprite formats, multiple collision boxes
+per animation frame, and Sakuga's whole Godot resource/editor layer.
+
+---
+
+
+---
+
+## 9. Research log
+
+Append-only. Date, what was read, what came out of it.
+
+*Entries below predate the §6 rewrite of 2026-09-21 and refer to the old
+"Stage" numbering. They are left as written; §6 is the current order.*
+
+### 2026-09-14 — ten open-source browser fighters
+See `FIGHTER-RESEARCH.md`. Nine of ten were shallower than what we already had.
+Two things worth taking, both MIT: `roiizchak/vibe-fighter`'s art/sim sync
+discipline, and `RyoSogawa/use-street-fighting-command`'s motion-input matcher.
+Neither has been used yet.
+
+### 2026-09-21 — the triangle pass
+See `FIGHTER-DEPTH.md`. Diagnosed and fixed: defence paid nothing, one button
+was the whole game, there was no third option. Found while testing: the juggle
+cap bounded only the juggle rule, so a third hit came through the ordinary
+overlap on the way down.
+
+### 2026-09-21 — Ikemen GO
+This document, §1–§5. Headline finds, in the order they surprised us:
+
+- Airborne bodies are solid in our game; cross-ups are impossible (§2.1).
+- A hit reaction is one state for us and eight for them; the shake/knockback
+  split is the one that matters (§2.2).
+- Their generic AI is a random button-jammer — we are ahead there (§5).
+- `HitDef` is a 130-field checklist; roughly a dozen of those fields are things
+  we hand-rolled as predicates (§3).
+
+Read but not yet mined: `src/bytecode.go` (the whole state-controller
+vocabulary — 420k lines, likely more findings in it), `src/anim.go` (the
+art/sim contract), `data/dizzy.zss`, `data/score.zss`, `data/training.zss`
+(what diagnostics a fighting game considers essential — may be worth aligning
+the test harness to), `data/tag.zss`.
+
+### 2026-09-21 — Sakuga Engine
+
+MIT, C#/Godot 4, ~25k lines of which ~12k is engine. A 2024 anime fighter rather
+than a 1999 arcade one, and **closer to our problem than Ikemen on almost every
+axis**. Read: `Globals/GlobalEnums.cs`, `Globals/GlobalFlags.cs`,
+`Globals/GlobalVariables.cs`, `Resources/HitboxElement.cs`,
+`Resources/BlockSettings.cs`, `Resources/MoveCancelSettings.cs`,
+`Components/SakugaProrations.cs`, `Components/CombatTracker.cs`,
+`Resources/AI/*`, `Components/AIBrain.cs`, `HitNotifs.tres`.
+
+Headline finds, in the order they surprised us:
+
+- **We have no counter hit.** Not mentioned once in the Ikemen pass because
+  Ikemen buries it; Sakuga prices it in five places. Every hit in our game is
+  the same hit (§2.5).
+- **Gravity proration is how a juggle should end** — the victim gets heavier
+  until the combo dies, instead of a hard cap making the third hit whiff for
+  invisible reasons. Supersedes the juggle-points plan (§3, Stage 3).
+- **Same-move proration is the principled version** of the hard "a jab cannot
+  cancel into a jab" ban we shipped. Ours is a hack that happens to work.
+- **The corner should pay both ways** — they scale corner combos to 120%
+  against a 100% base. Ours is all stick and no carrot (Stage 4).
+- **Cancels are per-target, per-outcome, per-window**, with block-cancel as a
+  first-class flag. No block-cancel means no blockstrings.
+- **Their AI is data, and better shaped than ours** (§5). Decision rates as
+  ranges, a single `PredictionQuality` difficulty knob, aggressive/defensive
+  personalities, action packs per distance band. This is the one idea in either
+  repo that reaches outside the fighter — it is what would make our twelve NPC
+  opponents fight differently. Added as Stage 6.
+- **A parry need not be a new move.** `InstantBlockWindow = 3` is a window on
+  the block you already have. Reclassified out of §7.
+- **Two independent confirmations we got something right**: their input buffer
+  is 10 frames against our 4–10 (baseline 7), and their block hitstop is 6
+  against a base of 10 — the same 0.6 ratio we picked by hand.
+
+Read but not yet mined: `Resources/FrameDataEvents/` (a move as a list of
+condition→action events — 24 conditions, 35 actions; an architecture worth
+understanding even if we never adopt it), `Collision/PhysicsWorld.cs`,
+`Components/StanceManager.cs`, `Components/SakugaSuperArmor.cs`,
+`Utils/ChecksumCalculator.cs` (determinism verification — possibly useful to the
+test suite), `Components/FighterCamera.cs`.
+
+---
+
+### 2026-09-21 — Schwarzerblitz
+
+BSD-3 code, all-rights-reserved assets, ~82k lines of C++/Irrlicht, Windows,
+3D. A shipped game rather than a framework, from the Tekken/Virtua Fighter
+school — the only one of the three in that lineage, and therefore the only one
+aimed at what was originally asked for. Read: `FK_Move.h`,
+`FK_MoveListMove.h`, `FK_SceneGameTutorial.h`, `FK_AIManager.h`, `LICENSE.md`.
+
+Two finds that matter:
+
+- **The player cannot learn our game.** Their tutorial is a numbered curriculum
+  of 23+ phases, one mechanic each, and they ship a move list panel. We have a
+  paragraph of help text and three mechanics added last week that nothing
+  announces. Promoted to Stage 0, above every other stage (§2.8).
+- **Move strings as a trie** — `followupMoves` and `cancelIntoMoves` as two
+  distinct lists, `followupOnly` moves, `isMultiChainable`. This is the Tekken
+  texture, specified. Still parked, on thumb grounds rather than model grounds
+  (§7).
+
+Smaller finds, all logged in §3: per-throw escape inputs, `moveMinRange`,
+`attackTypeAtFrame`, per-move `maximumDamageScaling`, per-move AI hints,
+`movePriority`, just-frame inputs.
+
+Confirmations rather than finds: their AI is likelihood knobs per behaviour
+(`getGuardLikelihood`, `getThrowEscapeLikelihood`, `getChainLikelihood`,
+`getJumpLikelihood`, `getAfterMoveCooldown`), which is the same family as
+Sakuga's and validates the Stage 6 shape without adding to it.
+
+**Returns are clearly diminishing.** Ikemen gave five structural holes, Sakuga
+three plus the AI idea, this one two. Three engines read, nothing built. The
+next move is Stage 0, not a fourth repository.
+
+### 2026-09-21 — GrappleMap, and a refusal
+
+Two repositories checked, neither a fighting game engine. Full notes in §1d.
+
+**GrappleMap** (public domain) is a 5,647-position database of grappling
+positions and transitions. One idea worth having, and it is one no engine in
+this document had: **a grapple is a graph, not a move.** Positions are nodes
+with a tagged state vocabulary, transitions are edges, and a training drill is a
+path through it. That is the Def Jam grapple described precisely. Parked in §7
+with a scoped three-node version costing roughly sixty lines, because 5,647
+nodes against our 2,000-line fighter is not a proposal.
+
+**Virtual Pro-Wrestling 2** is refused. It is AKI Corporation's engine and AKI
+went on to build Def Jam Vendetta and Fight for NY, so the lineage is the most
+on-target thing anyone has pointed at. It is still wrong on two independent
+grounds: it is an unlicensed matching decompilation of a copyrighted commercial
+game (the NBA Jam category, already governed by a standing rule), and there is
+nothing in it to read — 408 files of auto-named MIPS assembly and 558 lines of
+docs that are entirely about ROM layout. A decompilation is not a reference.
+
+**Count so far: five repositories examined, zero lines of fighter code written
+since the triangle pass.** The scope note in §6 stands and now applies to
+non-engine references too.
+
+### 2026-09-21 — Virtual Pro Grappler
+
+An original AKI-inspired wrestling engine — the legitimate version of what §1d
+refused. **GPLv3, and TypeScript on Vite: our exact stack.** First reference
+where the no-code rule is a real constraint rather than a formality, because
+these files would drop straight into `components/` and relicense the product.
+Its `src/combat/reversal.ts` also transcribes a probability table whose source
+doc cites N64 RAM addresses. Prose yes, code and digits no.
+
+The value is `docs/mechanics/` — 2,163 lines of plain-English design writing,
+the best-written material in any of the six repositories. Three finds:
+
+- **Two buttons are not the ceiling; context is** (§2.10). This overturns a call
+  this document made twice. Strings were parked because two buttons run out of
+  combinations — but AKI's answer was never strings, it is position × strength
+  × direction × button. Eight moves per grapple position from two buttons. Our
+  grab already freezes both fighters for thirteen frames with one outcome;
+  reading the D-pad during that hold gives four, for no new button and no new
+  state (§7).
+- **The reversal model** — one press, before the attacker commits, mashing
+  explicitly no help. Ours rewards mashing, which is a decision-free mechanic
+  and now a Stage 3 item. Their probabilistic roll is the part to leave; we
+  scale the *window* by `focus`, not the odds.
+- **A wake-up attack with its own reversal window** (`Rising` →
+  `RecoveringAttack`). Getting up is our only fully optionless moment. Added to
+  Stage 3.
+
+Also noted, not findings: an `InteractionRegion` as the single source of truth
+for spatial context (we recompute distance and facing in several places);
+`Parameters.md` has a "What Parameters Do Not Affect" section, which is a
+discipline worth copying while four of twelve hoops roster modifiers still do
+not reach the sim; and `state-vocabulary-stress-test.md` stress-tests a
+proposed vocabulary against six real moves, marking each CLEAN / STRAINS /
+BLOCKED — the same propose-then-break-it method this session has been using,
+which is a pleasing independent confirmation of the process if not of any
+mechanic.
+
+**Six repositories examined. Still nothing shipped since the triangle pass.**
+
+### 2026-09-21 — the hunt for borrowable grappling code
+
+Asked for wrestling and grappling code we can **borrow** rather than read.
+Checked our own position first: `private: true`, no LICENSE, proprietary.
+
+**Negative result, and the important one in this log: there is none.** Full
+table in §1f. The two closest matches are both TypeScript, both good, and both
+unusable — Virtual Pro Grappler is GPLv3 and would relicense this game, and
+`tb808/TUC` states no licence at all, which means all rights reserved. Every
+permissively licensed project is in a language we would port from, which is
+writing our own code from someone else's design — exactly what this document
+has been doing for six repositories.
+
+The only freely usable artefact found anywhere is GrappleMap's public-domain
+**data**, not its code.
+
+Read TUC anyway, for rules (§1g). Worth it: it runs a complete
+clinch → takedown → ground → submission loop in **295 lines**, which kills the
+scale objection that had the grapple parked in §7 through three research
+passes. Promoted to **Stage 5.5** with a design sized for our three buttons,
+taking the sprawl — a specific defensive read that beats a grab outright — as
+the piece that finally closes our triangle.
+
+Also a third independent confirmation of §2.10: TUC remaps a punch into a
+clinch punch or a ground punch by context. AKI slots, VPG slot data and TUC all
+solve "more moves than buttons" the same way, and none of them does it with
+strings.
