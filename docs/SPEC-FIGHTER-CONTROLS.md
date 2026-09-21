@@ -256,3 +256,78 @@ Every `AnimState` declares:
 
 That table is what an artist is briefed against and what the engine reads. It
 is the thing that must exist before a single frame is commissioned.
+
+---
+
+## Sprites, or 3D? — decided 2026-09-21
+
+**Stay 2D sprites at runtime. Use Blender as an authoring tool, not as an
+engine. Do not go to Unity or Unreal.**
+
+### Why not Unity or Unreal
+
+**It means leaving the web app, and that breaks the product.** The fighter is
+not a standalone game — it is one of sixteen mini-games sharing live player
+state: health, street cred, heat, inventory, the hospital system, banking.
+Unity WebGL builds are tens of megabytes and take many seconds to start;
+Unreal removed HTML5 entirely in UE5 and has no meaningful web target at all.
+Either route means a separate application or a heavy embedded blob with a state
+bridge, loading **every time the player gets into a fight**. In a game where you
+might fight three times in a session, that is fatal on its own.
+
+**Consistency.** Fifteen other mini-games are pixel art at a small authored
+scale (`ART_SCALE = 3`, figures around 24px tall). A real-time-3D fighter would
+read as a different game bolted onto this one. Fixing that means redoing all
+sixteen, which is a scope jump of a completely different order.
+
+**We have already paid the expensive part.** `SPRITE-PIPELINE.md` puts it
+bluntly, quoting the source it was adapted from: *"Image gen ≈ 20% of the work.
+The other 80% is the pipeline."* We built that pipeline — frame normalisation
+for drift, the PNG override registry, `check-art.mjs`, `ENTRIES`, `actor()`,
+`streetAnim`. Starting a Unity project throws away the part that was hard and
+keeps the part that was easy.
+
+### The honest argument for 3D, which is real
+
+**The grapple.** Two bodies in one interlocked pose is the single thing 3D
+genuinely does better. Rig two figures in Blender, animate the interaction
+once, and it is correct from any angle for any pairing. In sprites every
+grapple move is bespoke art, and the move list has eight of them.
+
+That argument is strong enough that it should not be waved away — but it does
+not require a 3D *runtime*.
+
+### Two ways to use Blender without changing the runtime
+
+**(a) Render to sprites.** Model and rig in Blender, animate including the
+two-body grapples, render each frame to a PNG strip, feed the existing
+pipeline. **Zero runtime change** — it is still PNGs into `actor()`. This is
+what Schwarzerblitz does, what Sakuga's README advertises ("supports 3D sprites
+and 3D models"), and what Donkey Kong Country did thirty years ago. Cost: it
+needs rigging skill rather than pixel skill, and the pre-rendered look is
+distinctive enough to clash with hand-drawn art elsewhere in the game.
+
+**(b) Blender as a posing and reference tool only.** Block the interlocked
+grapple poses in 3D, render them as flat reference, and the pixel artist draws
+over them. Keeps the art style exactly consistent, solves *how do two bodies
+fit together* for the artist, and costs almost nothing.
+
+### The recommendation
+
+**(b), for the grapple poses specifically. Everything else stays hand-authored
+2D.**
+
+The art-consistency argument is the strongest one in this section, and (b)
+takes the benefit of 3D — correct interlocked two-body poses — without taking
+its cost. The grapple is the only place the problem exists.
+
+**And the decision is reversible.** The runtime does not care where a PNG came
+from, so if we later want the full render-to-sprite path in (a), nothing in the
+engine changes. That is worth knowing before committing either way.
+
+### One note on rendering headroom
+
+If the *renderer* ever becomes the limit — it is not today — the in-family
+upgrade is **Phaser 4, already a dependency** and already piloted on Flight
+404. Not Unity. But two figures at 320×180 are nowhere near a draw-call
+ceiling: our problems are design and animation source, not rendering.
