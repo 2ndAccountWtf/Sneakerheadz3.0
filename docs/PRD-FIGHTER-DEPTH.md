@@ -1146,10 +1146,28 @@ The part of this document that keeps it alive. Nothing below has been verified.
     §7 asks the player to make a directional choice inside a 13-frame hold. That
     may be unreadable at 320×180 with 15px fighters, which is the same doubt as
     §8.1 and probably has the same answer.
-14. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
-    design writing; the Street Fighter III parry literature; anything on throw
-    tech windows on touchscreens. **None of these should be read before Phase 2
-    ships** — see the scope note in §6.
+14. **THE ONE REAL RESEARCH GAP: nobody has looked at a fighting game built
+    for a touchscreen.** Six engines were read and every one assumed a
+    controller — Ikemen, Sakuga, Schwarzerblitz, VPG, TUC and the whole AKI
+    lineage take a d-pad, four-plus face buttons and no input latency as given.
+
+    **We are a phone game with three buttons and a thumb.** Phase 2 asks a
+    player to pick one of four directions inside a sixteen-frame window while
+    holding a button down. That may simply not be possible with a thumb, and no
+    amount of further engine reading will say.
+
+    Worth looking at how mobile-native fighting games solved input on glass —
+    the Skullgirls, Injustice, Shadow Fight and UFC mobile lineages each
+    answered it differently, some tap-only, some with swipes, some by removing
+    the directional pad altogether. **Platform research, not another engine**,
+    and it decides whether Phase 2's four-way read ships as written or becomes
+    a swipe, a two-way choice, or a hold-and-release.
+
+    **This is the only outstanding research item in this document.** Everything
+    else above is a decision to make or a number to measure.
+15. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
+    design writing; the Street Fighter III parry literature. **None of these
+    should be read before Phase 2 ships** — see the scope note in §6.
 
 ---
 
