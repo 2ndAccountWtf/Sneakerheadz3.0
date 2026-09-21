@@ -155,3 +155,104 @@ Unit tests, not balance runs — the harness drives `FightInput` directly:
 - **Reachability**: stick and all four buttons inside the landscape thumb arc
   at the smallest supported screen.
 - **Latency**: any input registers inside the existing buffer window.
+
+---
+
+## The animation contract — how the mechanics meet the engine
+
+Audited 2026-09-21 by reading `components/minigames/engine/streetAnim.ts`,
+`streetArt.ts` and `draw.ts`. **The engine is more capable than earlier drafts
+of this plan credited it with**, and the gaps that remain are specific.
+
+### What already exists
+
+| need | engine |
+|---|---|
+| a clip that restarts when the state changes | `AnimClock { key, start }` + `frameFor(clock, id, t, frames, rate)` — **this is the state→clip machinery**, and earlier drafts wrongly said it was missing |
+| once versus loop | `ONCE: Set<string>` and `loops(id)` |
+| per-clip frame rate | `RATE: Record<string, number>` and `rateFor(id)` |
+| **fit N frames into a duration** | `fitRate(frames, secs)` — exactly what a move needs |
+| walk cycle keyed to real movement | `cycleRate(frames, speed, travel)` |
+| desync repeated props | `phaseOf(id, frames)` |
+| draw a sprite, or fall back | `actor()` takes `frame`, `elapsed` or `stride`, plus `facing`, `rotation`, `swap`, `hurt`, `height` — **and falls through to the procedural `figure()` with `armUp` / `crouch` when no sprite is loaded** |
+
+So "art plugs in later" is **already real**: `actor()` draws the strip if it is
+loaded and the procedural figure if it is not. A half-delivered set degrades to
+today's look rather than to a hole.
+
+**The model:** a clip *is* a sprite id — one horizontal strip per animation
+state, its rate and loop flag registered in `streetAnim.ts`. `AnimState` → clip
+is therefore a naming convention, not new machinery.
+
+### What Phase 1 actually has to build
+
+Smaller than feared:
+
+1. `Fighter` gains `anim: AnimState` and an `AnimClock`.
+2. `drawFighter` stops calling `actor()` with `frame: 0` and doing the rest
+   through `armUp` / `crouch` / rotation, and starts calling `frameFor`.
+3. The `AnimState` → sprite-id table, with rates and loop flags registered.
+
+### Five real gaps, and the answers
+
+**1. The clinch is two bodies in one pose — and the engine draws one sprite per
+fighter.** This is the genuine integration problem, and it is the centrepiece
+mechanic. A suplex or an armbar is a single interlocked image of two people; it
+cannot be composed from two independently positioned sprites without looking
+wrong. Three options:
+
+- **Paired sprite** — one strip containing both fighters, drawn once, anchored
+  to the pair. Best-looking, doubles the art per grapple move, and needs two
+  palette ranges in one image so `swap` can recolour each fighter separately.
+  `PaletteSwap` is already a map, so this works.
+- **Authored offsets** — each grapple state carries a per-frame table placing
+  the victim relative to the attacker. More flexible, much more authoring.
+- **Attacker-drives** — the attacker plays a clip and the victim is posed from
+  a small offset and rotation table. Cheapest, weakest.
+
+**Recommendation: paired sprites with dual palette ranges.** It changes the art
+brief, so it must be decided before anything is commissioned.
+
+**2. Hit-stop does not freeze the animation.** `stepFight` runs
+`s.elapsed += dt` **before** the hit-stop early return, and `drawFighter` reads
+`s.elapsed`. So during a freeze the simulation stops and the sprite keeps
+animating — which defeats the entire point of hit-stop and gets worse in Phase 3,
+where freeze lengths grow and split by attacker and defender. **Animation must
+run off a separate accumulator that hit-stop does not advance.** Worth checking
+whether Hoops has the same bug.
+
+**3. Held states need struggle progress, not just a loop.** A clinch is 16–20
+frames but a choke lasts as long as it lasts. `loops()` handles the repeat;
+what it cannot express is *how close to escaping* — arms shaking harder as the
+break nears. `actor()` has no progress input. Answer: pass `frame` explicitly,
+driven by the struggle value, instead of by the clock.
+
+**4. Some poses are parameters, not clips.** Guard fatigue is the arm visibly
+dropping — continuous, not discrete. The procedural `figure()` already takes
+`armUp: number` and does exactly this, but a sprite strip cannot interpolate.
+Answer: author the guard as a short strip where **frame index is the fatigue
+level**, and drive `frame` directly. Same shape as (3). `blinded` is probably a
+tint or overlay rather than a clip at all.
+
+**5. Contact frames must align to the frame data.** A jab is 4 startup / 3
+active / 6 recovery; the clip has to show the arm extended on frames 4–6, not
+wherever the artist felt like it. `fitRate` scales a clip to a duration but
+knows nothing about *which* frame is the hit. **The contract must record a
+contact-frame index per clip** so it can be phase-aligned to `startup` — the
+discipline `FIGHTER-RESEARCH.md` flagged from vibe-fighter and which nothing
+has used yet.
+
+### The contract, stated
+
+Every `AnimState` declares:
+
+| field | meaning |
+|---|---|
+| `clip` | sprite id, or null to use the procedural fallback |
+| `loop` | repeat, or hold the last frame |
+| `drive` | `clock` (wall time), `fit` (stretched to the move's duration), `param` (frame index driven by a value — struggle, fatigue) |
+| `contact` | frame index of the impact, for phase alignment against `startup` |
+| `paired` | whether this is a two-fighter interlocked pose |
+
+That table is what an artist is briefed against and what the engine reads. It
+is the thing that must exist before a single frame is commissioned.
