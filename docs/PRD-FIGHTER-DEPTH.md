@@ -776,6 +776,109 @@ state.
 - **Air grabs.** Unreadable at 320×180 and they break the anti-air game.
 - **Pins.** No referee. It is a car park.
 
+#### Open decisions — Phase 2 cannot start until these are answered
+
+Audited 2026-09-21 against the question *could someone build this without
+asking anything?* They could not. What follows are decisions, not research.
+
+**1. The sprawl conflicts with crouch-block. This is a bug in the spec above.**
+
+`StreetFighter.tsx:1044-1045` already defines the guard as two independent
+holds:
+
+```ts
+f.blockHeld = !locked && !airborne && f.state !== 'attack' && wantBack;
+f.crouch    = !airborne && cmd.down;
+```
+
+So **down-and-back is already crouch-block**. A sprawl that fires on
+"holding down-back during the grab's startup" would therefore fire on *every*
+low block, making it free and automatic — and the grab would never beat a
+guard again, which destroys the entire triangle.
+
+Three ways out, and one has to be picked before any of this is built:
+
+- **(a) The sprawl is a press, not a hold** — tap down while already holding
+  back, inside the startup window. Costs stamina, so a wrong guess is paid for.
+  Needs Phase 1's frame-stamped input to judge.
+- **(b) The sprawl is its own input** — GRAB pressed during their grab startup,
+  i.e. grab-beats-grab. Simple and readable; loses the "the right guard beats
+  it" flavour.
+- **(c) No sprawl; the grab is simply unblockable** — what we ship today. Keeps
+  the triangle three-sided and gives up the fourth answer.
+
+Recommendation: **(a)**, because it keeps the grab beatable by a *read* rather
+than a reflex, and because the stamina cost is what stops it being free.
+
+**2. Grabbing someone in blockstun is currently legal and undefined.**
+`grabbable()` excludes `hitstun` but not `blockstun`, so a tick throw — poke,
+they block, grab them before they recover — works today by accident. That is a
+real and legitimate tool in fighting games, but it has to be a decision: either
+allow it and price it, or exclude blockstun the way hitstun is excluded.
+
+**3. Two grabs on the same frame.** Undefined. Ikemen randomises the winner.
+Options: both whiff and both recoil (a clash — readable), or the faster startup
+wins, or coin-flip. Pick one.
+
+**4. The round ending mid-hold.** `endRound` knows nothing about `holdT` or
+`grabT`, so a timeout during a clinch leaves both fighters in a hold state
+through the K.O. banner. Needs an explicit release.
+
+**5. A projectile arriving mid-hold.** We have thrown weapons. Does a flying
+bureka interrupt a clinch, hit the held fighter for free, or pass through?
+
+**6. The special during a clinch.** With a full meter, can you uppercut out of
+being held? If yes it is a reversal and the meter gets a second use; if no, say
+so. Ikemen's answer is that the super has invulnerable startup and *is* the
+reversal.
+
+**7. Stalling.** Knee keeps the clinch and ground-and-pound repeats. What stops
+two cautious players sitting in a clinch for the whole round? Options: a hold
+timer that force-releases, or proration that makes chip worthless quickly, or
+stamina drain that makes holding unaffordable. Probably all three, lightly.
+
+**8. Grabbing a rising opponent.** `hittable()` excludes `down`, but rising has
+12 invulnerable frames. Is a grab on wake-up allowed? This is the reason
+§Phase 5 lists throw invulnerability as a *typed* frame property.
+
+#### The animation contract is named but not specified
+
+Phase 1 lists the `AnimState` names. It does not define the interface art will
+be authored against, and that must be pinned **before anyone draws a frame**:
+
+- Does each state declare a fixed frame count, or a duration the sim drives?
+- Which states loop and which play once?
+- What is the anchor — feet, centre, or the existing 15px body box?
+- What does a state do when its clip is missing? (Today's procedural draw is
+  the fallback, and it has to stay the fallback.)
+- Do held states — clinch, choke, armbar — expose a separate *struggle*
+  progress for the artist to key against?
+
+Until that is written down, "art plugs in later" is an intention rather than a
+contract.
+
+#### The numbers in this document are invented
+
+Every figure above — stamina costs, hold lengths, damage, the −20 on a stuffed
+grab — is a starting guess. They are not research questions; they are
+measurement questions, and each needs a named harness policy that proves it:
+
+| number | proven by |
+|---|---|
+| hold length | a bot that always breaks vs one that never does |
+| break window | break rate lands near 50% at baseline `focus` |
+| stamina costs | a grab-spam bot must run itself out of stamina |
+| sprawl advantage | a sprawl bot beats a grab-spam bot and loses to a striker |
+| chip proration | a knee-only bot must lose to a mixed bot |
+
+#### The AI half is a stub
+
+"The AI learns every mechanic" is not a spec. It needs: how the opponent
+chooses among four clinch outcomes, when it prefers a rung-up over a throw,
+its sprawl rate, its break rate, and whether it can be made to *stall* by a
+defensive record. That is the same shape as §5's behaviour table and should be
+written as one.
+
 #### If we build a subset first
 
 The weak clinch's four, the sprawl, the break, and the existing wall slam.
