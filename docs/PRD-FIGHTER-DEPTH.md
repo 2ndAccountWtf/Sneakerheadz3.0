@@ -62,8 +62,8 @@ useful for different things, so they are kept apart below rather than merged.
 | best for | the exhaustive checklist of what a hit *is*, and the standard state machine | the modern mechanics we are actually missing, and how to make an opponent with a personality | move *strings*, throw escapes you have to read, and teaching the player |
 | read | 2026-09-21 | 2026-09-21 | 2026-09-21 |
 
-Two further repositories were checked and are **not** in that table, because
-neither is a fighting game engine. They are recorded in §1d.
+Three further repositories were checked and are **not** in that table, because
+none is a fighting game engine. They are recorded in §1d and §1e.
 
 **Diminishing returns, stated honestly.** Three engines in, the mechanic space is
 well covered and each new reference adds less than the last. Ikemen gave five
@@ -162,6 +162,45 @@ is, genuinely, Def Jam's ancestor engine. It is still the wrong thing to use.
    a 2000 N64 game rather than a rule we could act on.
 
 Recorded so the question is not reopened. **A decompilation is not a reference.**
+
+### 1e. Virtual Pro Grappler — read the docs, touch none of the code
+
+`https://github.com/chaotix610/VirtualProGrappler` — an open-source wrestling
+game and engine "inspired by the AKI-era N64 wrestling games: WWF No Mercy,
+Virtual Pro Wrestling 2, WCW/nWo Revenge". An *original implementation*, not a
+decompilation — the legitimate version of what §1d refused.
+
+**Two licence facts, and they matter more here than anywhere else in this
+document.**
+
+1. **It is GPLv3.** Every other reference is MIT, BSD-3 or public domain.
+   GPLv3 is copyleft: code taken from it would oblige us to release
+   Sneakerhead Dope Wars under GPLv3.
+2. **It is TypeScript on Vite with Vitest** — our exact stack. Every previous
+   reference was Go, C#, C++ or a database, so "do not copy the code" was a
+   principle nobody was tempted to break. Here the files would drop straight
+   into `components/` and work.
+
+Those two facts together make this the one reference where the no-code rule has
+teeth. **Read the prose. Take the rules. Write our own numbers and our own
+code.** Ideas and mechanics are not copyrightable; their expression is.
+
+A third caution: `src/combat/reversal.ts` transcribes a reversal probability
+table whose source doc (`docs/mechanics/REVERSALS.md`) cites N64 RAM addresses,
+so that GPL'd file also carries data extracted from a commercial game. Both
+reasons to take the shape and none of the digits.
+
+**What is worth reading: `docs/mechanics/`, 2,163 lines of plain-English design
+prose** — by some distance the best-written design material in any of the six
+repositories. Findings in §2.10, §7 and the log.
+
+**Maturity caveat.** The docs are well ahead of the code. The README says the
+project is in an "early engine and tooling phase ... before full match gameplay
+comes online", `src/combat/` is about 800 lines, and the blueprint's own states
+(`GrappleHold`, `GrappleInitiation`, `Submission`, `Pinning`) do not appear in
+the source as working states. This is good design *thinking*, not played,
+validated behaviour. Treat it as a hypothesis, the way we treat our own
+un-measured ideas.
 
 ## 2. Structural gaps — things our game cannot express
 
@@ -282,6 +321,36 @@ situation specifically*, because our problem stopped being "not enough
 mechanics" on 2026-09-21. It is now "the mechanics are invisible". A move list
 and four or five 15-second drills would do more for how the fighter feels than
 Stages 4 and 5 combined.
+
+### 2.10 Two buttons are not the ceiling — context is
+
+Recorded here rather than in §7 because it overturns a decision this document
+made twice. Move strings were parked on the grounds that "with two attack
+buttons the vocabulary is A-A, A-B, B-A, B-B and little else". **That was the
+wrong frame.**
+
+AKI's answer is not strings, it is **context × direction × button**
+(`docs/mechanics/move-slot-overview.md`). The same two buttons mean different
+things depending on where you are:
+
+```
+position   front grapple | back grapple | standing | running | ground | turnbuckle
+strength   weak | strong
+direction  neutral | left-right | up | down
+button     A | B
+```
+
+`front-weak-grapple-3` is front grapple, weak, D-pad up, A. That is eight moves
+per grapple position from two buttons, and it is how an N64 controller carries
+a few hundred moves.
+
+**We already do a thin version of this** — `down + B` is the sweep, `down + A`
+is the special, airborne `A` is the air attack. What we do not have is a
+*position* that counts as a context. The grab is the obvious one: it already
+holds both fighters still for thirteen frames and currently has exactly one
+outcome.
+
+See §7 for the scoped version. It costs no new button and no new state.
 
 ### 2.9 There is no superpause
 
@@ -507,6 +576,13 @@ bonus is too large.
   The current rule is a hack that happens to work; scaling is the principled
   version and it generalises to every move.
 - Ground bounce as a juggle extender.
+- **A wake-up attack.** Virtual Pro Grappler's blueprint nests
+  `RecoveringAttack` inside `Rising` — a getup attack with its own reversal
+  window. Getting up is currently our only completely optionless moment.
+- **Stop rewarding the mash on a grab break** (§7). One press inside the
+  window, and the window scales with `focus` the way the input buffer already
+  does. Currently hammering the button is strictly correct, which is not a
+  decision.
 
 *Gate:* free wake-up pressure drops without knockdowns becoming worthless;
 juggle length spreads naturally to 1–3 instead of pinning at 2; mashing one
@@ -604,14 +680,33 @@ and most add a HUD element, on a phone, in a mini-game.
   *different set of options* is available.
 
   Parked, and the scale is why. GrappleMap has 5,647 positions; our entire
-  fighter is about 2,000 lines. But the shape does not need 5,647 nodes — it
-  needs three. **The scoped version, if we ever want it:** the grab catches into
-  a clinch; from the clinch, forward-plus-button and back-plus-button lead to two
-  different positions; each position has its own finish and its own escape.
-  That is roughly one extra state and two extra branches on the hold we already
-  have, and it turns the grab from one move into a small read. Perhaps sixty
-  lines. Revisit only after Stage 0 — a grab nobody can find does not need a
-  second layer.
+  fighter is about 2,000 lines.
+
+  **Superseded by a cheaper shape — see §2.10.** Virtual Pro Grappler's
+  AKI-derived move-slot model gets the same "a grapple is more than one move"
+  payoff without a graph at all: the hold already freezes both fighters for
+  thirteen frames, so *reading the D-pad during that hold* gives four outcomes
+  — neutral, up, down, toward — off the buttons and stick we already have. No
+  new state, no new node type, no new button. That is the version to build if
+  we build one, and it is perhaps thirty lines rather than sixty.
+
+  Revisit only after Stage 0. A grab nobody can find does not need a second
+  layer.
+- **The AKI reversal model, as rules rather than numbers.** From
+  `docs/mechanics/REVERSALS.md`: the defender presses **once** and mashing
+  explicitly does not improve the odds; the input must land **before the
+  attacker has chosen their move**, so it is a race rather than a reaction to a
+  specific animation; success is probabilistic, scaled by a stamina stat in
+  bands; and finisher mode disables reversals unless both sides have it.
+
+  Two of those are worth having and one is not. "One press, before commitment"
+  is a better rule than ours — **our break currently rewards mashing**, which is
+  a thing we should fix whatever else happens. The dice are the part to leave:
+  probabilistic reversals are a known frustration in the AKI games ("I pressed
+  it and nothing happened"), and a deterministic thirteen-frame window is the
+  better design for a thirty-second mini-game. Stat-scaling the *window* rather
+  than the *odds* is the version that fits us, and we already do exactly that
+  for the input buffer via `focus`.
 - **Clash** (§2.6). Nice, readable, and a real moment. Not urgent: our
   symmetric trade is defensible and simultaneous hitboxes are rare.
 - **Proximity block boxes** (`HitboxType.PROXIMITY_BLOCK`). Fixes "holding back
@@ -825,6 +920,45 @@ docs that are entirely about ROM layout. A decompilation is not a reference.
 since the triangle pass.** The scope note in §6 stands and now applies to
 non-engine references too.
 
+### 2026-09-21 — Virtual Pro Grappler
+
+An original AKI-inspired wrestling engine — the legitimate version of what §1d
+refused. **GPLv3, and TypeScript on Vite: our exact stack.** First reference
+where the no-code rule is a real constraint rather than a formality, because
+these files would drop straight into `components/` and relicense the product.
+Its `src/combat/reversal.ts` also transcribes a probability table whose source
+doc cites N64 RAM addresses. Prose yes, code and digits no.
+
+The value is `docs/mechanics/` — 2,163 lines of plain-English design writing,
+the best-written material in any of the six repositories. Three finds:
+
+- **Two buttons are not the ceiling; context is** (§2.10). This overturns a call
+  this document made twice. Strings were parked because two buttons run out of
+  combinations — but AKI's answer was never strings, it is position × strength
+  × direction × button. Eight moves per grapple position from two buttons. Our
+  grab already freezes both fighters for thirteen frames with one outcome;
+  reading the D-pad during that hold gives four, for no new button and no new
+  state (§7).
+- **The reversal model** — one press, before the attacker commits, mashing
+  explicitly no help. Ours rewards mashing, which is a decision-free mechanic
+  and now a Stage 3 item. Their probabilistic roll is the part to leave; we
+  scale the *window* by `focus`, not the odds.
+- **A wake-up attack with its own reversal window** (`Rising` →
+  `RecoveringAttack`). Getting up is our only fully optionless moment. Added to
+  Stage 3.
+
+Also noted, not findings: an `InteractionRegion` as the single source of truth
+for spatial context (we recompute distance and facing in several places);
+`Parameters.md` has a "What Parameters Do Not Affect" section, which is a
+discipline worth copying while four of twelve hoops roster modifiers still do
+not reach the sim; and `state-vocabulary-stress-test.md` stress-tests a
+proposed vocabulary against six real moves, marking each CLEAN / STRAINS /
+BLOCKED — the same propose-then-break-it method this session has been using,
+which is a pleasing independent confirmation of the process if not of any
+mechanic.
+
+**Six repositories examined. Still nothing shipped since the triangle pass.**
+
 ## 10. Standing rules
 
 1. **Measure, do not reason.** Every claim in this document that is not a
@@ -838,7 +972,13 @@ non-engine references too.
 4. **Revert rather than ship something measurably worse.**
 5. **No code, no data, no art from any reference in §1.** That covers Ikemen GO
    and the M.U.G.E.N ecosystem, Sakuga Engine, Schwarzerblitz (whose assets are
-   explicitly all-rights-reserved), and GrappleMap. Rules and shapes only.
+   explicitly all-rights-reserved), GrappleMap and Virtual Pro Grappler. Rules
+   and shapes only.
+5a. **Virtual Pro Grappler is GPLv3 and is written in our own stack.** Copying
+   from it would oblige us to release this game under GPLv3, and unlike every
+   other reference the code is copy-paste compatible. Read its prose, write our
+   own code, pick our own numbers. This is the one licence in the set that
+   changes what we may ship, not merely what is polite.
 6. **A decompilation of a commercial game is not a reference.** Established over
    the leaked NBA Jam source and reaffirmed for Virtual Pro-Wrestling 2 (§1d).
    Do not reopen either.
