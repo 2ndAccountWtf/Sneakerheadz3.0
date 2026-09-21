@@ -618,122 +618,125 @@ The foundation both the grapple and the defence game sit on.
 *Gate:* every existing buffer and focus check passes unchanged; a test asserts
 every reachable fighter state maps to a declared `AnimState` with no fallback.
 
-### Phase 1b — the touch layer, borrowed from the mobile natives
+### Phase 1b — the touch layer, on the CODM / PUBG model
 
-Researched 2026-09-21. This is the §8.14 gap closed, and it resolves the
-biggest open question in the grapple spec.
+Researched 2026-09-21, then **rewritten the same day.** The first version
+borrowed Skullgirls Mobile and Marvel Contest of Champions — tap / swipe /
+hold, with two-finger holds for block and two-finger swipes for the grab break.
+That was rejected, correctly. The games with genuinely great mobile controls
+are CODM and PUBG Mobile, and **neither uses multi-finger gestures as verbs at
+all.**
 
-#### What the mobile-native fighters actually do
+#### What CODM and PUBG actually do
 
-Two games with very different pedigrees converged on the same grammar.
+- **Many small dedicated buttons**, not a gesture vocabulary. Fire, jump,
+  crouch, prone, reload, aim — each its own target.
+- **A fully customisable HUD.** Elements are dragged on and off the screen,
+  resized, and repositioned. CODM's Advanced Mode hands over manual control of
+  shooting, aiming and movement.
+- **The skill ceiling lives in layout and finger count**, not in gesture
+  difficulty — the whole competitive scene is 2-, 3- and 4-finger claw layouts,
+  shared as codes.
+- **Context-sensitive buttons.** The same screen position becomes *pick up*,
+  *open door* or *revive* depending on what is in front of you.
+- Frequently-used actions sit inside the thumb arc; rarely-used ones sit where
+  reaching is deliberately awkward.
+- Fire button sized at 120–150% of default, with hit targets larger than the
+  visible art.
 
-**Skullgirls Mobile** (Hidden Variable): tap = normal attack, repeated taps
-chain into a combo; swipe forward = dash attack, twice = knockback; **swipe up
-= throw**; **swipe down = trip**; swipe back = backdash; **two-finger hold =
-block**; **two-finger swipe forward = grab break**; two-finger swipe up =
-block-break; hold-and-release = charge attack. Specials are icons, not motions.
+And from the general UI literature: a **floating** stick — one that appears
+where the thumb lands — measurably beats a fixed one (4.36 vs 4.07 for ease of
+learning, 4.00 vs 3.85 for satisfaction). In landscape, thumbs comfortably
+reach the two lower quadrants and little else.
 
-**Marvel Contest of Champions** (Kabam): tap = light, **swipe = medium**,
-**hold = heavy**, tap left = block, swipe back = dash back. Two defensive
-timing mechanics: **parry** (block just before the hit lands, stunning them)
-and **dexterity** (swipe back just before it lands, evading entirely). And the
-line that matters most for us — *heavy attacks are used in place of throws,
-damaging a blocking opponent*, which is how they get the rock-paper-scissors
-triangle onto a touchscreen with no grab button at all.
+#### The scheme
 
-**The shared grammar, which is the thing to borrow:**
+**Left thumb — a floating stick.** Appears under the thumb, walks left and
+right, and holding *away* from the opponent is the guard, as today.
 
-| verb | meaning |
+**Right thumb — a button cluster.** Five targets, because CODM's answer to
+"crouch" and "jump" is a button, not a stick direction:
+
+| button | neutral |
 |---|---|
-| **tap** | fast, light, repeatable |
-| **swipe** | committal, and it carries a *direction* in one motion |
-| **hold** | slow, heavy, charged |
-| **two fingers** | the defensive modifier — block, break |
-| **timing a defensive input** | parry / evade |
+| **PUNCH** | jab — largest target, most-pressed |
+| **KICK** | heavy / weapon |
+| **GRAB** | clinch — tap for weak, hold for strong |
+| **JUMP** | |
+| **CROUCH** | |
 
-Also from the general literature: virtual joysticks measurably underperform
-because there is no tactile feedback, so a touch scheme has to compensate with
-forgiveness — adjustable swipe distance and velocity thresholds, instant
-acknowledgement on touch-down, and a clear confirmation on commit.
+**This kills the sprawl bug outright.** Crouch stops being a stick direction,
+so `down + back` is no longer ambiguous with crouch-block, and the sprawl is
+simply CROUCH pressed during their grab startup. No hold, no gesture, no
+conflict — and no telegraph, because the button is always present.
 
-#### What this fixes
+**Context-sensitive cluster.** This is the CODM *pick up / revive* pattern, and
+it is the answer to the grapple's four-way read that swipes were reaching for:
 
-**A swipe is one thumb motion that carries a direction.** That is the answer to
-the question this document could not resolve: asking a player to pick one of
-four directions inside a sixteen-frame hold *while holding a button down* is
-not a thumb-shaped input. Flicking is.
-
-So the grapple's four-way read becomes **four swipes**, not four d-pad presses:
-
-| clinch outcome | input |
+| state | cluster becomes |
 |---|---|
-| Knee (chip) | tap |
-| Body slam / Suplex | swipe toward |
-| Judo trip / Back drop | swipe away |
-| Takedown | swipe down |
-| Shoulder throw (launcher) | swipe up |
+| clinch (weak) | KNEE · SLAM · TRIP · TAKEDOWN |
+| clinch (strong) | CHOKE · SUPLEX · BACKDROP · THROW |
+| ground, on top | POUND · MOUNT · ARMBAR · STAND |
+| being held | a single large **BREAK** |
+| being juggled / down | **TECH** |
 
-And the break becomes a **two-finger swipe**, exactly as Skullgirls does it —
-which also settles the "one press, not a mash" rule, because a two-finger
-swipe cannot be mashed by accident.
+Pressing one of four labelled buttons is faster, more accurate and less
+ambiguous than flicking a direction — and it is **self-documenting**, which
+quietly solves most of the discoverability problem the mechanics have had since
+the triangle shipped. Nobody has to be told the grab has four outcomes; the
+clinch shows them.
 
-#### The layer itself — built shared, proved in the fighter
+The single **BREAK** button also enforces "one press, not a mash" honestly: it
+exists only inside the window, so there is nothing to mash beforehand.
 
-It goes in `components/minigames/engine/`, next to `useInput`, `TouchZones` and
-`TouchPad`, **not** inside `StreetFighter.tsx`. The fighter is the proof; every
-other mini-game can adopt it afterwards without a rewrite.
+**Customisation, because that is half of why CODM feels good:**
 
-- A `useGestures` hook recognising: `tap`, `doubleTap`, `hold`,
-  `swipe` (8-way), `twoFingerHold`, `twoFingerSwipe`.
-- It emits **semantic events with a screen-space direction**. Each game
-  converts screen direction to game meaning — the fighter turns "swipe left"
-  into "toward" or "away" depending on which side it is standing on, which is
-  also what makes cross-ups readable later.
-- Thresholds — swipe distance, swipe velocity, hold duration, double-tap
-  window — are **configuration, not constants**, and they scale with `focus`,
-  exactly as `bufferFramesFor` already scales the input buffer. A sharper
-  player gets a more forgiving flick.
-- It **coexists with the existing stick and buttons** rather than replacing
-  them. Cart Race, Pizza Run and Flight 404 need continuous steering and keep
-  the stick untouched. The fighter keeps the stick for walking, crouching and
-  holding a guard, and takes gestures for everything committal.
-- Everything still funnels into the existing `Btn` / `FightInput` shape, so the
-  simulation does not learn about touch at all and the headless harness keeps
-  working unchanged.
+- Layout presets — right cluster, left cluster, and a wider claw-friendly
+  spread.
+- Per-button drag to reposition, with position saved per player.
+- Button size and opacity settings.
+- Hit targets larger than the drawn art, always.
 
-#### Two mechanics worth taking with it
+#### What is explicitly not in this
 
-- **Parry as a timed block** (MCOC) is the same mechanic as our instant block,
-  and it validates the design: a defensive input, judged on when it arrived.
-  Needs Phase 1's frame-stamped history.
-- **Evade — swipe back just before a hit** (MCOC's dexterity) is a defensive
-  option we do not have and it is a natural fit for a swipe. Candidate for
-  Phase 4 alongside air guard.
+- **No two-finger anything.** No two-finger block, no two-finger break.
+- **No swipes for core actions.** A flick may later be an *alternative* for a
+  power-user shortcut, never the only way to do something.
+- **No gesture recognition ambiguity**, which also deletes a whole class of
+  tests the previous version needed.
 
 #### Portability — what other games get
 
-Named now so the layer is built general rather than fighter-shaped:
+The context-sensitive cluster is the reusable part, and it lands hardest on
+Hoops, where the help text currently spends a paragraph explaining that the
+buttons mean different things depending on who has the ball:
 
-| game | gesture that fits |
+| game | cluster changes when |
 |---|---|
-| Hoops | swipe toward a team-mate to pass; swipe up to shoot; hold to gather |
-| Cart Race | swipe to drift, keep the stick for steering |
-| Pizza Run / Flight 404 | swipe up to jump or climb, keep the stick |
-| Darts / Dice | flick to throw, with velocity mapped to power |
+| Hoops | you have the ball, a team-mate has it, or the other team does |
+| Cart Race | drifting, or in the air |
+| Pizza Run / Flight 404 | carrying, climbing, or falling |
+| Darts / Dice | aiming versus committing |
+
+The floating stick and the customisable layout are engine-wide and benefit
+every game with a stick.
 
 #### What to measure
 
-The harness drives `FightInput` directly and cannot feel a thumb, so this phase
-is proved differently:
+The headless harness drives `FightInput` directly and cannot feel a thumb, so
+this phase is proved with unit tests rather than balance runs:
 
-- **Recognition tests are unit tests**, not balance runs: a synthetic pointer
-  trace produces exactly one intended gesture, and a slow drag never registers
-  as a swipe.
-- **Ambiguity is the real risk.** A test must prove a tap immediately after a
-  swipe is not swallowed, and that a two-finger block does not read as two
-  taps.
-- **Latency budget:** gesture recognition must commit within the existing input
-  buffer window (4–10 frames at `focus`), or the buffer is doing nothing.
+- **Reachability**: every button in every context sits inside the landscape
+  thumb arc at the smallest supported screen.
+- **Hit target**: every button's touch region is at least its drawn size, and
+  no two regions overlap.
+- **Context integrity**: every reachable fighter state maps to a declared
+  cluster, with no state showing a button that cannot fire.
+- **Latency**: a press registers within the existing input buffer window
+  (4–10 frames by `focus`), or the buffer is doing nothing.
+- **Layout safety**: a customised layout cannot place a button off-screen or
+  fully underneath another.
 
 ### Phase 2 — the grapple system · ~L
 
@@ -813,9 +816,11 @@ punishes it hardest. Tap-versus-hold comes from Phase 1.
 
 #### Rung 1 — the clinch. Direction is read **during** the hold, not at entry
 
-**Input, revised by §6 Phase 1b:** the direction is a **swipe**, not a d-pad
-press. One thumb motion carrying a direction, the way Skullgirls Mobile does
-throws and trips. The d-pad mapping below stays as the keyboard equivalent.
+**Input, revised by §6 Phase 1b:** on touch the four outcomes are **four
+labelled buttons** that replace the neutral cluster for the length of the hold
+— the CODM context-button pattern. Faster and less ambiguous than a flick, and
+self-documenting: nobody has to be told the clinch has four outcomes. The
+direction mapping below is the keyboard equivalent.
 
 Weak set — 16-frame hold:
 
@@ -850,12 +855,12 @@ Strong set — 20-frame hold:
    and leaves the grabber −20. This is the **read**, and it is what closes the
    triangle: strike beats grab, grab beats block, block beats strike, and the
    right low guard beats the grab.
-2. **Break** — a **two-finger swipe forward** inside the hold window (§6 Phase
-   1b; this is Skullgirls Mobile's grab break exactly). Both shoved apart,
-   neutral. The window scales with `focus`. A two-finger swipe **cannot be
-   mashed by accident**, which enforces the "one press, not a mash" rule
-   through the input itself rather than through a counter. On a keyboard it
-   stays a single GRAB press. This is the **reaction**.
+2. **Break** — a single large **BREAK** button that appears only for the
+   length of the window (§6 Phase 1b). Both shoved apart, neutral. The window
+   scales with `focus`. Because the button exists only inside the window there
+   is nothing to mash beforehand, which enforces "one press, not a mash"
+   through the input itself rather than through a counter. On a keyboard it is
+   a single GRAB press. This is the **reaction**.
 3. **Buck** — on the ground, direction plus button, contested on stamina.
    Reverses top and bottom. This is the **contest**.
 4. **Ride it out** — take the throw and keep your stamina. Sometimes correct:
@@ -931,14 +936,15 @@ Three ways out, and one has to be picked before any of this is built:
 - **(c) No sprawl; the grab is simply unblockable** — what we ship today. Keeps
   the triangle three-sided and gives up the fourth answer.
 
-- **(d) The sprawl is a swipe down** while guarding, during their grab startup
-  (§6 Phase 1b). A flick is deliberate in a way that holding a direction is
-  not, so it cannot fire off a passive crouch-block.
+- **(d) CROUCH becomes a button, not a stick direction** (§6 Phase 1b, the
+  CODM model). The sprawl is then simply CROUCH pressed during their grab
+  startup.
 
-Recommendation: **(d) on touch, (a) on keyboard.** The conflict only exists
-because a held direction is ambiguous; a gesture is not. This is the first
-concrete case of the touch layer resolving a design problem rather than merely
-re-expressing one.
+**Resolved: (d).** Moving crouch off the stick removes the ambiguity at its
+source — `down + back` stops meaning two things at once — rather than papering
+over it with a timing rule. On a keyboard the crouch key does the same job.
+This is the first case of the control rework deleting a design problem instead
+of re-expressing it.
 
 **2. Grabbing someone in blockstun is currently legal and undefined.**
 `grabbable()` excludes `hitstun` but not `blockstun`, so a tick throw — poke,
