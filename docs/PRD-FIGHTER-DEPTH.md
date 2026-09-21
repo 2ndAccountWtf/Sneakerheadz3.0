@@ -1110,6 +1110,104 @@ taken, block rate, grapple rate, match length — against the same player policy
 *Gate:* damage taken while cornered drops, time cornered does not go to zero,
 and getting someone cornered stays worth doing.
 
+### Phase 8 — the guard economy · ~S · **opened by Phase 1b**
+
+Moving block onto a button created a hole and it has to be closed in the same
+pass. Today the guard is *hold away*, so guarding and retreating are the same
+act and you pay for defence by giving up ground. On a button you can **advance
+behind a guard**, and since ordinary moves no longer chip (correctly — see §3),
+walking forward blocking costs nothing at all.
+
+The genre's three answers, and we need at least two:
+
+- **Pushback on block** — a guarded hit shoves the blocker back, so turtling
+  loses ground. We have some of this; it needs to be authored per move
+  alongside the block-freeze numbers in Phase 3.
+- **Guard drains stamina slowly while held** — holding a guard is a choice with
+  a price, and stamina is already arriving with the grapple.
+- **Throws beat guard** — we have it, but it only bites if the grapple's entry
+  is fast enough to punish a turtle on reaction. That is a tuning question for
+  the entry frames in Phase 2.
+
+*Gate:* a bot that walks forward permanently guarding must lose to a mixed bot,
+and must lose harder than it does today. If it does not, the button made the
+game worse.
+
+### Phase 9 — the fight is an event, not a system · ~M
+
+**The biggest gameplay hole in this document, and none of the rest of it
+touches this.** The fighter's whole interface to the game is:
+
+```ts
+onFinish: (won: boolean, note: string) => void
+```
+
+A boolean and a sentence. Meanwhile the world around it has `systems/hospital`,
+`systems/police`, `systems/opponents.ts`, `systems/weapons.ts`, `systems/npc`,
+`banking.ts` — and a street fight reports none of it.
+
+What a fight should hand back:
+
+| outcome | where it goes |
+|---|---|
+| damage taken | persistent health, not just this match |
+| a bad enough beating | `systems/hospital` — the injury system already exists |
+| who you beat, and how | street cred, weighted by their reputation |
+| a weapon, or the cops | `systems/police` heat |
+| the wager, or what you took off them | `banking.ts` |
+| a weapon dropped in the grapple | inventory — you can lose your crowbar |
+| the venue and the NPC | that opponent remembers you next time |
+
+And the same in reverse — a fight should read more of the player's state going
+in than health and cred: energy, injuries already carried, what is in your
+hands, whether you are high, whether you have eaten.
+
+*Gate:* two fights with identical mechanical outcomes but different
+circumstances — a clean win with fists versus a win with a crowbar in front of
+witnesses — produce materially different consequences in the world.
+
+### Phase 10 — street-fight texture · ~M
+
+The mechanics specced so far would suit a tournament. This is a car park.
+
+- **Dirty fighting.** A cheap shot — eye rake, groin, sand — that is fast,
+  damaging and *safe*, but costs street cred and turns the crowd. A move whose
+  price is social rather than mechanical is something no reference in this
+  document has, and it is the most characterful thing available.
+- **The weapon on the floor.** Phase 2 already drops a melee weapon when you
+  grapple. Leaving it there makes it a scramble — either fighter can dive for
+  it, and that is a genuine decision mid-fight.
+- **The crowd does something.** Currently ten drawn figures doing nothing. Def
+  Jam's crowd shoves you back in; ours could at minimum react, and at best make
+  the stage edges live.
+- **Getting jumped.** Two on one exists in this world and the fighter cannot
+  express it. Large, and worth naming rather than discovering later.
+
+### Phase 11 — how a fight ends · ~S
+
+Today: K.O., or a timeout decided on health. A street fight has more endings,
+and each is a different feeling:
+
+- They **give up** — stop fighting at low health rather than being knocked out.
+- **The cops** — heat crosses a threshold mid-fight and it ends for everyone.
+- Someone **breaks it up** — the venue, a bouncer, Bibi.
+- You **run** — the existing Run Away, but with consequences rather than a −$5.
+- A **submission** ends it, once Phase 2 has chokes and armbars.
+
+### Match shape — a question, not a decision
+
+Best-of-three sixty-second rounds is arcade convention and it is worth asking
+whether it fits. Measured: **31% of a match's running time is not play**, and
+much of that is round structure.
+
+The alternative is **one fight, no round resets, ended on a knockdown count** —
+boxing-shaped rather than arcade-shaped, which keeps a comeback structure
+without the banner overhead and reads as a street fight rather than a bout.
+
+Against it: rounds reset health, which is forgiving in a game where the damage
+now follows you out (Phase 9). Not decided here; it should be decided before
+Phase 9 rather than after.
+
 ---
 
 ### What is deliberately last, not skipped
@@ -1123,6 +1221,16 @@ we have not built. It is not a phase in front of the engine work.
 **If only two phases happen, make them 1 and 2.** One is the foundation
 everything else needs; the other is the grapple system, which is the largest
 single gap between what this is and what was asked for.
+
+**But Phase 8 is not optional if Phase 1b ships.** Moving block to a button
+opens the free-advancing-guard hole, and shipping the control change without
+the guard economy makes the neutral game worse than it is today.
+
+**And Phase 9 is the one most likely to be underrated.** Everything else in
+this document makes the fighting better. Phase 9 is the only thing that makes
+*this game's* fighter rather than a good generic one — a fight that costs you
+health you keep, puts you in hospital, draws heat, and is remembered by the
+person you beat.
 
 ## 7. Explicitly out of scope
 
