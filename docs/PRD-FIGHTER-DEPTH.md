@@ -577,170 +577,150 @@ per animation frame, and Sakuga's whole Godot resource/editor layer.
 
 ---
 
-## 6. The plan
+## 6. The build order
 
-Each stage ships with its AI half, its measurement, and its mutation test.
-Stages are ordered by feel-per-risk, not by size.
+Rewritten 2026-09-21. The stages below were written across six research passes,
+in the order the findings arrived, and that is not the order they should be
+built in — §12.1 in particular turned up a dependency that sits underneath two
+of them. This is the sequenced version: what blocks what, roughly how big, and
+the measurement that closes it.
 
-### Stage 0 — make what we already built visible
+**Sizes are estimates against a 2,279-line file, not promises.**
 
-Added after the Schwarzerblitz read, and **promoted above everything else**,
-because the fighter's problem stopped being "not enough mechanics" on
-2026-09-21 and became "nobody can find the mechanics".
+### The dependency that reorders everything
 
-- A move list the player can open — seven moves, their inputs, one line each.
-  Schwarzerblitz has `FK_MoveListPanel`; every fighting game has one; we have a
-  paragraph of help text.
-- Three or four 15-second drills, in the shape of `FK_TutorialPhase`: block a
-  kick and punish it, grab a guard, break a grab, land the combo.
-- The hit callouts from Stage 2 belong here too if they are cheap enough —
-  "PUNISH", "BREAK", "COUNTER" is the game teaching its own rules for free.
+`§12.1` — our input buffer is four countdown timers, so it can only answer *is
+there a live press now*. Anything that must look **backwards** from the hit
+frame is impossible until that changes. That blocks the instant block, and it
+blocks tap-versus-hold, which is the input half of §2.10. It does **not** block
+the counter hit, which only needs to know the defender is in startup at the
+moment of contact — so impact can ship before the rework.
 
-*Gate:* this one is not measurable with the headless harness, which is exactly
-why it keeps getting skipped. It needs a human playing on a phone. That is the
-same open item as §8.2 and it should be closed at the same time.
+---
 
-### Stage 1 — make the jump a real option
+### Phase 1 — make what we already built findable · ~M
 
-- Airborne bodies pass through each other; cross-ups become possible.
+Everything from the triangle pass is invisible. A player who never presses GRAB
+never learns a guard is beatable, and the whole explanation is one paragraph.
+
+- A move list the player can open: seven moves, inputs, one line each.
+- Three or four 15-second drills: block a kick and punish it, grab a guard,
+  break a grab, land the combo.
+- Callouts for what **already exists** — BREAK, KNOCKDOWN, COMBO ×N, PUNISH.
+  Punish is detectable today: we know when a hit lands during recovery.
+
+*Blocks:* nothing. *Blocked by:* nothing.
+*Gate:* a person who has not played finds the grab, the break and the combo
+unprompted. The headless harness cannot grade this — a bot knows every
+mechanic. It needs a human with a phone, which is also §8.1 and §8.2.
+
+### Phase 2 — impact · ~M
+
+Where "feels worse than Punch-Out" actually gets answered. Punch-Out's hits
+feel enormous; ours read as a number going down.
+
+- **Counter hit** — contact during the defender's startup frames, at roughly
+  double hitstop, with its own callout. Absent from our game entirely, and it
+  is the mechanic that pays for reading the opponent.
+- **Shake, then knockback** — freeze in place on impact, *then* slide. We apply
+  damage and velocity on the same frame.
+- Attacker and defender freeze as **separate authored numbers**; block freeze
+  authored rather than derived from `hitstop * 0.6`.
+- Two or three reaction types, so a kick does not read like a jab.
+- `EnvShake` with frequency and decay in place of the scalar.
+
+*Blocks:* nothing. *Blocked by:* nothing.
+*Gate:* no match-length regression; `proper` gains a little from counters and
+`mashHeavy` loses a little to them. Anything larger means the counter bonus is
+too big.
+
+### Phase 3 — the input foundation · ~M
+
+The refactor that unblocks the rest. Deliberately after Phase 2 so the felt
+improvements land first.
+
+- A **frame index** on the fight state (`§12.2`). We track `elapsed` in seconds;
+  every frame-exact window wants the integer.
+- **Frame-stamped press history** replacing the four countdowns, with
+  `pressedWithin(action, start, end)`.
+- **Tap versus hold**, which is how weak and strong come off the same button.
+- Then, and only then: the **instant block** — guarding within a few frames of
+  impact, for a bigger punish window. `§7` had this as "a handful of lines";
+  it is not, and this is why.
+- While in here: **stop rewarding the mash on a grab break.** One press inside
+  the window, and scale the *window* with `focus` the way the buffer already is.
+
+*Blocks:* instant block, tap/hold, and anything reading input history.
+*Gate:* every existing buffer and focus check still passes unchanged; the
+break stops being improved by mashing.
+
+### Phase 4 — the air game · ~L · **gated**
+
+The most interesting change in this document and the one I would not start
+blind.
+
+- Airborne bodies pass through each other, so **cross-ups become possible**.
 - Jump startup and landing recovery, so a jump is a commitment with a cost.
 - Air guard.
 
-One coherent change that adds a whole axis to a game currently played only on
-the ground. **Worth doing even if we do nothing else.**
+*Blocked by:* **§8.1 — can a cross-up read at 320×180 with 15px fighters?**
+That is a Phase 1 question answered by a human on a phone. If the answer is no,
+this phase does not happen and the air game stays a jump-in.
+*Gate:* the air attack's win contribution rises; jump frequency does not run
+away; the opponent's jump-in read stops being free.
 
-*Gate:* the air attack's win contribution rises; jump frequency does not go to
-the moon (landing recovery should price it); the opponent's jump-in read stops
-being free. Guard against: a cross-up that the AI cannot ever block.
+### Phase 5 — agency on the way down · ~M
 
-### Stage 2 — impact, and the counter hit
+Getting up is currently our only completely optionless moment.
 
-- **Counter hit** (§2.5): contact during the defender's startup frames is a
-  counter — roughly double hitstop, more damage, more advantage. Nearly free, and
-  it is the mechanic that pays for reading the opponent.
-- **Hit callouts** (§4): "Counter", "Punish", "Break", "Knockdown". The cheapest
-  feedback in this document, and we have three new mechanics the player currently
-  has no way of knowing worked.
-- Shake-then-knockback split (§2.2).
-- Attacker and defender freeze as separate authored numbers; block freeze too.
-- At least three reaction types, so a kick does not read like a jab.
-- `EnvShake` with frequency and decay in place of the scalar.
-
-Mostly feel. The counter hit is the one real balance change, and it should
-sharpen the neutral game rather than move win rates much.
-
-*Gate:* no match-length regression; `proper` should gain a little from counters
-and `mashHeavy` should lose a little to them. Anything bigger means the counter
-bonus is too large.
-
-### Stage 3 — agency on the way down, and combos that end by themselves
-
-- Knockdown tech (`fall.recover` / `fall.recovertime`), with a `TechingRate` on
-  the opponent so it is not all-or-nothing.
-- **Throw invulnerability on wake-up** as a typed frame property (§2.7). We
-  shipped a grab and then left getting up defenceless against it.
-- **Gravity proration replaces `JUGGLE_MAX`.** Each juggle hit adds gravity so
-  the victim falls faster and the combo dies on its own. This supersedes the
-  juggle-points plan: no arbitrary cap, no third hit whiffing for reasons the
-  player cannot see. Delete `juggleSpent` and `JUGGLE_MAX` together.
-- **Same-move proration replaces the hard ban** on cancelling a jab into a jab.
-  The current rule is a hack that happens to work; scaling is the principled
-  version and it generalises to every move.
-- Ground bounce as a juggle extender.
-- **A wake-up attack.** Virtual Pro Grappler's blueprint nests
-  `RecoveringAttack` inside `Rising` — a getup attack with its own reversal
-  window. Getting up is currently our only completely optionless moment.
-- **Stop rewarding the mash on a grab break** (§7). One press inside the
-  window, and the window scales with `focus` the way the input buffer already
-  does. Currently hammering the button is strictly correct, which is not a
-  decision.
+- **Knockdown tech**, with a teching rate on the opponent so it is not
+  all-or-nothing.
+- **Throw invulnerability on wake-up**, as a typed frame property. We shipped a
+  grab and left getting up defenceless against it.
+- A **wake-up attack** with its own reversal window.
+- **Gravity proration replaces `JUGGLE_MAX`** — each juggle hit makes them fall
+  faster until the combo dies on its own, instead of a third hit whiffing for
+  reasons the player cannot see. Deletes `juggleSpent`.
+- **Same-move proration replaces the hard ban** on jab-into-jab. Ours is a hack
+  that happens to work; scaling is the principled version.
 
 *Gate:* free wake-up pressure drops without knockdowns becoming worthless;
-juggle length spreads naturally to 1–3 instead of pinning at 2; mashing one
-button stays as bad as it is now (3%) *without* the hard cancel ban.
-
-### Stage 4 — the stage is a place
-
-- Corner push, with hit and block values authored separately (the stick).
-- **Corner damage scaling** — combos in the corner are worth more (the carrot).
-  Sakuga runs 120% against a 100% base. Right now our corner is pure downside
-  for the defender and pure upside for the attacker, with no tension either way.
-- Camera auto-zoom.
-
-*Gate:* damage taken while cornered drops, but time cornered does not go to
-zero, and getting someone cornered is still clearly worth doing.
-
-### Stage 5 — the special is a big deal
-
-- Superpause: world freeze, attacker head start, victim unhittable window.
-
-*Gate:* the special's hit rate rises; its win contribution does not double.
-
-### Stage 5.5 — the grapple ladder (specified, not parked)
-
-Written up 2026-09-21 after §1f/§1g. Three references independently point at
-the same shape, and TUC proves it costs about 300 lines end to end, so this
-stops being "someday" and becomes a stage with a design.
-
-**Ours is not their ladder.** A street fight outside an AM/PM is not an MMA
-bout: no cage, no rounds won on position, no submissions. What transfers is the
-*structure* — a grapple is a small ordered ladder of positions, entered at a
-cost, contested continuously, and escapable.
-
-The minimum that is still a game, on our existing three buttons:
-
-- The grab already catches into a 13-frame hold. Make that hold **rung one**.
-- From the hold, the D-pad picks the outcome — neutral, up, down, toward
-  (§2.10, and no new button).
-- One of those outcomes **advances a rung** rather than finishing: it spends
-  the hold to reach a stronger position with its own four outcomes. Two rungs,
-  not four.
-- The defender contests continuously rather than once: our break is currently
-  a single press inside a window. TUC contests on stamina; VPG contests on a
-  spirit band. Ours should contest on **turbo**, which already exists and is
-  already spent on dashes — so choosing to sprint is choosing to be easier to
-  hold down.
-- **The sprawl is the lesson to steal wholesale.** A specific defensive read —
-  not any block, the *right* one — beats the grab outright and punishes it.
-  That closes the triangle properly: strike beats grab, grab beats block,
-  block beats strike, and a correctly-timed low guard beats the grab too.
-
-*Gate:* the grab's usage rate rises without its win contribution rising —
-i.e. it becomes a tool rather than a trump. A bot that always grabs must stay
-beatable by a bot that reads the sprawl.
-
-**Still after Stage 0.** A grapple ladder nobody can find is worse than no
-ladder, and `§2.8` has not moved.
-
-### Stage 6 — opponents who fight differently
-
-Pull our four hardcoded AI constants (`AI_PUNISH_CHANCE`, `AI_COMBO_CHANCE`,
-`AI_JUGGLE_CHANCE`, `AI_BREAK_CHANCE`) out into a per-opponent behaviour record,
-in the shape Sakuga uses (§5): decision-rate ranges, blocking rate, teching rate,
-a single `prediction` difficulty knob, a low-health threshold, and an
-aggressive/defensive lean. Wire it to the NPC roster we already have, following
-`systems/hoops/roster.ts`.
-
-This is the only stage that is a *product* change rather than a fighter change:
-it is what makes fighting the bouncer different from fighting the washed-up
-rapper, which is currently impossible even in principle.
-
-*Gate:* two opponents with different records produce measurably different match
-shapes — hits taken, block rate, match length — against the same player policy.
-If they do not, the record is not doing anything.
-
-**Scope honesty, revised.** Seven stages is far too many for one of twelve
-mini-games, and the list has now grown twice from reading rather than from
-playing. Three engines have been read and nothing has been built.
-
-If only two stages ever happen they should be **Stage 0 and Stage 2** — make the
-existing mechanics visible, and make hits feel like hits. Stage 1 (the cross-up)
-is the most interesting change here and it is still gated on §8.1, which nobody
-has answered.
-
-**Do not read a fourth engine before shipping Stage 0.**
+juggle length spreads to 1–3 rather than pinning at 2; mashing one button stays
+as bad as it is now **without** the hard cancel ban.
 
 ---
+
+## Past here is optional depth
+
+Phases 1–3 are the upgrade. 4 is gated on a question nobody has answered. What
+follows is specified, costed and genuinely good, and none of it should start
+before the fighter has been played by a human.
+
+### Phase 6 — the stage is a place · ~M
+Corner push with hit and block valued separately (the stick), corner damage
+scaling (the carrot — ours is currently all stick), and camera auto-zoom. On a
+320×180 phone the zoom may be worth more than any single mechanic here.
+
+### Phase 7 — the special is a big deal · ~S
+Superpause: world freeze, attacker head start, victim unhittable window. The
+cheapest "this move matters" effect in the genre.
+
+### Phase 8 — opponents who fight differently · ~M
+Pull `AI_PUNISH_CHANCE`, `AI_COMBO_CHANCE`, `AI_JUGGLE_CHANCE` and
+`AI_BREAK_CHANCE` into a per-opponent record with a points budget and a
+validator. Every street fight currently has the identical brain.
+
+### Phase 9 — the grapple ladder · ~M
+§1g showed a full clinch-to-submission loop costs about 300 lines. Ours needs
+two rungs, not four, with the D-pad picking the outcome inside the hold we
+already have and the sprawl as the defensive read that beats a grab outright.
+Only if the grab proves popular once players can find it.
+
+---
+
+**If only two phases ever happen, make them 1 and 2.** One makes the existing
+game legible; the other makes it feel like a fighting game. Everything after is
+depth on a game nobody has yet played on a phone.
 
 ## 7. Explicitly out of scope
 
@@ -766,11 +746,11 @@ and most add a HUD element, on a phone, in a mini-game.
   top of `blockSucceeds`". It is not, with the buffer we have: judging a
   just-defend means looking *backwards* from the hit frame, and our countdown
   timers keep no record of *when* a press happened. It needs §12.1 first.
-  Candidate for Stage 2.5, after the input rework, not before.
+  It lands **inside Phase 3**, after the input rework, not before.
 - **Red life** (recoverable damage). Noise in a three-round mini-game.
 - **The `hitflag` / `guardflag` refactor as a standalone change.** It is the
   right model and it deletes three predicates, but on its own it is a large diff
-  with zero visible difference. Fold it into Stage 3 only as far as it pays.
+  with zero visible difference. Fold it into Phase 5 only as far as it pays.
 - **Generalising the throw into custom states.** Our bespoke hold works. Worth
   noting Sakuga models it as `HitstunType.GRABBED` — a *kind of hitstun* rather
   than a separate state — which is probably how ours should have been built and
@@ -786,7 +766,7 @@ and most add a HUD element, on a phone, in a mini-game.
   (161 tags — `bottom_supine`, `top_kneeling`, `top_underhook`, `crossface`,
   `back`, `turtle`, `half_guard`), and transitions are edges between them. A
   drill in `drills/*.script` is literally a path through that graph, which is
-  also the shape Stage 0's tutorial drills want.
+  also the shape Phase 1's drills want.
 
   That is the Def Jam grapple: you clinch, and from the position you end up in a
   *different set of options* is available.
@@ -802,7 +782,7 @@ and most add a HUD element, on a phone, in a mini-game.
   new state, no new node type, no new button. That is the version to build if
   we build one, and it is perhaps thirty lines rather than sixty.
 
-  **Superseded again, and promoted out of §7: this is now Stage 5.5.** TUC
+  **Superseded again, and promoted out of §7: this is now Phase 9.** TUC
   (§1g) showed the whole loop costs about 300 lines, which removes the scale
   objection that kept it parked.
 - **The AKI reversal model, as rules rather than numbers.** From
@@ -834,7 +814,7 @@ and most add a HUD element, on a phone, in a mini-game.
   Still parked, and the reason is the thumb, not the model. A string means
   pressing the same button again on a rhythm you learned; with two attack
   buttons the vocabulary is A-A, A-B, B-A, B-B and little else before it stops
-  being legible on a 320×180 phone screen. **Revisit only after Stage 0**: if a
+  being legible on a 320×180 phone screen. **Revisit only after Phase 1**: if a
   move list exists and players do learn the seven moves we have, a second tier
   of strings becomes a reasonable ask. Before that it is more depth nobody can
   see.
@@ -852,7 +832,7 @@ and most add a HUD element, on a phone, in a mini-game.
 
 The part of this document that keeps it alive. Nothing below has been verified.
 
-1. **Does a cross-up even read at 320×180?** The whole of Stage 1 rests on the
+1. **Does a cross-up even read at 320×180?** The whole of Phase 4 rests on the
    player being able to *see* which side they are on. Our fighters are 15px
    wide. Needs a prototype before the mechanic is worth building.
 2. **What actually happens on a phone with three buttons plus a d-pad?**
@@ -876,7 +856,7 @@ The part of this document that keeps it alive. Nothing below has been verified.
    measuring, not assuming. *Partly answered: §12.1 shows we cannot even
    implement it until the input buffer records press frames, so the question is
    now second in line behind that.*
-8. **Does the counter hit need to be visible to work?** Stage 2 pairs it with a
+8. **Does the counter hit need to be visible to work?** Phase 2 pairs it with a
    callout on that assumption. Untested.
 9. **Per-opponent AI records: how many knobs before it is unmaintainable?**
    Sakuga carries seven plus four action packs. We have four constants. The
@@ -887,8 +867,8 @@ The part of this document that keeps it alive. Nothing below has been verified.
     outcome. We resolve symmetrically. Is either better, or just more
     configurable?
 11. **What does `hitshaketime` vs `hittime` vs `slidetime` buy** that a single
-    stun number does not? Stage 2 assumes the split is worth it. Verify first.
-12. **Does a move list and a drill actually change how it feels?** Stage 0 is
+    stun number does not? Phase 2 assumes the split is worth it. Verify first.
+12. **Does a move list and a drill actually change how it feels?** Phase 1 is
     built on the claim that invisibility is now the bottleneck. That claim is
     reasoning, not measurement, and the headless harness cannot test it — a bot
     always knows every mechanic. Needs a human.
@@ -898,7 +878,7 @@ The part of this document that keeps it alive. Nothing below has been verified.
     §8.1 and probably has the same answer.
 14. **Other references not yet read.** Skullgirls' and Rivals of Aether's public
     design writing; the Street Fighter III parry literature; anything on throw
-    tech windows on touchscreens. **None of these should be read before Stage 0
+    tech windows on touchscreens. **None of these should be read before Phase 1
     ships** — see the scope note in §6.
 
 ---
@@ -906,6 +886,9 @@ The part of this document that keeps it alive. Nothing below has been verified.
 ## 9. Research log
 
 Append-only. Date, what was read, what came out of it.
+
+*Entries below predate the §6 rewrite of 2026-09-21 and refer to the old
+"Stage" numbering. They are left as written; §6 is the current order.*
 
 ### 2026-09-14 — ten open-source browser fighters
 See `FIGHTER-RESEARCH.md`. Nine of ten were shallower than what we already had.
